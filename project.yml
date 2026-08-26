@@ -1,0 +1,75 @@
+name: ProfileBrowser
+
+options:
+  bundleIdPrefix: com.personal
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGNING_ALLOWED: NO
+    CODE_SIGNING_REQUIRED: NO
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    CURRENT_PROJECT_VERSION: 1
+    MARKETING_VERSION: 1.0.0
+
+targets:
+  ProfileBrowser:
+    type: application
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: ProfileBrowser
+        excludes:
+          - Resources/Info.plist
+          - Resources/Assets.xcassets
+    resources:
+      - path: ProfileBrowser/Resources/Assets.xcassets
+    info:
+      path: ProfileBrowser/Resources/Info.plist
+      properties:
+        CFBundleDisplayName: 环境浏览器
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        NSFaceIDUsageDescription: 用于在填充已保存的账号密码前确认身份。
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.personal.profilebrowser
+        PRODUCT_NAME: ProfileBrowser
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: NO
+        GENERATE_INFOPLIST_FILE: NO
+
+  ProfileBrowserTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: ProfileBrowserTests
+    dependencies:
+      - target: ProfileBrowser
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.personal.profilebrowser.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  ProfileBrowser:
+    build:
+      targets:
+        ProfileBrowser: all
+        ProfileBrowserTests: [test]
+    test:
+      gatherCoverageData: true
+      targets:
+        - ProfileBrowserTests
+    run:
+      config: Debug
+    archive:
+      config: Release

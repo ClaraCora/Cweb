@@ -1,0 +1,109 @@
+name: Build unsigned iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "ProfileBrowser/**"
+      - "ProfileBrowserTests/**"
+      - "project.yml"
+      - ".github/workflows/ios-unsigned.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-unsigned-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          set -euo pipefail
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Install XcodeGen
+        run: |
+          set -euo pipefail
+          brew install xcodegen
+          xcodegen --version
+
+      - name: Generate Xcode project
+        run: |
+          set -euo pipefail
+          xcodegen generate --spec project.yml
+          test -d ProfileBrowser.xcodeproj
+
+      - name: Run simulator tests
+        run: |
+          set -euo pipefail
+          SIMULATOR_ID="$(xcrun simctl list devices available -j | jq -r '[.devices[][] | select(.name | startswith("iPhone"))][0].udid')"
+          if [ -n "$SIMULATOR_ID" ] && [ "$SIMULATOR_ID" != "null" ]; then
+            xcodebuild test \
+              -project ProfileBrowser.xcodeproj \
+              -scheme ProfileBrowser \
+              -configuration Debug \
+              -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
+              -derivedDataPath build/test
+          else
+            echo "No available iPhone Simulator found; continuing with device build."
+          fi
+
+      - name: Build device app without signing
+        run: |
+          set -euo pipefail
+          xcodebuild build \
+            -project ProfileBrowser.xcodeproj \
+            -scheme ProfileBrowser \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build/device \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM=""
+
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          APP_PATH="build/device/Build/Products/Release-iphoneos/ProfileBrowser.app"
+          test -d "$APP_PATH"
+          test -f "$APP_PATH/Info.plist"
+          test -f "$APP_PATH/ProfileBrowser"
+          test ! -e "$APP_PATH/embedded.mobileprovision"
+
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          IPA_NAME="ProfileBrowser-unsigned-${SHORT_SHA}.ipa"
+          mkdir -p artifacts/Payload
+          ditto "$APP_PATH" artifacts/Payload/ProfileBrowser.app
+          (
+            cd artifacts
+            /usr/bin/zip -qry "$IPA_NAME" Payload
+            rm -rf Payload
+            shasum -a 256 "$IPA_NAME" > SHA256SUMS.txt
+            {
+              echo "commit=$GITHUB_SHA"
+              echo "runner=$RUNNER_OS $RUNNER_ARCH"
+              xcodebuild -version | tr '\n' ' '
+              echo
+            } > BUILD-INFO.txt
+          )
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProfileBrowser-unsigned-${{ github.sha }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
