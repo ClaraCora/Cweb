@@ -17,8 +17,10 @@ struct WebOriginTests {
 
     @Test
     func keepsNonDefaultPortDistinct() throws {
-        let standard = try #require(WebOrigin(url: #require(URL(string: "https://example.com"))))
-        let alternate = try #require(WebOrigin(url: #require(URL(string: "https://example.com:8443"))))
+        let standardURL = try #require(URL(string: "https://example.com"))
+        let alternateURL = try #require(URL(string: "https://example.com:8443"))
+        let standard = try #require(WebOrigin(url: standardURL))
+        let alternate = try #require(WebOrigin(url: alternateURL))
 
         #expect(standard != alternate)
         #expect(alternate.displayString == "https://example.com:8443")

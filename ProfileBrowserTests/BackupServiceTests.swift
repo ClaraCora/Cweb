@@ -8,8 +8,10 @@ struct BackupServiceTests {
     func encryptsAndImportsProfiles() throws {
         let vault = CredentialVault()
         let service = BackupService(vault: vault)
-        let profile = BrowserProfile(name: "测试", homePage: #require(URL(string: "https://example.com")))
-        let origin = try #require(WebOrigin(url: #require(URL(string: "https://example.com/login"))))
+        let homePage = try #require(URL(string: "https://example.com"))
+        let loginURL = try #require(URL(string: "https://example.com/login"))
+        let profile = BrowserProfile(name: "测试", homePage: homePage)
+        let origin = try #require(WebOrigin(url: loginURL))
         let credential = StoredCredential(
             profileID: profile.id,
             origin: origin,
