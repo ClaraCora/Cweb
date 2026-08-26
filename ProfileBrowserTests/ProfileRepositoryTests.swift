@@ -11,10 +11,13 @@ struct ProfileRepositoryTests {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         let repository = ProfileRepository(fileURL: fileURL)
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
         let profile = BrowserProfile(
             name: "工作",
             homePage: try #require(URL(string: "https://example.com")),
-            color: .teal
+            color: .teal,
+            createdAt: timestamp,
+            updatedAt: timestamp
         )
 
         try repository.save([profile])

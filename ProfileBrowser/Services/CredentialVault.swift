@@ -6,8 +6,24 @@ final class CredentialVault {
     private let servicePrefix = "com.personal.profilebrowser.credentials"
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+    private var inMemoryItems: [UUID: Data]?
+
+    init(inMemory: Bool = false) {
+        inMemoryItems = inMemory ? [:] : nil
+    }
 
     func credentials(profileID: UUID, origin: WebOrigin? = nil) throws -> [StoredCredential] {
+        if let inMemoryItems {
+            return try inMemoryItems.values
+                .map { try decoder.decode(StoredCredential.self, from: $0) }
+                .filter { $0.profileID == profileID }
+                .filter { credential in origin.map { $0 == credential.origin } ?? true }
+                .sorted { lhs, rhs in
+                    if lhs.label == rhs.label { return lhs.username < rhs.username }
+                    return lhs.label.localizedStandardCompare(rhs.label) == .orderedAscending
+                }
+        }
+
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service(for: profileID),
@@ -40,6 +56,11 @@ final class CredentialVault {
 
     func save(_ credential: StoredCredential) throws {
         let data = try encoder.encode(credential)
+        if inMemoryItems != nil {
+            inMemoryItems![credential.id] = data
+            return
+        }
+
         let identity: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service(for: credential.profileID),
@@ -59,6 +80,11 @@ final class CredentialVault {
     }
 
     func delete(_ credential: StoredCredential) throws {
+        if inMemoryItems != nil {
+            inMemoryItems!.removeValue(forKey: credential.id)
+            return
+        }
+
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service(for: credential.profileID),
@@ -71,6 +97,17 @@ final class CredentialVault {
     }
 
     func deleteAll(profileID: UUID) throws {
+        if inMemoryItems != nil {
+            let matchingIDs = try inMemoryItems!.compactMap { id, data -> UUID? in
+                let credential = try decoder.decode(StoredCredential.self, from: data)
+                return credential.profileID == profileID ? id : nil
+            }
+            for id in matchingIDs {
+                inMemoryItems!.removeValue(forKey: id)
+            }
+            return
+        }
+
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service(for: profileID)

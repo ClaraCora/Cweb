@@ -6,7 +6,7 @@ import Testing
 struct BackupServiceTests {
     @Test
     func encryptsAndImportsProfiles() throws {
-        let vault = CredentialVault()
+        let vault = CredentialVault(inMemory: true)
         let service = BackupService(vault: vault)
         let homePage = try #require(URL(string: "https://example.com"))
         let loginURL = try #require(URL(string: "https://example.com/login"))
@@ -38,7 +38,7 @@ struct BackupServiceTests {
 
     @Test
     func rejectsWrongPassword() throws {
-        let service = BackupService(vault: CredentialVault())
+        let service = BackupService(vault: CredentialVault(inMemory: true))
         let profile = BrowserProfile(name: "测试")
         let data = try service.export(profiles: [profile], password: "correct horse")
 
