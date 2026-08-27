@@ -70,6 +70,45 @@ final class AppModel {
         try persist()
     }
 
+    func duplicateProfile(_ profile: BrowserProfile) throws {
+        guard profiles.contains(where: { $0.id == profile.id }) else {
+            throw ProfileError.notFound
+        }
+
+        let credentials = try credentialVault.credentials(profileID: profile.id)
+        let duplicate = BrowserProfile(
+            name: nextDuplicateName(for: profile.name),
+            groupName: profile.groupName,
+            userAgent: profile.userAgent,
+            homePage: profile.homePage,
+            color: profile.color,
+            cachedBalance: profile.cachedBalance
+        )
+
+        profiles.append(duplicate)
+        do {
+            try persist()
+            for credential in credentials {
+                try credentialVault.save(
+                    StoredCredential(
+                        profileID: duplicate.id,
+                        origin: credential.origin,
+                        username: credential.username,
+                        password: credential.password,
+                        label: credential.label,
+                        createdAt: credential.createdAt,
+                        updatedAt: credential.updatedAt
+                    )
+                )
+            }
+        } catch {
+            profiles.removeAll { $0.id == duplicate.id }
+            try? persist()
+            try? credentialVault.deleteAll(profileID: duplicate.id)
+            throw error
+        }
+    }
+
     func balance(for profile: BrowserProfile) -> String? {
         profile.cachedBalance
     }
@@ -156,6 +195,18 @@ final class AppModel {
     private func normalizedOptional(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func nextDuplicateName(for name: String) -> String {
+        let baseName = "\(name) 副本"
+        let existingNames = Set(profiles.map(\.name))
+        guard existingNames.contains(baseName) else { return baseName }
+
+        var suffix = 2
+        while existingNames.contains("\(baseName) \(suffix)") {
+            suffix += 1
+        }
+        return "\(baseName) \(suffix)"
     }
 
     private func saveCachedBalance(_ balance: String, for profileID: UUID) {

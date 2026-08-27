@@ -173,6 +173,13 @@ struct ProfileListView: View {
             Button("编辑环境", systemImage: "pencil") {
                 editorMode = .edit(profile)
             }
+            Button("复制环境", systemImage: "plus.square.on.square") {
+                do {
+                    try model.duplicateProfile(profile)
+                } catch {
+                    model.present(error)
+                }
+            }
             Button("清理网站数据", systemImage: "eraser") {
                 pendingClear = profile
             }
