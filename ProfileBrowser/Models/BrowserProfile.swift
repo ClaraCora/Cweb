@@ -66,7 +66,7 @@ struct BrowserProfile: Identifiable, Codable, Hashable, Sendable {
         ),
         UserAgentPreset(
             name: "Via",
-            value: "Mozilla/5.0 (Linux; Android 15; Pixel 8 Pro Build/AP3A.241105.007) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36 Via/6.8.0"
+            value: "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1 Via/6.8.0"
         ),
         UserAgentPreset(
             name: "Edge",
@@ -94,52 +94,89 @@ struct BrowserProfile: Identifiable, Codable, Hashable, Sendable {
         randomUserAgent(for: nil)
     }
 
+    static func userAgentPresetName(for userAgent: String?) -> String {
+        guard let userAgent else { return "iPhone Safari" }
+        if userAgent.contains("UCBrowser/") { return "UC" }
+        if userAgent.contains(" Via/") { return "Via" }
+        if userAgent.contains("EdgiOS/") { return "Edge" }
+        if userAgent.contains("CriOS/") { return "Chrome" }
+        if userAgent.contains("Alook/") { return "Alook" }
+        if userAgent.contains("FxiOS/") { return "Firefox" }
+        if userAgent.contains("OPiOS/") { return "Opera" }
+        if userAgent.contains("iPad") { return "iPad Safari" }
+        return "iPhone Safari"
+    }
+
     static func randomUserAgent(for presetName: String?) -> String {
         guard let presetName else {
-            return userAgentPresets.randomElement()?.value ?? defaultUserAgent
+            let name = userAgentPresets.randomElement()?.name
+            return randomUserAgent(for: name)
         }
 
-        let variants: [String: [String]] = [
-            "iPhone Safari": [
-                defaultUserAgent,
-                "Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Mobile/15E148 Safari/604.1"
-            ],
-            "iPad Safari": [
-                "Mozilla/5.0 (iPad; CPU OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1",
-                "Mozilla/5.0 (iPad; CPU OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Mobile/15E148 Safari/604.1"
-            ],
-            "UC": [
-                "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Safari/604.1 UCBrowser/19.7.2.1",
-                "Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Safari/604.1 UCBrowser/19.8.0.1"
-            ],
-            "Via": [
-                "Mozilla/5.0 (Linux; Android 15; Pixel 8 Pro Build/AP3A.241105.007) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36 Via/6.8.0",
-                "Mozilla/5.0 (Linux; Android 15; Pixel 8 Pro Build/AP3A.241205.002) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Mobile Safari/537.36 Via/6.9.0"
-            ],
-            "Edge": [
-                "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) EdgiOS/140.0.3485.77 Mobile/15E148 Safari/605.1.15",
-                "Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) EdgiOS/141.0.3537.32 Mobile/15E148 Safari/605.1.15"
-            ],
-            "Chrome": [
-                "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/140.0.7339.101 Mobile/15E148 Safari/604.1",
-                "Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/141.0.7390.41 Mobile/15E148 Safari/604.1"
-            ],
-            "Alook": [
-                "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1 Alook/1.0",
-                "Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Mobile/15E148 Safari/604.1 Alook/1.1"
-            ],
-            "Firefox": [
-                "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/142.0 Mobile/15E148 Safari/605.1.15",
-                "Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/143.0 Mobile/15E148 Safari/605.1.15"
-            ],
-            "Opera": [
-                "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1 OPiOS/2.2.0.11266",
-                "Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Mobile/15E148 Safari/604.1 OPiOS/2.2.0.11300"
-            ]
-        ]
-        return variants[presetName]?.randomElement()
-            ?? userAgentPresets.first(where: { $0.name == presetName })?.value
-            ?? defaultUserAgent
+        switch presetName {
+        case "iPhone Safari":
+            return randomSafari(device: "iPhone")
+        case "iPad Safari":
+            return randomSafari(device: "iPad")
+        case "UC":
+            let version = randomIOSVersion()
+            let browserVersion = "\(Int.random(in: 15...19)).\(Int.random(in: 0...9)).\(Int.random(in: 0...9)).\(Int.random(in: 1...999))"
+            return "\(iosPrefix(version)) Mobile/15E148 Safari/604.1 UCBrowser/\(browserVersion)"
+        case "Via":
+            let version = randomIOSVersion()
+            let appVersion = "\(Int.random(in: 6...7)).\(Int.random(in: 0...9)).\(Int.random(in: 0...9))"
+            return "\(iosPrefix(version)) Version/\(version.major).\(version.minor) Mobile/15E148 Safari/604.1 Via/\(appVersion)"
+        case "Edge":
+            let version = randomIOSVersion()
+            let browserVersion = "\(Int.random(in: 128...141)).\(Int.random(in: 0...9)).\(Int.random(in: 3000...5999)).\(Int.random(in: 1...199))"
+            return "\(iosPrefix(version)) EdgiOS/\(browserVersion) Mobile/15E148 Safari/605.1.15"
+        case "Chrome":
+            let version = randomIOSVersion()
+            let browserVersion = "\(Int.random(in: 128...141)).\(Int.random(in: 0...9_999)).\(Int.random(in: 1_000...9_999)).\(Int.random(in: 1...999))"
+            return "\(iosPrefix(version)) CriOS/\(browserVersion) Mobile/15E148 Safari/604.1"
+        case "Alook":
+            let version = randomIOSVersion()
+            let appVersion = "1.\(Int.random(in: 0...9)).\(Int.random(in: 0...99))"
+            return "\(iosPrefix(version)) Version/\(version.major).\(version.minor) Mobile/15E148 Safari/604.1 Alook/\(appVersion)"
+        case "Firefox":
+            let version = randomIOSVersion()
+            let browserVersion = "\(Int.random(in: 128...143)).\(Int.random(in: 0...9)).\(Int.random(in: 0...9))"
+            return "\(iosPrefix(version)) FxiOS/\(browserVersion) Mobile/15E148 Safari/605.1.15"
+        case "Opera":
+            let version = randomIOSVersion()
+            let browserVersion = "\(Int.random(in: 2...3)).\(Int.random(in: 0...9)).\(Int.random(in: 0...9)).\(Int.random(in: 10_000...99_999))"
+            return "\(iosPrefix(version)) Version/\(version.major).\(version.minor) Mobile/15E148 Safari/604.1 OPiOS/\(browserVersion)"
+        default:
+            return userAgentPresets.first(where: { $0.name == presetName })?.value ?? defaultUserAgent
+        }
+    }
+
+    private static func randomSafari(device: String) -> String {
+        let version = randomIOSVersion()
+        return "\(iosPrefix(version, device: device)) Version/\(version.major).\(version.minor) Mobile/15E148 Safari/\(randomSafariBuild(for: version.major))"
+    }
+
+    private static func randomIOSVersion() -> (major: Int, minor: Int) {
+        let major = [17, 18, 26].randomElement() ?? 18
+        let minor = major == 26 ? Int.random(in: 0...2) : Int.random(in: 0...7)
+        return (major, minor)
+    }
+
+    private static func iosPrefix(
+        _ version: (major: Int, minor: Int),
+        device: String = "iPhone"
+    ) -> String {
+        if device == "iPad" {
+            return "Mozilla/5.0 (iPad; CPU OS \(version.major)_\(version.minor) like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko)"
+        }
+        return "Mozilla/5.0 (iPhone; CPU iPhone OS \(version.major)_\(version.minor) like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko)"
+    }
+
+    private static func randomSafariBuild(for major: Int) -> String {
+        if major <= 17 {
+            return Bool.random() ? "604.1" : "605.1.15"
+        }
+        return "605.1.15"
     }
 }
 

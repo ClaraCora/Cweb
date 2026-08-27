@@ -27,7 +27,7 @@ struct ProfileEditorView: View {
         _groupName = State(initialValue: profile?.groupName ?? "")
         _homePageText = State(initialValue: profile?.homePage.absoluteString ?? BrowserProfile.defaultHomePage.absoluteString)
         _userAgent = State(initialValue: profile?.userAgent ?? BrowserProfile.defaultUserAgent)
-        _selectedUserAgentName = State(initialValue: BrowserProfile.userAgentPresets.first(where: { $0.value == profile?.userAgent })?.name ?? "iPhone Safari")
+        _selectedUserAgentName = State(initialValue: BrowserProfile.userAgentPresetName(for: profile?.userAgent))
         _autofillUsername = State(initialValue: "")
         _autofillPassword = State(initialValue: "")
         _color = State(initialValue: profile?.color ?? .indigo)
