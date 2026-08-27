@@ -25,18 +25,9 @@ final class AppModel {
     }
 
     var sortedProfiles: [BrowserProfile] {
-        profiles.sorted { lhs, rhs in
-            switch (lhs.lastOpenedAt, rhs.lastOpenedAt) {
-            case let (left?, right?):
-                return left > right
-            case (_?, nil):
-                return true
-            case (nil, _?):
-                return false
-            case (nil, nil):
-                return lhs.createdAt > rhs.createdAt
-            }
-        }
+        // The persisted array is the user's explicit order. Opening an environment
+        // updates its metadata, but must never move it in the list.
+        profiles
     }
 
     func addProfile(
@@ -167,6 +158,45 @@ final class AppModel {
         }
     }
 
+    func moveProfiles(_ profileIDs: [UUID], fromOffsets offsets: IndexSet, toOffset destination: Int) throws {
+        guard !offsets.isEmpty else { return }
+
+        let profileIDSet = Set(profileIDs)
+        guard profileIDSet.count == profileIDs.count,
+              profileIDs.allSatisfy({ profileID in profiles.contains(where: { $0.id == profileID }) }) else {
+            throw ProfileError.notFound
+        }
+
+        let oldProfiles = profiles
+        let movingIDs = offsets.sorted().compactMap { profileIDs[safe: $0] }
+        guard movingIDs.count == offsets.count else { return }
+
+        var remainingIDs = profileIDs.enumerated()
+            .filter { !offsets.contains($0.offset) }
+            .map(\.element)
+        let removedBeforeDestination = offsets.filter { $0 < destination }.count
+        let insertionIndex = max(0, min(remainingIDs.count, destination - removedBeforeDestination))
+        remainingIDs.insert(contentsOf: movingIDs, at: insertionIndex)
+
+        let profilesByID = Dictionary(uniqueKeysWithValues: oldProfiles.map { ($0.id, $0) })
+        var reordered = profiles
+        var replacementIndex = 0
+        for index in reordered.indices where profileIDSet.contains(reordered[index].id) {
+            guard replacementIndex < remainingIDs.count,
+                  let replacement = profilesByID[remainingIDs[replacementIndex]] else { continue }
+            reordered[index] = replacement
+            replacementIndex += 1
+        }
+
+        profiles = reordered
+        do {
+            try persist()
+        } catch {
+            profiles = oldProfiles
+            throw error
+        }
+    }
+
     func clearWebsiteData(for profile: BrowserProfile) async {
         busyProfileID = profile.id
         await websiteDataStores.clearWebsiteData(for: profile)
@@ -259,6 +289,12 @@ final class AppModel {
             updatedAt: .now
         )
         try credentialVault.save(credential)
+    }
+}
+
+private extension Array {
+    subscript(safe index: Index) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }
 

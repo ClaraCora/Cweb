@@ -11,6 +11,7 @@ struct ProfileListView: View {
     @State private var activeProfile: BrowserProfile?
     @State private var showsBackup = false
     @State private var selectedGroup = "__all__"
+    @State private var editMode: EditMode = .inactive
 
     private let allGroupsKey = "__all__"
 
@@ -48,6 +49,9 @@ struct ProfileListView: View {
                     }
                     .buttonStyle(.plain)
                     .fixedSize(horizontal: true, vertical: false)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    EditButton()
                 }
             }
             .sheet(isPresented: $showsBackup) {
@@ -107,6 +111,7 @@ struct ProfileListView: View {
                     dismissButton: .default(Text("好"))
                 )
             }
+            .environment(\.editMode, $editMode)
         }
     }
 
@@ -136,6 +141,17 @@ struct ProfileListView: View {
                     ForEach(group.profiles) { profile in
                         profileButton(for: profile)
                     }
+                    .onMove { offsets, destination in
+                        do {
+                            try model.moveProfiles(
+                                group.profiles.map(\.id),
+                                fromOffsets: offsets,
+                                toOffset: destination
+                            )
+                        } catch {
+                            model.present(error)
+                        }
+                    }
                 }
             }
         }
@@ -144,6 +160,7 @@ struct ProfileListView: View {
 
     private func profileButton(for profile: BrowserProfile) -> some View {
         Button {
+            guard editMode != .active else { return }
             pendingEntry = profile
         } label: {
             ProfileRow(
