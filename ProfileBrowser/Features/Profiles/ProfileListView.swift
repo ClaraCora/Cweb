@@ -7,6 +7,8 @@ struct ProfileListView: View {
     @State private var editorMode: ProfileEditorMode?
     @State private var pendingDeletion: BrowserProfile?
     @State private var pendingClear: BrowserProfile?
+    @State private var pendingEntry: BrowserProfile?
+    @State private var activeProfile: BrowserProfile?
     @State private var showsBackup = false
     @State private var selectedGroup = "__all__"
 
@@ -19,6 +21,9 @@ struct ProfileListView: View {
             content
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(item: $activeProfile) { profile in
+                BrowserView(profile: profile)
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -92,6 +97,15 @@ struct ProfileListView: View {
             } message: { profile in
                 Text("将清除“\(profile.name)”的 Cookie、缓存和网站存储，但保留该环境和已保存凭据。")
             }
+            .alert("进入环境？", isPresented: entryAlertBinding, presenting: pendingEntry) { profile in
+                Button("进入") {
+                    pendingEntry = nil
+                    activeProfile = profile
+                }
+                Button("取消", role: .cancel) {}
+            } message: { profile in
+                Text("将使用“\(profile.name)”的独立网站数据和 User-Agent 打开主页。")
+            }
             .alert(item: $model.presentedError) { error in
                 Alert(
                     title: Text("操作失败"),
@@ -126,7 +140,7 @@ struct ProfileListView: View {
             ForEach(groupedProfiles) { group in
                 Section(group.name) {
                     ForEach(group.profiles) { profile in
-                        profileLink(for: profile)
+                        profileButton(for: profile)
                     }
                 }
             }
@@ -134,9 +148,9 @@ struct ProfileListView: View {
         .listStyle(.insetGrouped)
     }
 
-    private func profileLink(for profile: BrowserProfile) -> some View {
-        NavigationLink {
-            BrowserView(profile: profile)
+    private func profileButton(for profile: BrowserProfile) -> some View {
+        Button {
+            pendingEntry = profile
         } label: {
             ProfileRow(
                 profile: profile,
@@ -144,6 +158,7 @@ struct ProfileListView: View {
                 isBusy: model.busyProfileID == profile.id
             )
         }
+        .buttonStyle(.plain)
         .disabled(model.busyProfileID == profile.id)
         .swipeActions(edge: .leading, allowsFullSwipe: false) {
             Button("清理", systemImage: "eraser") {
@@ -246,6 +261,13 @@ struct ProfileListView: View {
         Binding(
             get: { pendingClear != nil },
             set: { if !$0 { pendingClear = nil } }
+        )
+    }
+
+    private var entryAlertBinding: Binding<Bool> {
+        Binding(
+            get: { pendingEntry != nil },
+            set: { if !$0 { pendingEntry = nil } }
         )
     }
 }

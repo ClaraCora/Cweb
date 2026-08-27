@@ -50,6 +50,7 @@ struct BrowserView: View {
                 }
                 .buttonStyle(.plain)
                 .fixedSize(horizontal: true, vertical: false)
+                .tint(Color.accentColor)
                 .disabled(session.currentOrigin?.isSecure != true)
                 .accessibilityLabel("填充密码")
             }

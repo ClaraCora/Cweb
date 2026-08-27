@@ -26,8 +26,8 @@ targets:
         excludes:
           - Resources/Info.plist
           - Resources/Assets.xcassets
-    resources:
       - path: ProfileBrowser/Resources/Assets.xcassets
+        buildPhase: resources
     info:
       path: ProfileBrowser/Resources/Info.plist
       properties:

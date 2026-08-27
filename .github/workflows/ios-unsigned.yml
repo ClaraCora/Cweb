@@ -80,6 +80,7 @@ jobs:
           APP_PATH="build/device/Build/Products/Release-iphoneos/ProfileBrowser.app"
           test -d "$APP_PATH"
           test -f "$APP_PATH/Info.plist"
+          test -f "$APP_PATH/Assets.car"
           test -f "$APP_PATH/ProfileBrowser"
           test ! -e "$APP_PATH/embedded.mobileprovision"
 
