@@ -75,6 +75,7 @@ struct BrowserView: View {
         .task {
             model.markOpened(session.profile)
             session.start()
+            await model.refreshBalance(for: session)
         }
         .sheet(isPresented: $showsCredentials) {
             if let origin = session.currentOrigin, origin.isSecure {

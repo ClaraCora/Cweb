@@ -75,12 +75,6 @@ struct ProfileListView: View {
                     }
                 }
             }
-            .task {
-                model.refreshBalances()
-            }
-            .onChange(of: model.profiles) { _, _ in
-                model.refreshBalances()
-            }
             .alert("删除环境？", isPresented: deletionAlertBinding, presenting: pendingDeletion) { profile in
                 Button("删除", role: .destructive) {
                     Task { await model.deleteProfile(profile) }

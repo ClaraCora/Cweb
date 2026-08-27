@@ -12,6 +12,7 @@ struct BrowserProfile: Identifiable, Codable, Hashable, Sendable {
     let fingerprintSeed: UUID
     var homePage: URL
     var color: ProfileColor
+    var cachedBalance: String?
     let createdAt: Date
     var updatedAt: Date
     var lastOpenedAt: Date?
@@ -25,6 +26,7 @@ struct BrowserProfile: Identifiable, Codable, Hashable, Sendable {
         fingerprintSeed: UUID = UUID(),
         homePage: URL = BrowserProfile.defaultHomePage,
         color: ProfileColor = .indigo,
+        cachedBalance: String? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now,
         lastOpenedAt: Date? = nil
@@ -37,6 +39,7 @@ struct BrowserProfile: Identifiable, Codable, Hashable, Sendable {
         self.fingerprintSeed = fingerprintSeed
         self.homePage = homePage
         self.color = color
+        self.cachedBalance = cachedBalance
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.lastOpenedAt = lastOpenedAt

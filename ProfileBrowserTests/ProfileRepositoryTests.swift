@@ -16,6 +16,7 @@ struct ProfileRepositoryTests {
             name: "工作",
             homePage: try #require(URL(string: "https://example.com")),
             color: .teal,
+            cachedBalance: "$4.03",
             createdAt: timestamp,
             updatedAt: timestamp
         )
@@ -63,6 +64,7 @@ struct ProfileRepositoryTests {
 
         #expect(loaded.count == 1)
         #expect(loaded[0].groupName == nil)
+        #expect(loaded[0].cachedBalance == nil)
         #expect(loaded[0].displayGroupName == "未分组")
     }
 }
