@@ -113,6 +113,17 @@ final class AppModel {
         profile.cachedBalance
     }
 
+    func resetCachedBalance(for profile: BrowserProfile) throws {
+        guard let index = profiles.firstIndex(where: { $0.id == profile.id }) else {
+            throw ProfileError.notFound
+        }
+        guard profiles[index].cachedBalance != "$0.00" else { return }
+
+        profiles[index].cachedBalance = "$0.00"
+        profiles[index].updatedAt = .now
+        try persist()
+    }
+
     func refreshBalance(for session: BrowserSession) async {
         for _ in 0..<24 {
             guard !Task.isCancelled else { return }

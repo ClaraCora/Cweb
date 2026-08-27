@@ -180,6 +180,13 @@ struct ProfileListView: View {
                     model.present(error)
                 }
             }
+            Button("余额清零", systemImage: "dollarsign.arrow.trianglehead.counterclockwise") {
+                do {
+                    try model.resetCachedBalance(for: profile)
+                } catch {
+                    model.present(error)
+                }
+            }
             Button("清理网站数据", systemImage: "eraser") {
                 pendingClear = profile
             }
