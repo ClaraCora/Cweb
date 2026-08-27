@@ -89,6 +89,8 @@ struct ProfileEditorView: View {
                             Text("恢复 iPhone Safari 默认值")
                         }
                     }
+                    .buttonStyle(.bordered)
+                    .tint(Color.accentColor)
                     Button {
                         userAgent = BrowserProfile.randomUserAgent(for: selectedUserAgentName)
                     } label: {
@@ -97,6 +99,8 @@ struct ProfileEditorView: View {
                             Text("随机生成当前浏览器 UA")
                         }
                     }
+                    .buttonStyle(.bordered)
+                    .tint(Color.accentColor)
                     Menu {
                         ForEach(BrowserProfile.userAgentPresets) { preset in
                             Button(preset.name) {
@@ -110,13 +114,17 @@ struct ProfileEditorView: View {
                             Text("选择浏览器 UA")
                         }
                     }
+                    .buttonStyle(.bordered)
+                    .tint(Color.accentColor)
                 }
 
                 Section("自动填充") {
                     TextField("账号（可选）", text: $autofillUsername)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    SecureField("密码（可选）", text: $autofillPassword)
+                    TextField("密码（可选）", text: $autofillPassword)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
                     Text("填写账号和密码后，会安全保存到钥匙串，并可在浏览器的凭据入口中填充。编辑已有环境时留空会保留原凭据。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)

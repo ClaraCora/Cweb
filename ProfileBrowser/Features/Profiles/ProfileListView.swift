@@ -218,13 +218,17 @@ struct ProfileListView: View {
         } label: {
             Text(title)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(selectedGroup == value ? .white : .primary)
+                .foregroundStyle(.primary)
                 .padding(.horizontal, 14)
                 .frame(minHeight: 36)
                 .background(
-                    selectedGroup == value ? Color.accentColor : Color.secondary.opacity(0.12),
+                    selectedGroup == value ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.12),
                     in: Capsule()
                 )
+                .overlay {
+                    Capsule()
+                        .stroke(selectedGroup == value ? Color.accentColor : .clear, lineWidth: 1)
+                }
         }
         .buttonStyle(.plain)
         .accessibilityLabel("分组：\(title)")

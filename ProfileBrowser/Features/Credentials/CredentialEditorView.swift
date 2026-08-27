@@ -41,7 +41,9 @@ struct CredentialEditorView: View {
                     TextField("用户名或邮箱", text: $username)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    SecureField("密码", text: $password)
+                    TextField("密码", text: $password)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
                 }
             }
             .navigationTitle(originalCredential == nil ? "添加凭据" : "编辑凭据")
