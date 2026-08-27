@@ -80,6 +80,7 @@ struct BackupService {
             return BrowserProfile(
                 id: newID,
                 name: profile.name,
+                groupName: profile.groupName,
                 websiteDataStoreID: UUID(),
                 userAgent: profile.userAgent,
                 fingerprintSeed: UUID(),

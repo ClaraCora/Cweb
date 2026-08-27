@@ -39,15 +39,30 @@ final class AppModel {
         }
     }
 
-    func addProfile(name: String, homePage: URL, userAgent: String, color: ProfileColor) throws {
+    func addProfile(
+        name: String,
+        groupName: String? = nil,
+        homePage: URL,
+        userAgent: String,
+        color: ProfileColor,
+        autofillUsername: String? = nil,
+        autofillPassword: String? = nil
+    ) throws {
         let profile = BrowserProfile(
             name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+            groupName: normalizedOptional(groupName),
             userAgent: userAgent.trimmingCharacters(in: .whitespacesAndNewlines),
             homePage: homePage,
             color: color
         )
         profiles.append(profile)
         try persist()
+        try saveAutofillCredentialIfNeeded(
+            profileID: profile.id,
+            homePage: profile.homePage,
+            username: autofillUsername,
+            password: autofillPassword
+        )
     }
 
     func addImportedProfile(_ profile: BrowserProfile) throws {
@@ -55,14 +70,25 @@ final class AppModel {
         try persist()
     }
 
-    func updateProfile(_ updatedProfile: BrowserProfile) throws {
+    func updateProfile(
+        _ updatedProfile: BrowserProfile,
+        autofillUsername: String? = nil,
+        autofillPassword: String? = nil
+    ) throws {
         guard let index = profiles.firstIndex(where: { $0.id == updatedProfile.id }) else {
             throw ProfileError.notFound
         }
         var value = updatedProfile
+        value.groupName = normalizedOptional(value.groupName)
         value.updatedAt = .now
         profiles[index] = value
         try persist()
+        try saveAutofillCredentialIfNeeded(
+            profileID: value.id,
+            homePage: value.homePage,
+            username: autofillUsername,
+            password: autofillPassword
+        )
     }
 
     func markOpened(_ profile: BrowserProfile) {
@@ -111,6 +137,41 @@ final class AppModel {
     private func persist() throws {
         try profileRepository.save(profiles)
     }
+
+    private func normalizedOptional(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func saveAutofillCredentialIfNeeded(
+        profileID: UUID,
+        homePage: URL,
+        username: String?,
+        password: String?
+    ) throws {
+        let normalizedUsername = normalizedOptional(username)
+        let normalizedPassword = password?.isEmpty == false ? password : nil
+        guard normalizedUsername != nil || normalizedPassword != nil else { return }
+        guard let normalizedUsername, let normalizedPassword else {
+            throw ProfileError.autofillCredentialsIncomplete
+        }
+        guard let origin = WebOrigin(url: homePage) else {
+            throw ProfileError.invalidAutofillOrigin
+        }
+
+        let existing = try credentialVault.credentials(profileID: profileID, origin: origin).first
+        let credential = StoredCredential(
+            id: existing?.id ?? UUID(),
+            profileID: profileID,
+            origin: origin,
+            username: normalizedUsername,
+            password: normalizedPassword,
+            label: existing?.label ?? "自动填充",
+            createdAt: existing?.createdAt ?? .now,
+            updatedAt: .now
+        )
+        try credentialVault.save(credential)
+    }
 }
 
 struct PresentedError: Identifiable {
@@ -120,11 +181,17 @@ struct PresentedError: Identifiable {
 
 enum ProfileError: LocalizedError {
     case notFound
+    case autofillCredentialsIncomplete
+    case invalidAutofillOrigin
 
     var errorDescription: String? {
         switch self {
         case .notFound:
             return "找不到这个浏览器环境。"
+        case .autofillCredentialsIncomplete:
+            return "自动填充账号和密码需要同时填写，或都留空。"
+        case .invalidAutofillOrigin:
+            return "主页网址无法用于保存自动填充凭据。"
         }
     }
 }

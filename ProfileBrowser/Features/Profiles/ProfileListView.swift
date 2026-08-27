@@ -25,47 +25,47 @@ struct ProfileListView: View {
                     }
                 } else {
                     List {
-                        Section {
-                            ForEach(model.sortedProfiles) { profile in
-                                NavigationLink {
-                                    BrowserView(profile: profile)
-                                } label: {
-                                    ProfileRow(
-                                        profile: profile,
-                                        isBusy: model.busyProfileID == profile.id
-                                    )
-                                }
-                                .disabled(model.busyProfileID == profile.id)
-                                .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                                    Button("清理", systemImage: "eraser") {
-                                        pendingClear = profile
+                        ForEach(groupedProfiles) { group in
+                            Section(group.name) {
+                                ForEach(group.profiles) { profile in
+                                    NavigationLink {
+                                        BrowserView(profile: profile)
+                                    } label: {
+                                        ProfileRow(
+                                            profile: profile,
+                                            isBusy: model.busyProfileID == profile.id
+                                        )
                                     }
-                                    .tint(.orange)
-                                }
-                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                    Button("删除", systemImage: "trash", role: .destructive) {
-                                        pendingDeletion = profile
+                                    .disabled(model.busyProfileID == profile.id)
+                                    .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                                        Button("清理", systemImage: "eraser") {
+                                            pendingClear = profile
+                                        }
+                                        .tint(.orange)
                                     }
-                                    Button("编辑", systemImage: "pencil") {
-                                        editorMode = .edit(profile)
+                                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                        Button("删除", systemImage: "trash", role: .destructive) {
+                                            pendingDeletion = profile
+                                        }
+                                        Button("编辑", systemImage: "pencil") {
+                                            editorMode = .edit(profile)
+                                        }
+                                        .tint(.indigo)
                                     }
-                                    .tint(.indigo)
-                                }
-                                .contextMenu {
-                                    Button("编辑环境", systemImage: "pencil") {
-                                        editorMode = .edit(profile)
-                                    }
-                                    Button("清理网站数据", systemImage: "eraser") {
-                                        pendingClear = profile
-                                    }
-                                    Divider()
-                                    Button("删除环境", systemImage: "trash", role: .destructive) {
-                                        pendingDeletion = profile
+                                    .contextMenu {
+                                        Button("编辑环境", systemImage: "pencil") {
+                                            editorMode = .edit(profile)
+                                        }
+                                        Button("清理网站数据", systemImage: "eraser") {
+                                            pendingClear = profile
+                                        }
+                                        Divider()
+                                        Button("删除环境", systemImage: "trash", role: .destructive) {
+                                            pendingDeletion = profile
+                                        }
                                     }
                                 }
                             }
-                        } header: {
-                            Text("选择环境")
                         }
                     }
                     .listStyle(.insetGrouped)
@@ -93,15 +93,22 @@ struct ProfileListView: View {
             .sheet(item: $editorMode) { mode in
                 ProfileEditorView(profile: mode.profile) { submission in
                     switch submission {
-                    case .create(let name, let homePage, let userAgent, let color):
+                    case .create(let name, let groupName, let homePage, let userAgent, let color, let autofillUsername, let autofillPassword):
                         try model.addProfile(
                             name: name,
+                            groupName: groupName,
                             homePage: homePage,
                             userAgent: userAgent,
-                            color: color
+                            color: color,
+                            autofillUsername: autofillUsername,
+                            autofillPassword: autofillPassword
                         )
-                    case .update(let profile):
-                        try model.updateProfile(profile)
+                    case .update(let profile, let autofillUsername, let autofillPassword):
+                        try model.updateProfile(
+                            profile,
+                            autofillUsername: autofillUsername,
+                            autofillPassword: autofillPassword
+                        )
                     }
                 }
             }
@@ -131,6 +138,16 @@ struct ProfileListView: View {
         }
     }
 
+    private var groupedProfiles: [ProfileGroup] {
+        Dictionary(grouping: model.sortedProfiles, by: \.displayGroupName)
+            .map { ProfileGroup(name: $0.key, profiles: $0.value) }
+            .sorted { lhs, rhs in
+                if lhs.name == "未分组" { return false }
+                if rhs.name == "未分组" { return true }
+                return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+            }
+    }
+
     private var deletionAlertBinding: Binding<Bool> {
         Binding(
             get: { pendingDeletion != nil },
@@ -144,6 +161,13 @@ struct ProfileListView: View {
             set: { if !$0 { pendingClear = nil } }
         )
     }
+}
+
+private struct ProfileGroup: Identifiable {
+    let name: String
+    let profiles: [BrowserProfile]
+
+    var id: String { name }
 }
 
 @MainActor

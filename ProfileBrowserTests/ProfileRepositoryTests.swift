@@ -35,4 +35,34 @@ struct ProfileRepositoryTests {
 
         #expect(try repository.load().isEmpty)
     }
+
+    @Test
+    func profilesWithoutGroupRemainCompatible() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let fileURL = directory.appending(path: "profiles.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let legacyJSON = """
+        [{
+          "color": "indigo",
+          "createdAt": "2023-11-14T22:13:20Z",
+          "fingerprintSeed": "00000000-0000-0000-0000-000000000001",
+          "homePage": "https://example.com",
+          "id": "00000000-0000-0000-0000-000000000002",
+          "name": "旧环境",
+          "updatedAt": "2023-11-14T22:13:20Z",
+          "userAgent": "Mozilla/5.0",
+          "websiteDataStoreID": "00000000-0000-0000-0000-000000000003"
+        }]
+        """.data(using: .utf8)!
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try legacyJSON.write(to: fileURL)
+
+        let loaded = try ProfileRepository(fileURL: fileURL).load()
+
+        #expect(loaded.count == 1)
+        #expect(loaded[0].groupName == nil)
+        #expect(loaded[0].displayGroupName == "未分组")
+    }
 }
