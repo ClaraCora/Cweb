@@ -39,3 +39,7 @@ project.yml           XcodeGen 工程描述
 Windows 没有 Apple SDK，无法完整编译 SwiftUI/WebKit 代码或运行 iOS Simulator。项目的真实编译与测试关卡是 GitHub Actions 的 macOS 26 runner。
 
 完整架构、边界与验收标准见 [方案.md](方案.md)。
+
+## UA / 环境检测页
+
+根目录的 `ua-diagnostics.php` 是一个可独立部署的 PHP 检测页。将它放到 PHP 网站后直接访问，即可对比服务端收到的 User-Agent、请求头、浏览器参数和能力信息；页面会遮盖 Cookie、Authorization 等敏感请求头，浏览器端数据只在当前页面生成。建议只在自己的站点使用，并按需限制访问权限。
