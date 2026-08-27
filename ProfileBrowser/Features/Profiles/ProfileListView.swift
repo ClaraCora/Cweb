@@ -8,6 +8,9 @@ struct ProfileListView: View {
     @State private var pendingDeletion: BrowserProfile?
     @State private var pendingClear: BrowserProfile?
     @State private var showsBackup = false
+    @State private var selectedGroup = "__all__"
+
+    private let allGroupsKey = "__all__"
 
     var body: some View {
         @Bindable var model = model
@@ -24,64 +27,83 @@ struct ProfileListView: View {
                         .buttonStyle(.borderedProminent)
                     }
                 } else {
-                    List {
-                        ForEach(groupedProfiles) { group in
-                            Section(group.name) {
-                                ForEach(group.profiles) { profile in
-                                    NavigationLink {
-                                        BrowserView(profile: profile)
-                                    } label: {
-                                        ProfileRow(
-                                            profile: profile,
-                                            isBusy: model.busyProfileID == profile.id
-                                        )
-                                    }
-                                    .disabled(model.busyProfileID == profile.id)
-                                    .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                                        Button("清理", systemImage: "eraser") {
-                                            pendingClear = profile
+                    VStack(spacing: 0) {
+                        groupBar
+                        List {
+                            ForEach(groupedProfiles) { group in
+                                Section(group.name) {
+                                    ForEach(group.profiles) { profile in
+                                        NavigationLink {
+                                            BrowserView(profile: profile)
+                                        } label: {
+                                            ProfileRow(
+                                                profile: profile,
+                                                balance: model.balance(for: profile),
+                                                isBusy: model.busyProfileID == profile.id
+                                            )
                                         }
-                                        .tint(.orange)
-                                    }
-                                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                        Button("删除", systemImage: "trash", role: .destructive) {
-                                            pendingDeletion = profile
+                                        .disabled(model.busyProfileID == profile.id)
+                                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                                            Button("清理", systemImage: "eraser") {
+                                                pendingClear = profile
+                                            }
+                                            .tint(.orange)
                                         }
-                                        Button("编辑", systemImage: "pencil") {
-                                            editorMode = .edit(profile)
+                                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                            Button("删除", systemImage: "trash", role: .destructive) {
+                                                pendingDeletion = profile
+                                            }
+                                            Button("编辑", systemImage: "pencil") {
+                                                editorMode = .edit(profile)
+                                            }
+                                            .tint(.indigo)
                                         }
-                                        .tint(.indigo)
-                                    }
-                                    .contextMenu {
-                                        Button("编辑环境", systemImage: "pencil") {
-                                            editorMode = .edit(profile)
-                                        }
-                                        Button("清理网站数据", systemImage: "eraser") {
-                                            pendingClear = profile
-                                        }
-                                        Divider()
-                                        Button("删除环境", systemImage: "trash", role: .destructive) {
-                                            pendingDeletion = profile
+                                        .contextMenu {
+                                            Button("编辑环境", systemImage: "pencil") {
+                                                editorMode = .edit(profile)
+                                            }
+                                            Button("清理网站数据", systemImage: "eraser") {
+                                                pendingClear = profile
+                                            }
+                                            Divider()
+                                            Button("删除环境", systemImage: "trash", role: .destructive) {
+                                                pendingDeletion = profile
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
+                        .listStyle(.insetGrouped)
                     }
-                    .listStyle(.insetGrouped)
                 }
             }
-            .navigationTitle("环境")
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button("新建", systemImage: "plus") {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
                         editorMode = .create
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "plus")
+                            Text("新建")
+                        }
                     }
                     .buttonStyle(.plain)
-                    Button("备份", systemImage: "lock.doc") {
+                    .fixedSize(horizontal: true, vertical: false)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
                         showsBackup = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "lock.doc")
+                            Text("备份")
+                        }
                     }
                     .buttonStyle(.plain)
+                    .fixedSize(horizontal: true, vertical: false)
                 }
             }
             .sheet(isPresented: $showsBackup) {
@@ -108,6 +130,12 @@ struct ProfileListView: View {
                         )
                     }
                 }
+            }
+            .task {
+                model.refreshBalances()
+            }
+            .onChange(of: model.profiles) { _, _ in
+                model.refreshBalances()
             }
             .alert("删除环境？", isPresented: deletionAlertBinding, presenting: pendingDeletion) { profile in
                 Button("删除", role: .destructive) {
@@ -136,13 +164,60 @@ struct ProfileListView: View {
     }
 
     private var groupedProfiles: [ProfileGroup] {
-        Dictionary(grouping: model.sortedProfiles, by: \.displayGroupName)
+        Dictionary(grouping: visibleProfiles, by: \.displayGroupName)
             .map { ProfileGroup(name: $0.key, profiles: $0.value) }
             .sorted { lhs, rhs in
                 if lhs.name == "未分组" { return false }
                 if rhs.name == "未分组" { return true }
                 return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
             }
+    }
+
+    private var visibleProfiles: [BrowserProfile] {
+        guard selectedGroup != allGroupsKey else { return model.sortedProfiles }
+        return model.sortedProfiles.filter { $0.displayGroupName == selectedGroup }
+    }
+
+    private var groupNames: [String] {
+        let names = Set(model.profiles.map(\.displayGroupName))
+        return names.sorted { lhs, rhs in
+            if lhs == "未分组" { return false }
+            if rhs == "未分组" { return true }
+            return lhs.localizedStandardCompare(rhs) == .orderedAscending
+        }
+    }
+
+    private var groupBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                groupButton(title: "全部", value: allGroupsKey)
+                ForEach(groupNames, id: \.self) { name in
+                    groupButton(title: name, value: name)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+        }
+        .background(.bar)
+    }
+
+    private func groupButton(title: String, value: String) -> some View {
+        Button {
+            selectedGroup = value
+        } label: {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(selectedGroup == value ? .white : .primary)
+                .padding(.horizontal, 14)
+                .frame(minHeight: 36)
+                .background(
+                    selectedGroup == value ? Color.accentColor : Color.secondary.opacity(0.12),
+                    in: Capsule()
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("分组：\(title)")
+        .accessibilityAddTraits(selectedGroup == value ? .isSelected : [])
     }
 
     private var deletionAlertBinding: Binding<Bool> {
@@ -170,6 +245,7 @@ private struct ProfileGroup: Identifiable {
 @MainActor
 private struct ProfileRow: View {
     let profile: BrowserProfile
+    let balance: String?
     let isBusy: Bool
 
     var body: some View {
@@ -185,9 +261,18 @@ private struct ProfileRow: View {
             .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(profile.name)
-                    .font(.headline)
-                    .foregroundStyle(.primary)
+                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    Text(profile.name)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .layoutPriority(1)
+                    if let balance {
+                        Text(balance)
+                            .font(.subheadline.monospacedDigit().weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
                 Text(profile.homePageHost)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -204,7 +289,7 @@ private struct ProfileRow: View {
         }
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(profile.name)，主页 \(profile.homePageHost)")
+        .accessibilityLabel("\(profile.name)\(balance.map { "，余额 \($0)" } ?? "")，主页 \(profile.homePageHost)")
     }
 }
 

@@ -5,6 +5,7 @@ import Observation
 @Observable
 final class AppModel {
     private(set) var profiles: [BrowserProfile] = []
+    private(set) var balances: [UUID: String] = [:]
     var presentedError: PresentedError?
     var busyProfileID: UUID?
 
@@ -12,6 +13,8 @@ final class AppModel {
     let websiteDataStores: WebsiteDataStoreManager
 
     private let profileRepository: ProfileRepository
+    private var balanceSessions: [UUID: BrowserSession] = [:]
+    private var balanceTasks: [UUID: Task<Void, Never>] = [:]
 
     init(
         profileRepository: ProfileRepository = ProfileRepository(),
@@ -70,6 +73,45 @@ final class AppModel {
         try persist()
     }
 
+    func balance(for profile: BrowserProfile) -> String? {
+        balances[profile.id]
+    }
+
+    func refreshBalances() {
+        let profileIDs = Set(profiles.map(\.id))
+        let staleProfileIDs = balanceTasks.keys.filter { !profileIDs.contains($0) }
+        for profileID in staleProfileIDs {
+            balanceTasks[profileID]?.cancel()
+            balanceTasks.removeValue(forKey: profileID)
+            balanceSessions.removeValue(forKey: profileID)
+            balances.removeValue(forKey: profileID)
+        }
+
+        for profile in profiles where balanceTasks[profile.id] == nil {
+            let session = BrowserSession(profile: profile)
+            balanceSessions[profile.id] = session
+            balanceTasks[profile.id] = Task { [weak self, weak session] in
+                guard let session else { return }
+                session.start()
+
+                var detectedBalance: String?
+                for _ in 0..<24 {
+                    if Task.isCancelled { return }
+                    if let value = try? await session.readAccountBalance(), !value.isEmpty {
+                        detectedBalance = value
+                        break
+                    }
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                }
+
+                guard !Task.isCancelled else { return }
+                self?.balances[profile.id] = detectedBalance
+                self?.balanceTasks.removeValue(forKey: profile.id)
+                self?.balanceSessions.removeValue(forKey: profile.id)
+            }
+        }
+    }
+
     func updateProfile(
         _ updatedProfile: BrowserProfile,
         autofillUsername: String? = nil,
@@ -78,6 +120,7 @@ final class AppModel {
         guard let index = profiles.firstIndex(where: { $0.id == updatedProfile.id }) else {
             throw ProfileError.notFound
         }
+        invalidateBalance(for: updatedProfile.id)
         var value = updatedProfile
         value.groupName = normalizedOptional(value.groupName)
         value.updatedAt = .now
@@ -112,6 +155,8 @@ final class AppModel {
         busyProfileID = profile.id
         defer { busyProfileID = nil }
 
+        invalidateBalance(for: profile.id)
+
         do {
             try await websiteDataStores.deleteDataStore(for: profile)
             try credentialVault.deleteAll(profileID: profile.id)
@@ -141,6 +186,13 @@ final class AppModel {
     private func normalizedOptional(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func invalidateBalance(for profileID: UUID) {
+        balanceTasks[profileID]?.cancel()
+        balanceTasks.removeValue(forKey: profileID)
+        balanceSessions.removeValue(forKey: profileID)
+        balances.removeValue(forKey: profileID)
     }
 
     private func saveAutofillCredentialIfNeeded(

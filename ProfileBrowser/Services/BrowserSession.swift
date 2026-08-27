@@ -129,6 +129,32 @@ final class BrowserSession {
         )
     }
 
+    func readAccountBalance() async throws -> String? {
+        let functionBody = """
+        const element = [...document.querySelectorAll('div')].find((node) => {
+            const classes = node.classList;
+            return classes.contains('text-foreground')
+                && classes.contains('mt-1.5')
+                && classes.contains('font-mono')
+                && classes.contains('text-lg')
+                && classes.contains('font-bold')
+                && classes.contains('tracking-tight')
+                && classes.contains('tabular-nums');
+        });
+        return element?.textContent?.trim() || null;
+        """
+
+        let value = try await page.callJavaScript(
+            functionBody,
+            arguments: [:],
+            in: nil,
+            contentWorld: .page
+        )
+        guard let balance = value as? String else { return nil }
+        let trimmed = balance.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     static func resolveAddress(_ input: String) -> URL? {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }

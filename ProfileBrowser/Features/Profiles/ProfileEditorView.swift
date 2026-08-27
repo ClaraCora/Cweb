@@ -11,6 +11,7 @@ struct ProfileEditorView: View {
     @State private var groupName: String
     @State private var homePageText: String
     @State private var userAgent: String
+    @State private var selectedUserAgentName: String?
     @State private var autofillUsername: String
     @State private var autofillPassword: String
     @State private var color: ProfileColor
@@ -26,6 +27,7 @@ struct ProfileEditorView: View {
         _groupName = State(initialValue: profile?.groupName ?? "")
         _homePageText = State(initialValue: profile?.homePage.absoluteString ?? BrowserProfile.defaultHomePage.absoluteString)
         _userAgent = State(initialValue: profile?.userAgent ?? BrowserProfile.defaultUserAgent)
+        _selectedUserAgentName = State(initialValue: BrowserProfile.userAgentPresets.first(where: { $0.value == profile?.userAgent })?.name ?? "iPhone Safari")
         _autofillUsername = State(initialValue: "")
         _autofillPassword = State(initialValue: "")
         _color = State(initialValue: profile?.color ?? .indigo)
@@ -78,17 +80,34 @@ struct ProfileEditorView: View {
                         .lineLimit(3...6)
                         .font(.caption.monospaced())
 
-                    Button("恢复 iPhone Safari 默认值", systemImage: "arrow.counterclockwise") {
+                    Button {
                         userAgent = BrowserProfile.defaultUserAgent
+                        selectedUserAgentName = "iPhone Safari"
+                    } label: {
+                        HStack {
+                            Image(systemName: "arrow.counterclockwise")
+                            Text("恢复 iPhone Safari 默认值")
+                        }
                     }
-                    Button("随机生成合理 UA", systemImage: "shuffle") {
-                        userAgent = BrowserProfile.randomUserAgent()
+                    Button {
+                        userAgent = BrowserProfile.randomUserAgent(for: selectedUserAgentName)
+                    } label: {
+                        HStack {
+                            Image(systemName: "shuffle")
+                            Text("随机生成当前浏览器 UA")
+                        }
                     }
-                    Menu("选择浏览器 UA", systemImage: "list.bullet") {
+                    Menu {
                         ForEach(BrowserProfile.userAgentPresets) { preset in
                             Button(preset.name) {
+                                selectedUserAgentName = preset.name
                                 userAgent = preset.value
                             }
+                        }
+                    } label: {
+                        HStack {
+                            Image(systemName: "list.bullet")
+                            Text("选择浏览器 UA")
                         }
                     }
                 }
@@ -106,18 +125,30 @@ struct ProfileEditorView: View {
             .navigationTitle(originalProfile == nil ? "新建环境" : "编辑环境")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItemGroup(placement: .topBarLeading) {
-                    Button("取消") {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
                         dismiss()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "xmark")
+                            Text("取消")
+                        }
                     }
                     .buttonStyle(.plain)
+                    .fixedSize(horizontal: true, vertical: false)
                 }
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button("完成") {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
                         save()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark")
+                            Text("完成")
+                        }
                     }
                     .buttonStyle(.plain)
-                        .disabled(!isValid)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .disabled(!isValid)
                 }
             }
             .alert(item: $localError) { error in
