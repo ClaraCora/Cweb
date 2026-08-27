@@ -16,68 +16,7 @@ struct ProfileListView: View {
         @Bindable var model = model
 
         NavigationStack {
-            Group {
-                if model.profiles.isEmpty {
-                    ContentUnavailableView {
-                        Label("还没有环境", systemImage: "person.crop.square.badge.plus")
-                    } actions: {
-                        Button("新建环境", systemImage: "plus") {
-                            editorMode = .create
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
-                } else {
-                    VStack(spacing: 0) {
-                        groupBar
-                        List {
-                            ForEach(groupedProfiles) { group in
-                                Section(group.name) {
-                                    ForEach(group.profiles) { profile in
-                                        NavigationLink {
-                                            BrowserView(profile: profile)
-                                        } label: {
-                                            ProfileRow(
-                                                profile: profile,
-                                                balance: model.balance(for: profile),
-                                                isBusy: model.busyProfileID == profile.id
-                                            )
-                                        }
-                                        .disabled(model.busyProfileID == profile.id)
-                                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                                            Button("清理", systemImage: "eraser") {
-                                                pendingClear = profile
-                                            }
-                                            .tint(.orange)
-                                        }
-                                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                            Button("删除", systemImage: "trash", role: .destructive) {
-                                                pendingDeletion = profile
-                                            }
-                                            Button("编辑", systemImage: "pencil") {
-                                                editorMode = .edit(profile)
-                                            }
-                                            .tint(.indigo)
-                                        }
-                                        .contextMenu {
-                                            Button("编辑环境", systemImage: "pencil") {
-                                                editorMode = .edit(profile)
-                                            }
-                                            Button("清理网站数据", systemImage: "eraser") {
-                                                pendingClear = profile
-                                            }
-                                            Divider()
-                                            Button("删除环境", systemImage: "trash", role: .destructive) {
-                                                pendingDeletion = profile
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        .listStyle(.insetGrouped)
-                    }
-                }
-            }
+            content
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -159,6 +98,78 @@ struct ProfileListView: View {
                     message: Text(error.message),
                     dismissButton: .default(Text("好"))
                 )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if model.profiles.isEmpty {
+            ContentUnavailableView {
+                Label("还没有环境", systemImage: "person.crop.square.badge.plus")
+            } actions: {
+                Button("新建环境", systemImage: "plus") {
+                    editorMode = .create
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        } else {
+            VStack(spacing: 0) {
+                groupBar
+                profileList
+            }
+        }
+    }
+
+    private var profileList: some View {
+        List {
+            ForEach(groupedProfiles) { group in
+                Section(group.name) {
+                    ForEach(group.profiles) { profile in
+                        profileLink(for: profile)
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+    }
+
+    private func profileLink(for profile: BrowserProfile) -> some View {
+        NavigationLink {
+            BrowserView(profile: profile)
+        } label: {
+            ProfileRow(
+                profile: profile,
+                balance: model.balance(for: profile),
+                isBusy: model.busyProfileID == profile.id
+            )
+        }
+        .disabled(model.busyProfileID == profile.id)
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+            Button("清理", systemImage: "eraser") {
+                pendingClear = profile
+            }
+            .tint(.orange)
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button("删除", systemImage: "trash", role: .destructive) {
+                pendingDeletion = profile
+            }
+            Button("编辑", systemImage: "pencil") {
+                editorMode = .edit(profile)
+            }
+            .tint(.indigo)
+        }
+        .contextMenu {
+            Button("编辑环境", systemImage: "pencil") {
+                editorMode = .edit(profile)
+            }
+            Button("清理网站数据", systemImage: "eraser") {
+                pendingClear = profile
+            }
+            Divider()
+            Button("删除环境", systemImage: "trash", role: .destructive) {
+                pendingDeletion = profile
             }
         }
     }
