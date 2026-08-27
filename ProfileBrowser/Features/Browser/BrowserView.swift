@@ -39,6 +39,16 @@ struct BrowserView: View {
                     .lineLimit(1)
                     .accessibilityLabel("当前环境：\(session.profile.name)")
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showsCredentials = true
+                } label: {
+                    Label("填充密码", systemImage: "key.fill")
+                }
+                .buttonStyle(.plain)
+                .disabled(session.currentOrigin?.isSecure != true)
+                .accessibilityLabel("填充密码")
+            }
             ToolbarItem(placement: .bottomBar) {
                 BrowserToolbar(
                     canGoBack: session.canGoBack,

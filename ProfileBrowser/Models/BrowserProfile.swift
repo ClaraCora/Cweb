@@ -51,16 +51,52 @@ struct BrowserProfile: Identifiable, Codable, Hashable, Sendable {
         return trimmed.isEmpty ? "未分组" : trimmed
     }
 
+    static let userAgentPresets: [UserAgentPreset] = [
+        UserAgentPreset(name: "iPhone Safari", value: defaultUserAgent),
+        UserAgentPreset(
+            name: "iPad Safari",
+            value: "Mozilla/5.0 (iPad; CPU OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1"
+        ),
+        UserAgentPreset(
+            name: "UC",
+            value: "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Safari/604.1 UCBrowser/19.7.2.1"
+        ),
+        UserAgentPreset(
+            name: "Via",
+            value: "Mozilla/5.0 (Linux; Android 15; Pixel 8 Pro Build/AP3A.241105.007) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36 Via/6.8.0"
+        ),
+        UserAgentPreset(
+            name: "Edge",
+            value: "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) EdgiOS/140.0.3485.77 Mobile/15E148 Safari/605.1.15"
+        ),
+        UserAgentPreset(
+            name: "Chrome",
+            value: "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/140.0.7339.101 Mobile/15E148 Safari/604.1"
+        ),
+        UserAgentPreset(
+            name: "Alook",
+            value: "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1 Alook/1.0"
+        ),
+        UserAgentPreset(
+            name: "Firefox",
+            value: "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/142.0 Mobile/15E148 Safari/605.1.15"
+        ),
+        UserAgentPreset(
+            name: "OpenRa",
+            value: "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1 OpenRa/1.0"
+        )
+    ]
+
     static func randomUserAgent() -> String {
-        let candidates = [
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1",
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Mobile/15E148 Safari/604.1",
-            "Mozilla/5.0 (iPad; CPU OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1",
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/140.0.7339.101 Mobile/15E148 Safari/604.1",
-            "Mozilla/5.0 (iPad; CPU OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/140.0.7339.101 Mobile/15E148 Safari/604.1"
-        ]
-        return candidates.randomElement() ?? defaultUserAgent
+        userAgentPresets.randomElement()?.value ?? defaultUserAgent
     }
+}
+
+struct UserAgentPreset: Identifiable, Hashable, Sendable {
+    let name: String
+    let value: String
+
+    var id: String { name }
 }
 
 enum ProfileColor: String, CaseIterable, Codable, Hashable, Identifiable, Sendable {

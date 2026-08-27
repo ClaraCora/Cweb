@@ -73,18 +73,15 @@ struct ProfileListView: View {
             }
             .navigationTitle("环境")
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button("新建环境", systemImage: "plus") {
-                            editorMode = .create
-                        }
-                        Button("加密备份", systemImage: "lock.doc") {
-                            showsBackup = true
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button("新建", systemImage: "plus") {
+                        editorMode = .create
                     }
-                    .accessibilityLabel("更多操作")
+                    .buttonStyle(.plain)
+                    Button("备份", systemImage: "lock.doc") {
+                        showsBackup = true
+                    }
+                    .buttonStyle(.plain)
                 }
             }
             .sheet(isPresented: $showsBackup) {

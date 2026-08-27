@@ -84,6 +84,13 @@ struct ProfileEditorView: View {
                     Button("随机生成合理 UA", systemImage: "shuffle") {
                         userAgent = BrowserProfile.randomUserAgent()
                     }
+                    Menu("选择浏览器 UA", systemImage: "list.bullet") {
+                        ForEach(BrowserProfile.userAgentPresets) { preset in
+                            Button(preset.name) {
+                                userAgent = preset.value
+                            }
+                        }
+                    }
                 }
 
                 Section("自动填充") {
@@ -99,19 +106,17 @@ struct ProfileEditorView: View {
             .navigationTitle(originalProfile == nil ? "新建环境" : "编辑环境")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
+                ToolbarItemGroup(placement: .topBarLeading) {
+                    Button("取消") {
                         dismiss()
-                    } label: {
-                        Text("取消")
                     }
+                    .buttonStyle(.plain)
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button("完成") {
                         save()
-                    } label: {
-                        Text("完成")
                     }
+                    .buttonStyle(.plain)
                         .disabled(!isValid)
                 }
             }

@@ -102,6 +102,11 @@ struct CredentialListView: View {
         } else {
             List {
                 Section {
+                    Text("点击账号后，由当前网页脚本直接填入登录表单，不调用 iOS 系统自动填充。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Section {
                     ForEach(credentials) { credential in
                         Button {
                             fill(credential)
