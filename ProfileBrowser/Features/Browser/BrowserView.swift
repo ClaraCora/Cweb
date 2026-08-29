@@ -28,8 +28,7 @@ struct BrowserView: View {
 
             WebView(session.page)
                 .webViewBackForwardNavigationGestures(.enabled)
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             BrowserToolbar(
                 canGoBack: session.canGoBack,
                 canGoForward: session.canGoForward,
