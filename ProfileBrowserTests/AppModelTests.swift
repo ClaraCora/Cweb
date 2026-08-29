@@ -96,7 +96,11 @@ struct AppModelTests {
                 label: "自动填充"
             )
         )
-        let model = AppModel(profileRepository: repository, credentialVault: vault)
+        let model = AppModel(
+            profileRepository: repository,
+            credentialVault: vault,
+            websiteDataStores: WebsiteDataStoreManager(clearExistingWebsiteDataHandler: { _ in })
+        )
 
         await model.deleteProfile(profile)
 
@@ -129,7 +133,11 @@ struct AppModelTests {
                 )
             )
         }
-        let model = AppModel(profileRepository: repository, credentialVault: vault)
+        let model = AppModel(
+            profileRepository: repository,
+            credentialVault: vault,
+            websiteDataStores: WebsiteDataStoreManager(clearExistingWebsiteDataHandler: { _ in })
+        )
 
         await model.deleteProfiles(inGroupNamed: "工作")
 

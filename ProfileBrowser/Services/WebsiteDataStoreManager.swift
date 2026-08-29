@@ -3,6 +3,14 @@ import WebKit
 
 @MainActor
 struct WebsiteDataStoreManager {
+    private let existingWebsiteDataClearer: ((BrowserProfile) async -> Void)?
+
+    init(
+        clearExistingWebsiteDataHandler: ((BrowserProfile) async -> Void)? = nil
+    ) {
+        existingWebsiteDataClearer = clearExistingWebsiteDataHandler
+    }
+
     func dataStore(for profile: BrowserProfile) -> WKWebsiteDataStore {
         WKWebsiteDataStore(forIdentifier: profile.websiteDataStoreID)
     }
@@ -16,6 +24,11 @@ struct WebsiteDataStoreManager {
     }
 
     func clearExistingWebsiteData(for profile: BrowserProfile) async {
+        if let existingWebsiteDataClearer {
+            await existingWebsiteDataClearer(profile)
+            return
+        }
+
         let identifiers = await WKWebsiteDataStore.allDataStoreIdentifiers
         guard identifiers.contains(profile.websiteDataStoreID) else { return }
 
