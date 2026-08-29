@@ -29,6 +29,26 @@ struct BrowserView: View {
             WebView(session.page)
                 .webViewBackForwardNavigationGestures(.enabled)
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            BrowserToolbar(
+                canGoBack: session.canGoBack,
+                canGoForward: session.canGoForward,
+                isLoading: session.page.isLoading,
+                credentialsEnabled: session.currentOrigin?.isSecure == true,
+                goBack: session.goBack,
+                goForward: session.goForward,
+                goHome: session.goHome,
+                reloadOrStop: session.reloadOrStop,
+                showCredentials: { showsCredentials = true },
+                showDiagnostics: { showsDiagnostics = true }
+            )
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
+            .background(.bar)
+            .overlay(alignment: .top) {
+                Divider()
+            }
+        }
         .navigationTitle(session.profile.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -53,20 +73,6 @@ struct BrowserView: View {
                 .tint(Color.accentColor)
                 .disabled(session.currentOrigin?.isSecure != true)
                 .accessibilityLabel("填充密码")
-            }
-            ToolbarItem(placement: .bottomBar) {
-                BrowserToolbar(
-                    canGoBack: session.canGoBack,
-                    canGoForward: session.canGoForward,
-                    isLoading: session.page.isLoading,
-                    credentialsEnabled: session.currentOrigin?.isSecure == true,
-                    goBack: session.goBack,
-                    goForward: session.goForward,
-                    goHome: session.goHome,
-                    reloadOrStop: session.reloadOrStop,
-                    showCredentials: { showsCredentials = true },
-                    showDiagnostics: { showsDiagnostics = true }
-                )
             }
         }
         .onChange(of: session.page.url) { _, newURL in
