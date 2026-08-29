@@ -4,58 +4,35 @@ import SwiftUI
 struct ProfileListView: View {
     @Environment(AppModel.self) private var model
 
+    let groupName: String
+
     @State private var editorMode: ProfileEditorMode?
     @State private var pendingDeletion: BrowserProfile?
     @State private var pendingClear: BrowserProfile?
     @State private var pendingEntry: BrowserProfile?
     @State private var activeProfile: BrowserProfile?
-    @State private var showsBackup = false
-    @State private var selectedGroup = "__all__"
     @State private var editMode: EditMode = .inactive
 
-    private let allGroupsKey = "__all__"
+    init(groupName: String) {
+        self.groupName = groupName
+    }
 
     var body: some View {
         @Bindable var model = model
 
-        NavigationStack {
-            content
-            .navigationTitle("")
+        content
+            .navigationTitle(groupName)
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(item: $activeProfile) { profile in
                 BrowserView(profile: profile)
             }
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        editorMode = .create
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "plus")
-                            Text("新建")
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .fixedSize(horizontal: true, vertical: false)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showsBackup = true
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "lock.doc")
-                            Text("备份")
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .fixedSize(horizontal: true, vertical: false)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
                     EditButton()
+                    Button("新建", systemImage: "plus") {
+                        editorMode = .create
+                    }
                 }
-            }
-            .sheet(isPresented: $showsBackup) {
-                BackupView()
             }
             .sheet(item: $editorMode) { mode in
                 ProfileEditorView(profile: mode.profile) { submission in
@@ -112,14 +89,13 @@ struct ProfileListView: View {
                 )
             }
             .environment(\.editMode, $editMode)
-        }
     }
 
     @ViewBuilder
     private var content: some View {
-        if model.profiles.isEmpty {
+        if visibleProfiles.isEmpty {
             ContentUnavailableView {
-                Label("还没有环境", systemImage: "person.crop.square.badge.plus")
+                Label("这个分组还没有环境", systemImage: "person.crop.square")
             } actions: {
                 Button("新建环境", systemImage: "plus") {
                     editorMode = .create
@@ -127,35 +103,28 @@ struct ProfileListView: View {
                 .buttonStyle(.borderedProminent)
             }
         } else {
-            VStack(spacing: 0) {
-                groupBar
-                profileList
-            }
-        }
-    }
-
-    private var profileList: some View {
-        List {
-            ForEach(groupedProfiles) { group in
-                Section(group.name) {
-                    ForEach(group.profiles) { profile in
-                        profileButton(for: profile)
-                    }
-                    .onMove { offsets, destination in
-                        do {
-                            try model.moveProfiles(
-                                group.profiles.map(\.id),
-                                fromOffsets: offsets,
-                                toOffset: destination
-                            )
-                        } catch {
-                            model.present(error)
-                        }
+            List {
+                ForEach(visibleProfiles) { profile in
+                    profileButton(for: profile)
+                }
+                .onMove { offsets, destination in
+                    do {
+                        try model.moveProfiles(
+                            visibleProfiles.map(\.id),
+                            fromOffsets: offsets,
+                            toOffset: destination
+                        )
+                    } catch {
+                        model.present(error)
                     }
                 }
             }
+            .listStyle(.insetGrouped)
         }
-        .listStyle(.insetGrouped)
+    }
+
+    private var visibleProfiles: [BrowserProfile] {
+        model.sortedProfiles.filter { $0.displayGroupName == groupName }
     }
 
     private func profileButton(for profile: BrowserProfile) -> some View {
@@ -214,67 +183,6 @@ struct ProfileListView: View {
         }
     }
 
-    private var groupedProfiles: [ProfileGroup] {
-        Dictionary(grouping: visibleProfiles, by: \.displayGroupName)
-            .map { ProfileGroup(name: $0.key, profiles: $0.value) }
-            .sorted { lhs, rhs in
-                if lhs.name == "未分组" { return false }
-                if rhs.name == "未分组" { return true }
-                return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
-            }
-    }
-
-    private var visibleProfiles: [BrowserProfile] {
-        guard selectedGroup != allGroupsKey else { return model.sortedProfiles }
-        return model.sortedProfiles.filter { $0.displayGroupName == selectedGroup }
-    }
-
-    private var groupNames: [String] {
-        let names = Set(model.profiles.map(\.displayGroupName))
-        return names.sorted { lhs, rhs in
-            if lhs == "未分组" { return false }
-            if rhs == "未分组" { return true }
-            return lhs.localizedStandardCompare(rhs) == .orderedAscending
-        }
-    }
-
-    private var groupBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                groupButton(title: "全部", value: allGroupsKey)
-                ForEach(groupNames, id: \.self) { name in
-                    groupButton(title: name, value: name)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-        }
-        .background(.bar)
-    }
-
-    private func groupButton(title: String, value: String) -> some View {
-        Button {
-            selectedGroup = value
-        } label: {
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 14)
-                .frame(minHeight: 36)
-                .background(
-                    selectedGroup == value ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.12),
-                    in: Capsule()
-                )
-                .overlay {
-                    Capsule()
-                        .stroke(selectedGroup == value ? Color.accentColor : .clear, lineWidth: 1)
-                }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("分组：\(title)")
-        .accessibilityAddTraits(selectedGroup == value ? .isSelected : [])
-    }
-
     private var deletionAlertBinding: Binding<Bool> {
         Binding(
             get: { pendingDeletion != nil },
@@ -297,13 +205,6 @@ struct ProfileListView: View {
     }
 }
 
-private struct ProfileGroup: Identifiable {
-    let name: String
-    let profiles: [BrowserProfile]
-
-    var id: String { name }
-}
-
 @MainActor
 private struct ProfileRow: View {
     let profile: BrowserProfile
@@ -313,7 +214,7 @@ private struct ProfileRow: View {
     var body: some View {
         HStack(spacing: 12) {
             ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(profile.color.color.opacity(0.16))
                 Image(systemName: "person.crop.square.fill")
                     .foregroundStyle(profile.color.color)
@@ -352,24 +253,5 @@ private struct ProfileRow: View {
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(profile.name)\(balance.map { "，余额 \($0)" } ?? "")，主页 \(profile.homePageHost)")
-    }
-}
-
-private enum ProfileEditorMode: Identifiable {
-    case create
-    case edit(BrowserProfile)
-
-    var id: String {
-        switch self {
-        case .create: "create"
-        case .edit(let profile): profile.id.uuidString
-        }
-    }
-
-    var profile: BrowserProfile? {
-        switch self {
-        case .create: nil
-        case .edit(let profile): profile
-        }
     }
 }

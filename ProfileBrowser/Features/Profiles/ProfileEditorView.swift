@@ -133,29 +133,15 @@ struct ProfileEditorView: View {
             .navigationTitle(originalProfile == nil ? "新建环境" : "编辑环境")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消", systemImage: "xmark") {
                         dismiss()
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "xmark")
-                            Text("取消")
-                        }
                     }
-                    .buttonStyle(.plain)
-                    .fixedSize(horizontal: true, vertical: false)
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成", systemImage: "checkmark") {
                         save()
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark")
-                            Text("完成")
-                        }
                     }
-                    .buttonStyle(.plain)
-                    .fixedSize(horizontal: true, vertical: false)
                     .disabled(!isValid)
                 }
             }

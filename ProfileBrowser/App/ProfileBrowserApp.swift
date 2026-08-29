@@ -7,7 +7,7 @@ struct ProfileBrowserApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ProfileListView()
+            ProfileGroupGridView()
                 .environment(model)
                 .tint(Color("AccentColor"))
         }

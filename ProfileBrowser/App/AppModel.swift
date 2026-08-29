@@ -30,6 +30,24 @@ final class AppModel {
         profiles
     }
 
+    var profileGroups: [ProfileGroup] {
+        var groupedProfiles: [String: [BrowserProfile]] = [:]
+        var groupOrder: [String] = []
+
+        for profile in sortedProfiles {
+            let groupName = profile.displayGroupName
+            if groupedProfiles[groupName] == nil {
+                groupOrder.append(groupName)
+            }
+            groupedProfiles[groupName, default: []].append(profile)
+        }
+
+        return groupOrder.compactMap { name in
+            guard let profiles = groupedProfiles[name] else { return nil }
+            return ProfileGroup(name: name, profiles: profiles)
+        }
+    }
+
     func addProfile(
         name: String,
         groupName: String? = nil,

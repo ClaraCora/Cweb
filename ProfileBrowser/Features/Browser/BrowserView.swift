@@ -59,16 +59,9 @@ struct BrowserView: View {
                     .accessibilityLabel("当前环境：\(session.profile.name)")
             }
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
+                Button("填充密码", systemImage: "key.fill") {
                     showsCredentials = true
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "key.fill")
-                        Text("填充密码")
-                    }
                 }
-                .buttonStyle(.plain)
-                .fixedSize(horizontal: true, vertical: false)
                 .tint(Color.accentColor)
                 .disabled(session.currentOrigin?.isSecure != true)
                 .accessibilityLabel("填充密码")
