@@ -15,10 +15,18 @@ struct WebsiteDataStoreManager {
         )
     }
 
-    func deleteDataStore(for profile: BrowserProfile) async throws {
+    func clearExistingWebsiteData(for profile: BrowserProfile) async {
         let identifiers = await WKWebsiteDataStore.allDataStoreIdentifiers
         guard identifiers.contains(profile.websiteDataStoreID) else { return }
-        try await WKWebsiteDataStore.remove(forIdentifier: profile.websiteDataStoreID)
+
+        // Removing an identified data store while WebKit is winding down can
+        // terminate the app. Clearing its contents keeps the deletion private
+        // and makes the now-unreferenced store unusable by the app.
+        let dataStore = WKWebsiteDataStore(forIdentifier: profile.websiteDataStoreID)
+        await dataStore.removeData(
+            ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(),
+            modifiedSince: .distantPast
+        )
     }
 
     func cookieCount(for profile: BrowserProfile) async -> Int {

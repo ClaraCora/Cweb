@@ -74,4 +74,69 @@ struct AppModelTests {
         #expect(model.profileGroups[0].profiles.map(\.id) == [profiles[0].id, profiles[2].id])
         #expect(model.profileGroups[1].profiles.map(\.id) == [profiles[1].id])
     }
+
+    @Test
+    func deletingProfileRemovesPersistedProfileAndCredentials() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let fileURL = directory.appending(path: "profiles.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let profile = BrowserProfile(name: "待删除")
+        let repository = ProfileRepository(fileURL: fileURL)
+        let vault = CredentialVault(inMemory: true)
+        try repository.save([profile])
+        let origin = try #require(WebOrigin(url: URL(string: "https://example.com")!))
+        try vault.save(
+            StoredCredential(
+                profileID: profile.id,
+                origin: origin,
+                username: "name",
+                password: "password",
+                label: "自动填充"
+            )
+        )
+        let model = AppModel(profileRepository: repository, credentialVault: vault)
+
+        await model.deleteProfile(profile)
+
+        #expect(model.profiles.isEmpty)
+        #expect(try repository.load().isEmpty)
+        #expect(try vault.credentials(profileID: profile.id).isEmpty)
+    }
+
+    @Test
+    func deletingGroupRemovesOnlyProfilesAndCredentialsInThatGroup() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let fileURL = directory.appending(path: "profiles.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let first = BrowserProfile(name: "工作一", groupName: "工作")
+        let second = BrowserProfile(name: "工作二", groupName: "工作")
+        let retained = BrowserProfile(name: "个人", groupName: "个人")
+        let repository = ProfileRepository(fileURL: fileURL)
+        let vault = CredentialVault(inMemory: true)
+        try repository.save([first, second, retained])
+        let origin = try #require(WebOrigin(url: URL(string: "https://example.com")!))
+        for profile in [first, second, retained] {
+            try vault.save(
+                StoredCredential(
+                    profileID: profile.id,
+                    origin: origin,
+                    username: profile.name,
+                    password: "password"
+                )
+            )
+        }
+        let model = AppModel(profileRepository: repository, credentialVault: vault)
+
+        await model.deleteProfiles(inGroupNamed: "工作")
+
+        #expect(model.profiles.map(\.id) == [retained.id])
+        #expect(try repository.load().map(\.id) == [retained.id])
+        #expect(try vault.credentials(profileID: first.id).isEmpty)
+        #expect(try vault.credentials(profileID: second.id).isEmpty)
+        #expect(try vault.credentials(profileID: retained.id).count == 1)
+    }
 }

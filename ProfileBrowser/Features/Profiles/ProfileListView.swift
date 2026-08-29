@@ -7,6 +7,7 @@ struct ProfileListView: View {
     let groupName: String
 
     @State private var editorMode: ProfileEditorMode?
+    @State private var pendingGroupDeletion: ProfileGroup?
     @State private var pendingDeletion: BrowserProfile?
     @State private var pendingClear: BrowserProfile?
     @State private var pendingEntry: BrowserProfile?
@@ -32,6 +33,13 @@ struct ProfileListView: View {
                     Button("新建", systemImage: "plus") {
                         editorMode = .create
                     }
+                    Menu {
+                        Button("删除整个分组", systemImage: "trash", role: .destructive) {
+                            pendingGroupDeletion = ProfileGroup(name: groupName, profiles: visibleProfiles)
+                        }
+                    } label: {
+                        Label("更多", systemImage: "ellipsis.circle")
+                    }
                 }
             }
             .sheet(item: $editorMode) { mode in
@@ -56,8 +64,18 @@ struct ProfileListView: View {
                     }
                 }
             }
+            .alert("删除整个分组？", isPresented: groupDeletionAlertBinding, presenting: pendingGroupDeletion) { group in
+                Button("删除", role: .destructive) {
+                    pendingGroupDeletion = nil
+                    Task { await model.deleteProfiles(inGroupNamed: group.name) }
+                }
+                Button("取消", role: .cancel) {}
+            } message: { group in
+                Text("将永久删除“\(group.name)”中的 \(group.profiles.count) 个环境，以及它们的网站数据和已保存凭据。")
+            }
             .alert("删除环境？", isPresented: deletionAlertBinding, presenting: pendingDeletion) { profile in
                 Button("删除", role: .destructive) {
+                    pendingDeletion = nil
                     Task { await model.deleteProfile(profile) }
                 }
                 Button("取消", role: .cancel) {}
@@ -187,6 +205,13 @@ struct ProfileListView: View {
         Binding(
             get: { pendingDeletion != nil },
             set: { if !$0 { pendingDeletion = nil } }
+        )
+    }
+
+    private var groupDeletionAlertBinding: Binding<Bool> {
+        Binding(
+            get: { pendingGroupDeletion != nil },
+            set: { if !$0 { pendingGroupDeletion = nil } }
         )
     }
 

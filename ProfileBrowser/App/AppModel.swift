@@ -7,6 +7,7 @@ final class AppModel {
     private(set) var profiles: [BrowserProfile] = []
     var presentedError: PresentedError?
     var busyProfileID: UUID?
+    var busyGroupName: String?
 
     let credentialVault: CredentialVault
     let websiteDataStores: WebsiteDataStoreManager
@@ -222,14 +223,46 @@ final class AppModel {
     }
 
     func deleteProfile(_ profile: BrowserProfile) async {
+        guard profiles.contains(where: { $0.id == profile.id }) else { return }
+
         busyProfileID = profile.id
         defer { busyProfileID = nil }
 
         do {
-            try await websiteDataStores.deleteDataStore(for: profile)
             try credentialVault.deleteAll(profileID: profile.id)
             profiles.removeAll { $0.id == profile.id }
             try persist()
+
+            // Do not call WKWebsiteDataStore.remove(forIdentifier:) here. WebKit
+            // can still retain the store while SwiftUI dismisses its UI, which
+            // has caused an application crash. Clearing existing site data is
+            // safe and the store is no longer reachable after this point.
+            await websiteDataStores.clearExistingWebsiteData(for: profile)
+        } catch {
+            present(error)
+        }
+    }
+
+    func deleteProfiles(inGroupNamed groupName: String) async {
+        let profilesToDelete = profiles.filter { $0.displayGroupName == groupName }
+        guard !profilesToDelete.isEmpty else { return }
+
+        busyGroupName = groupName
+        defer { busyGroupName = nil }
+
+        do {
+            for profile in profilesToDelete {
+                try credentialVault.deleteAll(profileID: profile.id)
+            }
+            let profileIDs = Set(profilesToDelete.map(\.id))
+            profiles.removeAll { profileIDs.contains($0.id) }
+            try persist()
+
+            // Keep the same WebKit-safe cleanup path as single-profile deletion.
+            // The stores are no longer reachable once their profiles are removed.
+            for profile in profilesToDelete {
+                await websiteDataStores.clearExistingWebsiteData(for: profile)
+            }
         } catch {
             present(error)
         }

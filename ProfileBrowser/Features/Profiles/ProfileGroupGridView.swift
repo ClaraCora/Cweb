@@ -6,6 +6,7 @@ struct ProfileGroupGridView: View {
 
     @State private var editorMode: ProfileEditorMode?
     @State private var showsBackup = false
+    @State private var pendingGroupDeletion: ProfileGroup?
 
     var body: some View {
         @Bindable var model = model
@@ -56,6 +57,15 @@ struct ProfileGroupGridView: View {
                         }
                     }
                 }
+                .alert("删除整个分组？", isPresented: groupDeletionAlertBinding, presenting: pendingGroupDeletion) { group in
+                    Button("删除", role: .destructive) {
+                        pendingGroupDeletion = nil
+                        Task { await model.deleteProfiles(inGroupNamed: group.name) }
+                    }
+                    Button("取消", role: .cancel) {}
+                } message: { group in
+                    Text("将永久删除“\(group.name)”中的 \(group.profiles.count) 个环境，以及它们的网站数据和已保存凭据。")
+                }
                 .alert(item: $model.presentedError) { error in
                     Alert(
                         title: Text("操作失败"),
@@ -88,9 +98,18 @@ struct ProfileGroupGridView: View {
                 ) {
                     ForEach(model.profileGroups) { group in
                         NavigationLink(value: group.name) {
-                            ProfileGroupCard(group: group)
+                            ProfileGroupCard(
+                                group: group,
+                                isBusy: model.busyGroupName == group.name
+                            )
                         }
                         .buttonStyle(.plain)
+                        .disabled(model.busyGroupName == group.name)
+                        .contextMenu {
+                            Button("删除整个分组", systemImage: "trash", role: .destructive) {
+                                pendingGroupDeletion = group
+                            }
+                        }
                     }
                 }
                 .padding(.horizontal, 16)
@@ -99,10 +118,18 @@ struct ProfileGroupGridView: View {
             .background(Color(.systemGroupedBackground))
         }
     }
+
+    private var groupDeletionAlertBinding: Binding<Bool> {
+        Binding(
+            get: { pendingGroupDeletion != nil },
+            set: { if !$0 { pendingGroupDeletion = nil } }
+        )
+    }
 }
 
 private struct ProfileGroupCard: View {
     let group: ProfileGroup
+    let isBusy: Bool
 
     var body: some View {
         HStack(spacing: 10) {
@@ -125,10 +152,16 @@ private struct ProfileGroupCard: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
 
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.tertiary)
-                .accessibilityHidden(true)
+            if isBusy {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel("正在删除分组")
+            } else {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
+            }
         }
         .padding(.horizontal, 14)
         .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
