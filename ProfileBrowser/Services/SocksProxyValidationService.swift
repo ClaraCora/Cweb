@@ -338,7 +338,7 @@ struct NetworkSocksProxyProbe: SocksProxyProbe {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             let gate = ContinuationGate()
 
-            func finish(_ result: Result<Void, Error>) {
+            @Sendable func finish(_ result: Result<Void, Error>) {
                 gate.resume {
                     connection.stateUpdateHandler = nil
                     if case .failure = result {
