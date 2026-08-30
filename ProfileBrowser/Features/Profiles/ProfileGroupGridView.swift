@@ -6,6 +6,7 @@ struct ProfileGroupGridView: View {
 
     @State private var editorMode: ProfileEditorMode?
     @State private var showsBackup = false
+    @State private var showsSocksProxyManager = false
     @State private var pendingGroupDeletion: ProfileGroup?
     @State private var pendingDeletionGroupName: String?
     @State private var navigationPath = NavigationPath()
@@ -32,6 +33,9 @@ struct ProfileGroupGridView: View {
                             Button("备份", systemImage: "lock.doc") {
                                 showsBackup = true
                             }
+                            Button("SOCKS 代理", systemImage: "network") {
+                                showsSocksProxyManager = true
+                            }
                         } label: {
                             Label("更多", systemImage: "ellipsis.circle")
                         }
@@ -39,6 +43,9 @@ struct ProfileGroupGridView: View {
                 }
                 .sheet(isPresented: $showsBackup) {
                     BackupView()
+                }
+                .navigationDestination(isPresented: $showsSocksProxyManager) {
+                    SocksProxyListView()
                 }
                 .sheet(item: $editorMode) { mode in
                     ProfileEditorView(profile: mode.profile) { submission in
