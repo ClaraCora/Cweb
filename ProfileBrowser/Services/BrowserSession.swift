@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import Observation
 import WebKit
 
@@ -6,6 +7,7 @@ import WebKit
 @Observable
 final class BrowserSession {
     let profile: BrowserProfile
+    let socksProxy: SocksProxy?
     let dataStore: WKWebsiteDataStore
     let page: WebPage
 
@@ -14,12 +16,27 @@ final class BrowserSession {
 
     private var hasStarted = false
 
-    init(profile: BrowserProfile) {
+    init(profile: BrowserProfile, socksProxy: SocksProxy? = nil) {
         self.profile = profile
+        self.socksProxy = socksProxy
         self.addressText = profile.homePage.absoluteString
 
         let dataStore = WKWebsiteDataStore(forIdentifier: profile.websiteDataStoreID)
         self.dataStore = dataStore
+
+        if let socksProxy, let endpoint = Self.endpoint(for: socksProxy) {
+            var proxyConfiguration = ProxyConfiguration(socksv5Proxy: endpoint)
+            // Never fall back to a direct connection if the selected proxy
+            // fails. That would expose the environment's real network path.
+            proxyConfiguration.allowFailover = false
+            if let username = socksProxy.username,
+               let password = socksProxy.password {
+                proxyConfiguration.applyCredential(username: username, password: password)
+            }
+            dataStore.proxyConfigurations = [proxyConfiguration]
+        } else {
+            dataStore.proxyConfigurations = []
+        }
 
         var configuration = WebPage.Configuration()
         configuration.websiteDataStore = dataStore
@@ -35,6 +52,15 @@ final class BrowserSession {
         page.isInspectable = false
 #endif
         self.page = page
+    }
+
+    private static func endpoint(for proxy: SocksProxy) -> NWEndpoint? {
+        guard (1...65_535).contains(proxy.port),
+              let port = NWEndpoint.Port(rawValue: UInt16(proxy.port)),
+              !proxy.host.isEmpty else {
+            return nil
+        }
+        return .hostPort(host: NWEndpoint.Host(proxy.host), port: port)
     }
 
     var canGoBack: Bool { !page.backForwardList.backList.isEmpty }

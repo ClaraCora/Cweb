@@ -86,6 +86,7 @@ struct BackupService {
                 fingerprintSeed: UUID(),
                 homePage: profile.homePage,
                 color: profile.color,
+                socksProxyNumber: profile.socksProxyNumber,
                 createdAt: .now,
                 updatedAt: .now,
                 lastOpenedAt: nil

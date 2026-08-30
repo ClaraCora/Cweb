@@ -67,4 +67,20 @@ struct ProfileRepositoryTests {
         #expect(loaded[0].cachedBalance == nil)
         #expect(loaded[0].displayGroupName == "未分组")
     }
+
+    @Test
+    func volatileSocksProxyNumberRoundTrips() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let fileURL = directory.appending(path: "profiles.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let profile = BrowserProfile(name: "代理环境", socksProxyNumber: 3)
+        let repository = ProfileRepository(fileURL: fileURL)
+        try repository.save([profile])
+
+        let loaded = try repository.load()
+
+        #expect(loaded.first?.socksProxyNumber == 3)
+    }
 }

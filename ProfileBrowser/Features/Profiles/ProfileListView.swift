@@ -28,7 +28,7 @@ struct ProfileListView: View {
             .navigationTitle(groupName)
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(item: $activeProfile) { profile in
-                BrowserView(profile: profile)
+                BrowserView(profile: profile, socksProxy: model.socksProxy(for: profile))
             }
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
@@ -48,13 +48,14 @@ struct ProfileListView: View {
             .sheet(item: $editorMode) { mode in
                 ProfileEditorView(profile: mode.profile) { submission in
                     switch submission {
-                    case .create(let name, let groupName, let homePage, let userAgent, let color, let autofillUsername, let autofillPassword):
+                    case .create(let name, let groupName, let homePage, let userAgent, let color, let socksProxyNumber, let autofillUsername, let autofillPassword):
                         try model.addProfile(
                             name: name,
                             groupName: groupName,
                             homePage: homePage,
                             userAgent: userAgent,
                             color: color,
+                            socksProxyNumber: socksProxyNumber,
                             autofillUsername: autofillUsername,
                             autofillPassword: autofillPassword
                         )

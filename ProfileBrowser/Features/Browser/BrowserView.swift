@@ -9,8 +9,8 @@ struct BrowserView: View {
     @State private var showsCredentials = false
     @State private var showsDiagnostics = false
 
-    init(profile: BrowserProfile) {
-        _session = State(initialValue: BrowserSession(profile: profile))
+    init(profile: BrowserProfile, socksProxy: SocksProxy? = nil) {
+        _session = State(initialValue: BrowserSession(profile: profile, socksProxy: socksProxy))
     }
 
     var body: some View {

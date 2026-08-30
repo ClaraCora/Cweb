@@ -139,4 +139,55 @@ struct AppModelTests {
         #expect(try vault.credentials(profileID: second.id).isEmpty)
         #expect(try vault.credentials(profileID: retained.id).count == 1)
     }
+
+    @Test
+    func profileProxySelectionFollowsCurrentDisplayNumber() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let profileURL = directory.appending(path: "profiles.json")
+        let proxyURL = directory.appending(path: "proxies.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let profile = BrowserProfile(name: "时效代理", socksProxyNumber: 1)
+        let slow = SocksProxy(
+            host: "slow.example",
+            port: 1080,
+            latencyMilliseconds: 80,
+            status: .available
+        )
+        let fast = SocksProxy(
+            host: "fast.example",
+            port: 1080,
+            latencyMilliseconds: 20,
+            status: .available
+        )
+        let profileRepository = ProfileRepository(fileURL: profileURL)
+        let proxyRepository = SocksProxyRepository(
+            fileURL: proxyURL,
+            credentialStore: SocksProxyCredentialStore(inMemory: true)
+        )
+        try profileRepository.save([profile])
+        try proxyRepository.save([slow, fast])
+
+        let firstModel = AppModel(
+            profileRepository: profileRepository,
+            socksProxyRepository: proxyRepository
+        )
+        #expect(firstModel.socksProxy(for: profile)?.id == fast.id)
+
+        let refreshedSlow = SocksProxy(
+            id: slow.id,
+            host: slow.host,
+            port: slow.port,
+            latencyMilliseconds: 10,
+            status: .available
+        )
+        try proxyRepository.save([refreshedSlow, fast])
+
+        let refreshedModel = AppModel(
+            profileRepository: profileRepository,
+            socksProxyRepository: proxyRepository
+        )
+        #expect(refreshedModel.socksProxy(for: profile)?.id == refreshedSlow.id)
+    }
 }

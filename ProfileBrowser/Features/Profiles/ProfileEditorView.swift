@@ -2,6 +2,7 @@ import SwiftUI
 
 @MainActor
 struct ProfileEditorView: View {
+    @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
 
     private let originalProfile: BrowserProfile?
@@ -14,6 +15,7 @@ struct ProfileEditorView: View {
     @State private var selectedUserAgentName: String?
     @State private var autofillUsername: String
     @State private var autofillPassword: String
+    @State private var socksProxyNumber: Int?
     @State private var color: ProfileColor
     @State private var localError: PresentedError?
 
@@ -30,6 +32,7 @@ struct ProfileEditorView: View {
         _selectedUserAgentName = State(initialValue: BrowserProfile.userAgentPresetName(for: profile?.userAgent))
         _autofillUsername = State(initialValue: "")
         _autofillPassword = State(initialValue: "")
+        _socksProxyNumber = State(initialValue: profile?.socksProxyNumber)
         _color = State(initialValue: profile?.color ?? .indigo)
     }
 
@@ -118,6 +121,39 @@ struct ProfileEditorView: View {
                     .tint(Color.accentColor)
                 }
 
+                Section("SOCKS 代理") {
+                    Picker(
+                        "代理编号",
+                        selection: Binding(
+                            get: { socksProxyNumber ?? 0 },
+                            set: { socksProxyNumber = $0 == 0 ? nil : $0 }
+                        )
+                    ) {
+                        Text("不使用代理").tag(0)
+                        ForEach(rankedProxyOptions) { option in
+                            Text("第 \(option.number) 号 · \(option.proxy.displayAddress)")
+                                .tag(option.number)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    if let socksProxyNumber {
+                        if let proxy = SocksProxyValidationService.proxy(
+                            forDisplayNumber: socksProxyNumber,
+                            in: model.socksProxies
+                        ) {
+                            LabeledContent("当前代理", value: proxy.displayAddress)
+                        } else {
+                            Text("当前没有第 \(socksProxyNumber) 号代理，重新拉取或验证后会按这个编号使用。")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Text("环境保存的是当前显示编号。代理验证或拉取后重新排序时，同一编号会指向新的代理内容。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("自动填充") {
                     TextField("账号（可选）", text: $autofillUsername)
                         .textInputAutocapitalization(.never)
@@ -197,6 +233,7 @@ struct ProfileEditorView: View {
                 profile.homePage = homePage
                 profile.userAgent = userAgent.trimmingCharacters(in: .whitespacesAndNewlines)
                 profile.color = color
+                profile.socksProxyNumber = socksProxyNumber
                 try onSave(.update(
                     profile,
                     autofillUsername: autofillUsername,
@@ -209,6 +246,7 @@ struct ProfileEditorView: View {
                     homePage: homePage,
                     userAgent: userAgent,
                     color: color,
+                    socksProxyNumber: socksProxyNumber,
                     autofillUsername: autofillUsername,
                     autofillPassword: autofillPassword
                 ))
@@ -217,6 +255,10 @@ struct ProfileEditorView: View {
         } catch {
             localError = PresentedError(message: error.localizedDescription)
         }
+    }
+
+    private var rankedProxyOptions: [SocksProxyRanking] {
+        SocksProxyValidationService.ranked(model.socksProxies)
     }
 }
 
@@ -227,6 +269,7 @@ enum ProfileEditorSubmission {
         homePage: URL,
         userAgent: String,
         color: ProfileColor,
+        socksProxyNumber: Int?,
         autofillUsername: String,
         autofillPassword: String
     )

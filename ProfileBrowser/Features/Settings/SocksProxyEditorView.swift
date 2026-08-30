@@ -102,12 +102,34 @@ struct SocksProxyEditorView: View {
     }
 
     private var isValid: Bool {
-        !normalizedHost.isEmpty && parsedPort != nil
+        hostIsValid && parsedPort != nil && authFieldsValid
+    }
+
+    private var hostIsValid: Bool {
+        !normalizedHost.isEmpty
+            && normalizedHost.rangeOfCharacter(from: .whitespacesAndNewlines) == nil
+            && !normalizedHost.contains(where: { "/?#".contains($0) })
+    }
+
+    private var authFieldsValid: Bool {
+        let normalizedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalizedUsername.isEmpty == password.isEmpty { return true }
+        // Leaving the password blank while keeping the same username means
+        // "retain the existing keychain value" when editing a record.
+        return password.isEmpty && normalizedUsername == (originalProxy?.username ?? "")
     }
 
     private func save() {
+        guard hostIsValid else {
+            presentedError = PresentedError(message: "请输入有效的主机名或 IP 地址。")
+            return
+        }
         guard let parsedPort else {
             presentedError = PresentedError(message: "端口必须是 1 到 65535 之间的数字。")
+            return
+        }
+        guard authFieldsValid else {
+            presentedError = PresentedError(message: "用户名和密码需要同时填写，或都留空。")
             return
         }
 
@@ -133,7 +155,7 @@ struct SocksProxyEditorView: View {
             status: originalProxy?.status ?? .untested,
             lastCheckedAt: originalProxy?.lastCheckedAt,
             validationMessage: originalProxy?.validationMessage,
-            sourceURLString: nil
+            sourceURLString: originalProxy?.sourceURLString
         )
         proxy.sourceURLString = proxy.displayAddress
 

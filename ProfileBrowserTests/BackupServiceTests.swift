@@ -10,7 +10,7 @@ struct BackupServiceTests {
         let service = BackupService(vault: vault)
         let homePage = try #require(URL(string: "https://example.com"))
         let loginURL = try #require(URL(string: "https://example.com/login"))
-        let profile = BrowserProfile(name: "测试", homePage: homePage)
+        let profile = BrowserProfile(name: "测试", homePage: homePage, socksProxyNumber: 2)
         let origin = try #require(WebOrigin(url: loginURL))
         let credential = StoredCredential(
             profileID: profile.id,
@@ -29,6 +29,7 @@ struct BackupServiceTests {
         #expect(imported[0].name == profile.name)
         #expect(imported[0].id != profile.id)
         #expect(imported[0].websiteDataStoreID != profile.websiteDataStoreID)
+        #expect(imported[0].socksProxyNumber == profile.socksProxyNumber)
         let importedCredentials = try vault.credentials(profileID: imported[0].id, origin: origin)
         #expect(importedCredentials.count == 1)
         #expect(importedCredentials[0].username == credential.username)

@@ -5,6 +5,8 @@ import Observation
 @Observable
 final class AppModel {
     private(set) var profiles: [BrowserProfile] = []
+    private(set) var socksProxies: [SocksProxy] = []
+    private(set) var proxyPresets: [SocksProxyPreset] = []
     var presentedError: PresentedError?
     var busyProfileID: UUID?
     var busyGroupName: String?
@@ -13,16 +15,26 @@ final class AppModel {
     let websiteDataStores: WebsiteDataStoreManager
 
     private let profileRepository: ProfileRepository
+    private let socksProxyRepository: SocksProxyRepository
+    private let socksProxyImportService: SocksProxyImportService
+    private let socksProxyValidationService: SocksProxyValidationService
 
     init(
         profileRepository: ProfileRepository = ProfileRepository(),
         credentialVault: CredentialVault = CredentialVault(),
-        websiteDataStores: WebsiteDataStoreManager = WebsiteDataStoreManager()
+        websiteDataStores: WebsiteDataStoreManager = WebsiteDataStoreManager(),
+        socksProxyRepository: SocksProxyRepository = SocksProxyRepository(),
+        socksProxyImportService: SocksProxyImportService = SocksProxyImportService(),
+        socksProxyValidationService: SocksProxyValidationService = SocksProxyValidationService()
     ) {
         self.profileRepository = profileRepository
         self.credentialVault = credentialVault
         self.websiteDataStores = websiteDataStores
+        self.socksProxyRepository = socksProxyRepository
+        self.socksProxyImportService = socksProxyImportService
+        self.socksProxyValidationService = socksProxyValidationService
         reloadProfiles()
+        reloadSocksProxies()
     }
 
     var sortedProfiles: [BrowserProfile] {
@@ -55,6 +67,7 @@ final class AppModel {
         homePage: URL,
         userAgent: String,
         color: ProfileColor,
+        socksProxyNumber: Int? = nil,
         autofillUsername: String? = nil,
         autofillPassword: String? = nil
     ) throws {
@@ -63,7 +76,8 @@ final class AppModel {
             groupName: normalizedOptional(groupName),
             userAgent: userAgent.trimmingCharacters(in: .whitespacesAndNewlines),
             homePage: homePage,
-            color: color
+            color: color,
+            socksProxyNumber: normalizedProxyNumber(socksProxyNumber)
         )
         profiles.append(profile)
         try persist()
@@ -92,7 +106,8 @@ final class AppModel {
             userAgent: profile.userAgent,
             homePage: profile.homePage,
             color: profile.color,
-            cachedBalance: profile.cachedBalance
+            cachedBalance: profile.cachedBalance,
+            socksProxyNumber: profile.socksProxyNumber
         )
 
         profiles.append(duplicate)
@@ -155,6 +170,7 @@ final class AppModel {
         }
         var value = updatedProfile
         value.groupName = normalizedOptional(value.groupName)
+        value.socksProxyNumber = normalizedProxyNumber(value.socksProxyNumber)
         value.updatedAt = .now
         profiles[index] = value
         try persist()
@@ -164,6 +180,79 @@ final class AppModel {
             username: autofillUsername,
             password: autofillPassword
         )
+    }
+
+    // MARK: - SOCKS proxies
+
+    /// Returns the proxy currently occupying a profile's volatile display
+    /// number. A profile deliberately stores the number, not this record's ID.
+    func socksProxy(for profile: BrowserProfile) -> SocksProxy? {
+        guard let number = profile.socksProxyNumber else { return nil }
+        return SocksProxyValidationService.proxy(forDisplayNumber: number, in: socksProxies)
+    }
+
+    func addSocksProxy(_ proxy: SocksProxy) throws {
+        socksProxies = try socksProxyRepository.appendUnique([proxy])
+    }
+
+    func updateSocksProxy(_ proxy: SocksProxy) throws {
+        guard let existing = socksProxies.first(where: { $0.id == proxy.id }) else {
+            throw SocksProxyError.notFound
+        }
+
+        var value = proxy
+        if existing.identityKey != proxy.identityKey || existing.scheme != proxy.scheme {
+            value.latencyMilliseconds = nil
+            value.status = .untested
+            value.lastCheckedAt = nil
+            value.validationMessage = nil
+        }
+        socksProxies = try socksProxyRepository.upsert(value)
+    }
+
+    func deleteSocksProxy(_ proxy: SocksProxy) throws {
+        guard socksProxies.contains(where: { $0.id == proxy.id }) else {
+            throw SocksProxyError.notFound
+        }
+        try socksProxyRepository.delete(proxyID: proxy.id)
+        socksProxies.removeAll { $0.id == proxy.id }
+    }
+
+    func clearSocksProxies() throws {
+        try socksProxyRepository.removeAll()
+        socksProxies = []
+    }
+
+    func importSocksProxies(from url: URL) async throws {
+        let imported = try await socksProxyImportService.fetch(from: url)
+        guard !imported.isEmpty else { return }
+        socksProxies = try socksProxyRepository.appendUnique(imported)
+    }
+
+    func validateSocksProxies() async throws {
+        guard !socksProxies.isEmpty else { return }
+        let validated = await socksProxyValidationService.validateAndSort(socksProxies)
+        try socksProxyRepository.save(validated)
+        socksProxies = validated
+    }
+
+    func updateOrAddProxyPreset(_ preset: SocksProxyPreset) throws {
+        proxyPresets = try socksProxyRepository.upsertPreset(preset)
+    }
+
+    func updateProxyPreset(_ preset: SocksProxyPreset) throws {
+        guard proxyPresets.contains(where: { $0.id == preset.id }) else {
+            throw SocksProxyError.presetNotFound
+        }
+        proxyPresets = try socksProxyRepository.upsertPreset(preset)
+    }
+
+    func deleteProxyPreset(_ preset: SocksProxyPreset) throws {
+        guard proxyPresets.contains(where: { $0.id == preset.id }) else {
+            throw SocksProxyError.presetNotFound
+        }
+        try socksProxyRepository.delete(presetID: preset.id)
+        proxyPresets.removeAll { $0.id == preset.id }
     }
 
     func markOpened(_ profile: BrowserProfile) {
@@ -273,6 +362,15 @@ final class AppModel {
         }
     }
 
+    private func reloadSocksProxies() {
+        do {
+            socksProxies = try socksProxyRepository.load()
+            proxyPresets = try socksProxyRepository.loadPresets()
+        } catch {
+            present(error)
+        }
+    }
+
     private func persist() throws {
         try profileRepository.save(profiles)
     }
@@ -315,6 +413,11 @@ final class AppModel {
     private func normalizedOptional(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func normalizedProxyNumber(_ value: Int?) -> Int? {
+        guard let value, value > 0 else { return nil }
+        return value
     }
 
     private func nextDuplicateName(for name: String) -> String {
@@ -395,6 +498,20 @@ enum ProfileError: LocalizedError {
             return "自动填充账号和密码需要同时填写，或都留空。"
         case .invalidAutofillOrigin:
             return "主页网址无法用于保存自动填充凭据。"
+        }
+    }
+}
+
+enum SocksProxyError: LocalizedError {
+    case notFound
+    case presetNotFound
+
+    var errorDescription: String? {
+        switch self {
+        case .notFound:
+            return "找不到这个 SOCKS 代理。"
+        case .presetNotFound:
+            return "找不到这个代理预设链接。"
         }
     }
 }

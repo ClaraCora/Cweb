@@ -13,6 +13,10 @@ struct BrowserProfile: Identifiable, Codable, Hashable, Sendable {
     var homePage: URL
     var color: ProfileColor
     var cachedBalance: String?
+    /// The currently selected SOCKS display number. This intentionally points
+    /// to the volatile ranked position rather than a proxy record ID: feed
+    /// refreshes can replace the endpoint behind the same number.
+    var socksProxyNumber: Int?
     let createdAt: Date
     var updatedAt: Date
     var lastOpenedAt: Date?
@@ -27,6 +31,7 @@ struct BrowserProfile: Identifiable, Codable, Hashable, Sendable {
         homePage: URL = BrowserProfile.defaultHomePage,
         color: ProfileColor = .indigo,
         cachedBalance: String? = nil,
+        socksProxyNumber: Int? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now,
         lastOpenedAt: Date? = nil
@@ -40,6 +45,7 @@ struct BrowserProfile: Identifiable, Codable, Hashable, Sendable {
         self.homePage = homePage
         self.color = color
         self.cachedBalance = cachedBalance
+        self.socksProxyNumber = socksProxyNumber
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.lastOpenedAt = lastOpenedAt
