@@ -7,16 +7,20 @@ struct ProfileGroupGridView: View {
     @State private var editorMode: ProfileEditorMode?
     @State private var showsBackup = false
     @State private var pendingGroupDeletion: ProfileGroup?
+    @State private var navigationPath = NavigationPath()
 
     var body: some View {
         @Bindable var model = model
 
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             content
                 .navigationTitle("分组")
                 .navigationBarTitleDisplayMode(.inline)
                 .navigationDestination(for: String.self) { groupName in
-                    ProfileListView(groupName: groupName)
+                    ProfileListView(
+                        groupName: groupName,
+                        onDeleteGroup: deleteGroupAndReturnHome
+                    )
                 }
                 .toolbar {
                     ToolbarItemGroup(placement: .topBarTrailing) {
@@ -60,11 +64,11 @@ struct ProfileGroupGridView: View {
                 .alert("删除整个分组？", isPresented: groupDeletionAlertBinding, presenting: pendingGroupDeletion) { group in
                     Button("删除", role: .destructive) {
                         pendingGroupDeletion = nil
-                        Task { await model.deleteProfiles(inGroupNamed: group.name) }
+                        deleteGroupAndReturnHome(group.name)
                     }
                     Button("取消", role: .cancel) {}
                 } message: { group in
-                    Text("将永久删除“\(group.name)”中的 \(group.profiles.count) 个环境，以及它们的网站数据和已保存凭据。")
+                    Text("将永久删除“\(group.name)”中的 \(group.profiles.count) 个环境和已保存凭据。旧环境的网站数据将被弃用，且不会被新环境复用。")
                 }
                 .alert(item: $model.presentedError) { error in
                     Alert(
@@ -124,6 +128,14 @@ struct ProfileGroupGridView: View {
             get: { pendingGroupDeletion != nil },
             set: { if !$0 { pendingGroupDeletion = nil } }
         )
+    }
+
+    private func deleteGroupAndReturnHome(_ groupName: String) {
+        navigationPath = NavigationPath()
+        Task { @MainActor in
+            await Task.yield()
+            await model.deleteProfiles(inGroupNamed: groupName)
+        }
     }
 }
 

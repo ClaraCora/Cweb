@@ -3,8 +3,10 @@ import SwiftUI
 @MainActor
 struct ProfileListView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
 
     let groupName: String
+    let onDeleteGroup: ((String) -> Void)?
 
     @State private var editorMode: ProfileEditorMode?
     @State private var pendingGroupDeletion: ProfileGroup?
@@ -14,8 +16,9 @@ struct ProfileListView: View {
     @State private var activeProfile: BrowserProfile?
     @State private var editMode: EditMode = .inactive
 
-    init(groupName: String) {
+    init(groupName: String, onDeleteGroup: ((String) -> Void)? = nil) {
         self.groupName = groupName
+        self.onDeleteGroup = onDeleteGroup
     }
 
     var body: some View {
@@ -67,20 +70,24 @@ struct ProfileListView: View {
             .alert("删除整个分组？", isPresented: groupDeletionAlertBinding, presenting: pendingGroupDeletion) { group in
                 Button("删除", role: .destructive) {
                     pendingGroupDeletion = nil
-                    Task { await model.deleteProfiles(inGroupNamed: group.name) }
+                    requestGroupDeletion(group.name)
                 }
                 Button("取消", role: .cancel) {}
             } message: { group in
-                Text("将永久删除“\(group.name)”中的 \(group.profiles.count) 个环境，以及它们的网站数据和已保存凭据。")
+                Text("将永久删除“\(group.name)”中的 \(group.profiles.count) 个环境和已保存凭据。旧环境的网站数据将被弃用，且不会被新环境复用。")
             }
             .alert("删除环境？", isPresented: deletionAlertBinding, presenting: pendingDeletion) { profile in
                 Button("删除", role: .destructive) {
                     pendingDeletion = nil
-                    Task { await model.deleteProfile(profile) }
+                    if visibleProfiles.count == 1 {
+                        requestGroupDeletion(groupName)
+                    } else {
+                        Task { await model.deleteProfile(profile) }
+                    }
                 }
                 Button("取消", role: .cancel) {}
             } message: { profile in
-                Text("“\(profile.name)”的网站数据和已保存凭据都会被永久删除。")
+                Text("将永久删除“\(profile.name)”和已保存凭据。旧环境的网站数据将被弃用，且不会被新环境复用。")
             }
             .alert("清理网站数据？", isPresented: clearAlertBinding, presenting: pendingClear) { profile in
                 Button("清理", role: .destructive) {
@@ -227,6 +234,19 @@ struct ProfileListView: View {
             get: { pendingEntry != nil },
             set: { if !$0 { pendingEntry = nil } }
         )
+    }
+
+    private func requestGroupDeletion(_ name: String) {
+        if let onDeleteGroup {
+            onDeleteGroup(name)
+            return
+        }
+
+        dismiss()
+        Task { @MainActor in
+            await Task.yield()
+            await model.deleteProfiles(inGroupNamed: name)
+        }
     }
 }
 

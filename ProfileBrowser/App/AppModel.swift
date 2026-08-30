@@ -217,27 +217,28 @@ final class AppModel {
     }
 
     func clearWebsiteData(for profile: BrowserProfile) async {
+        guard profiles.contains(where: { $0.id == profile.id }) else { return }
+        guard !isDestructiveOperationInProgress else { return }
+
         busyProfileID = profile.id
+        defer { busyProfileID = nil }
         await websiteDataStores.clearWebsiteData(for: profile)
-        busyProfileID = nil
     }
 
     func deleteProfile(_ profile: BrowserProfile) async {
         guard profiles.contains(where: { $0.id == profile.id }) else { return }
+        guard !isDestructiveOperationInProgress else { return }
 
         busyProfileID = profile.id
         defer { busyProfileID = nil }
 
         do {
-            try credentialVault.deleteAll(profileID: profile.id)
-            profiles.removeAll { $0.id == profile.id }
-            try persist()
-
-            // Do not call WKWebsiteDataStore.remove(forIdentifier:) here. WebKit
-            // can still retain the store while SwiftUI dismisses its UI, which
-            // has caused an application crash. Clearing existing site data is
-            // safe and the store is no longer reachable after this point.
-            await websiteDataStores.clearExistingWebsiteData(for: profile)
+            // Do not access WKWebsiteDataStore during deletion. WebKit can keep
+            // a page's store alive while SwiftUI tears down the destination,
+            // and native failures here cannot be recovered with do/catch. The
+            // deleted store ID is never reused, so its data is no longer
+            // reachable by this app or by a newly created environment.
+            try deleteProfilesAtomically([profile])
         } catch {
             present(error)
         }
@@ -246,23 +247,15 @@ final class AppModel {
     func deleteProfiles(inGroupNamed groupName: String) async {
         let profilesToDelete = profiles.filter { $0.displayGroupName == groupName }
         guard !profilesToDelete.isEmpty else { return }
+        guard !isDestructiveOperationInProgress else { return }
 
         busyGroupName = groupName
         defer { busyGroupName = nil }
 
         do {
-            for profile in profilesToDelete {
-                try credentialVault.deleteAll(profileID: profile.id)
-            }
-            let profileIDs = Set(profilesToDelete.map(\.id))
-            profiles.removeAll { profileIDs.contains($0.id) }
-            try persist()
-
-            // Keep the same WebKit-safe cleanup path as single-profile deletion.
-            // The stores are no longer reachable once their profiles are removed.
-            for profile in profilesToDelete {
-                await websiteDataStores.clearExistingWebsiteData(for: profile)
-            }
+            // Keep deletion independent from WebKit lifecycle teardown. Each
+            // removed profile has a unique store ID that will never be reused.
+            try deleteProfilesAtomically(profilesToDelete)
         } catch {
             present(error)
         }
@@ -282,6 +275,41 @@ final class AppModel {
 
     private func persist() throws {
         try profileRepository.save(profiles)
+    }
+
+    private var isDestructiveOperationInProgress: Bool {
+        busyProfileID != nil || busyGroupName != nil
+    }
+
+    private func deleteProfilesAtomically(_ profilesToDelete: [BrowserProfile]) throws {
+        guard !profilesToDelete.isEmpty else { return }
+
+        let oldProfiles = profiles
+        let credentials = try profilesToDelete.reduce(into: [StoredCredential]()) { result, profile in
+            result.append(contentsOf: try credentialVault.credentials(profileID: profile.id))
+        }
+        let profileIDs = Set(profilesToDelete.map(\.id))
+
+        profiles.removeAll { profileIDs.contains($0.id) }
+        do {
+            try persist()
+        } catch {
+            profiles = oldProfiles
+            throw error
+        }
+
+        do {
+            for profile in profilesToDelete {
+                try credentialVault.deleteAll(profileID: profile.id)
+            }
+        } catch {
+            profiles = oldProfiles
+            try? persist()
+            for credential in credentials {
+                try? credentialVault.save(credential)
+            }
+            throw error
+        }
     }
 
     private func normalizedOptional(_ value: String?) -> String? {
