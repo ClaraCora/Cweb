@@ -163,7 +163,7 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
     /// A stable endpoint key useful for de-duplicating feed imports. It does
     /// not contain the password and therefore is safe to use in UI state.
     var identityKey: String {
-        "\(host.lowercased())|\(port)|\(username ?? \"\")"
+        "\(host.lowercased())|\(port)|\(username ?? "")"
     }
 
     var displayAddress: String {

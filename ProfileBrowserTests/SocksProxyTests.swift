@@ -135,22 +135,22 @@ struct SocksProxyTests {
         let first = SocksProxy(host: "one.example", port: 1080)
         let second = SocksProxy(host: "two.example", port: 1080)
         let third = SocksProxy(host: "three.example", port: 1080)
-        let unavailable = SocksProxyProbeResult(status: .unavailable, message: "offline")
+        let fourth = SocksProxy(host: "four.example", port: 1080)
         let probe = StubProbe(results: [
             first.id: SocksProxyProbeResult(status: .available, latencyMilliseconds: 80),
             second.id: SocksProxyProbeResult(status: .available, latencyMilliseconds: 20),
             third.id: SocksProxyProbeResult(status: .available, latencyMilliseconds: 20),
             // Keep one failed result to ensure unavailable values are placed last.
-            UUID(): unavailable
+            fourth.id: SocksProxyProbeResult(status: .unavailable, message: "offline")
         ])
 
         let service = SocksProxyValidationService(timeout: 1, probe: probe)
-        let sorted = await service.validateAndSort([first, second, third])
+        let sorted = await service.validateAndSort([first, second, third, fourth])
 
-        #expect(sorted.map(\.id) == [second.id, third.id, first.id])
-        #expect(sorted.map(\.latencyMilliseconds) == [20, 20, 80])
-        #expect(sorted.allSatisfy { $0.status == .available })
-        #expect(SocksProxyValidationService.ranked(sorted).map(\.number) == [1, 2, 3])
+        #expect(sorted.map(\.id) == [second.id, third.id, first.id, fourth.id])
+        #expect(sorted.prefix(3).compactMap(\.latencyMilliseconds) == [20, 20, 80])
+        #expect(sorted.last?.status == .unavailable)
+        #expect(SocksProxyValidationService.ranked(sorted).map(\.number) == [1, 2, 3, 4])
         #expect(SocksProxyValidationService.proxy(forDisplayNumber: 1, in: sorted)?.id == second.id)
         #expect(SocksProxyValidationService.proxy(forDisplayNumber: 0, in: sorted) == nil)
     }
