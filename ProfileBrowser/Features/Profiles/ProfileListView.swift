@@ -79,7 +79,8 @@ struct ProfileListView: View {
             .alert("删除环境？", isPresented: deletionAlertBinding, presenting: pendingDeletion) { profile in
                 Button("删除", role: .destructive) {
                     pendingDeletion = nil
-                    if visibleProfiles.count == 1 {
+                    if visibleProfiles.count == 1,
+                       model.profiles.contains(where: { $0.id == profile.id }) {
                         requestGroupDeletion(groupName)
                     } else {
                         Task { await model.deleteProfile(profile) }

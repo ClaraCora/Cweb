@@ -7,6 +7,7 @@ struct ProfileGroupGridView: View {
     @State private var editorMode: ProfileEditorMode?
     @State private var showsBackup = false
     @State private var pendingGroupDeletion: ProfileGroup?
+    @State private var pendingDeletionGroupName: String?
     @State private var navigationPath = NavigationPath()
 
     var body: some View {
@@ -77,6 +78,10 @@ struct ProfileGroupGridView: View {
                         dismissButton: .default(Text("好"))
                     )
                 }
+                .onChange(of: navigationPath.count) { _, count in
+                    guard count == 0 else { return }
+                    schedulePendingGroupDeletion()
+                }
         }
     }
 
@@ -131,7 +136,19 @@ struct ProfileGroupGridView: View {
     }
 
     private func deleteGroupAndReturnHome(_ groupName: String) {
-        navigationPath = NavigationPath()
+        let wasAtHome = navigationPath.isEmpty
+        pendingDeletionGroupName = groupName
+        if !wasAtHome {
+            navigationPath = NavigationPath()
+            return
+        }
+
+        schedulePendingGroupDeletion()
+    }
+
+    private func schedulePendingGroupDeletion() {
+        guard let groupName = pendingDeletionGroupName else { return }
+        pendingDeletionGroupName = nil
         Task { @MainActor in
             await Task.yield()
             await model.deleteProfiles(inGroupNamed: groupName)
