@@ -15,6 +15,7 @@ final class BrowserSession {
     var presentedError: PresentedError?
 
     private var hasStarted = false
+    private let proxyConfigurationError: String?
 
     init(profile: BrowserProfile, socksProxy: SocksProxy? = nil) {
         self.profile = profile
@@ -24,8 +25,14 @@ final class BrowserSession {
         let dataStore = WKWebsiteDataStore(forIdentifier: profile.websiteDataStoreID)
         self.dataStore = dataStore
 
+        var proxyConfigurationError: String?
         if let socksProxy, let endpoint = Self.endpoint(for: socksProxy) {
             var proxyConfiguration = ProxyConfiguration(socksv5Proxy: endpoint)
+            // An empty match domain is Network's default-domain wildcard.
+            // Without it WebKit may leave ordinary page requests outside the
+            // proxy configuration, depending on the OS release.
+            proxyConfiguration.matchDomains = [""]
+            proxyConfiguration.excludedDomains = []
             // Never fall back to a direct connection if the selected proxy
             // fails. That would expose the environment's real network path.
             proxyConfiguration.allowFailover = false
@@ -36,6 +43,16 @@ final class BrowserSession {
             dataStore.proxyConfigurations = [proxyConfiguration]
         } else {
             dataStore.proxyConfigurations = []
+            if socksProxy != nil {
+                proxyConfigurationError = "SOCKS 代理地址无效，无法打开环境。"
+            } else if let proxyNumber = profile.socksProxyNumber {
+                // A profile that explicitly selected a proxy must never
+                // silently fall back to a direct connection when that volatile
+                // number is temporarily missing.
+                proxyConfigurationError = "当前没有第 \(proxyNumber) 号 SOCKS 代理，无法直连打开环境。"
+            } else {
+                proxyConfigurationError = nil
+            }
         }
 
         var configuration = WebPage.Configuration()
@@ -52,15 +69,19 @@ final class BrowserSession {
         page.isInspectable = false
 #endif
         self.page = page
+        self.proxyConfigurationError = proxyConfigurationError
     }
 
     private static func endpoint(for proxy: SocksProxy) -> NWEndpoint? {
+        let host = SocksProxy.normalizeHost(proxy.host)
         guard (1...65_535).contains(proxy.port),
               let port = NWEndpoint.Port(rawValue: UInt16(proxy.port)),
-              !proxy.host.isEmpty else {
+              !host.isEmpty,
+              host.rangeOfCharacter(from: .whitespacesAndNewlines) == nil,
+              !host.contains(where: { "/?#".contains($0) }) else {
             return nil
         }
-        return .hostPort(host: NWEndpoint.Host(proxy.host), port: port)
+        return .hostPort(host: NWEndpoint.Host(host), port: port)
     }
 
     var canGoBack: Bool { !page.backForwardList.backList.isEmpty }
@@ -69,6 +90,11 @@ final class BrowserSession {
 
     func start() {
         guard !hasStarted else { return }
+        if let proxyConfigurationError {
+            presentedError = PresentedError(message: proxyConfigurationError)
+            hasStarted = true
+            return
+        }
         hasStarted = true
         navigate(to: profile.homePage)
     }
@@ -82,6 +108,12 @@ final class BrowserSession {
     }
 
     func navigate(to url: URL) {
+        guard proxyConfigurationError == nil else {
+            if let proxyConfigurationError {
+                presentedError = PresentedError(message: proxyConfigurationError)
+            }
+            return
+        }
         addressText = url.absoluteString
         page.load(url)
     }

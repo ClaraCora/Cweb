@@ -33,16 +33,15 @@ struct SocksProxyValidationResult: Sendable, Hashable {
 
 struct SocksProxyValidationConfiguration: Sendable, Hashable {
     var timeout: TimeInterval
-    /// When non-nil, the probe performs a SOCKS CONNECT request after the
-    /// greeting/authentication handshake. Leaving it nil avoids a dependency
-    /// on any third-party test endpoint while still verifying the SOCKS5
-    /// server handshake.
+    /// The probe performs a SOCKS CONNECT request after the
+    /// greeting/authentication handshake. This catches proxies that accept a
+    /// handshake but cannot actually carry browser traffic.
     var targetHost: String?
     var targetPort: Int
 
     init(
         timeout: TimeInterval = 8,
-        targetHost: String? = nil,
+        targetHost: String? = "example.com",
         targetPort: Int = 80
     ) {
         self.timeout = max(0.1, timeout)
@@ -236,8 +235,14 @@ struct NetworkSocksProxyProbe: SocksProxyProbe {
               let port = NWEndpoint.Port(rawValue: UInt16(proxy.port)) else {
             throw SocksProxyValidationError.connectionFailed
         }
+        let proxyHost = SocksProxy.normalizeHost(proxy.host)
+        guard !proxyHost.isEmpty,
+              proxyHost.rangeOfCharacter(from: .whitespacesAndNewlines) == nil,
+              !proxyHost.contains(where: { "/?#".contains($0) }) else {
+            throw SocksProxyValidationError.connectionFailed
+        }
         let connection = NWConnection(
-            host: NWEndpoint.Host(proxy.host),
+            host: NWEndpoint.Host(proxyHost),
             port: port,
             using: NWParameters.tcp
         )

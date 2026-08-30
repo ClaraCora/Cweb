@@ -45,7 +45,7 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
     ) {
         self.id = id
         self.scheme = scheme
-        self.host = host
+        self.host = Self.normalizeHost(host)
         self.port = port
         self.username = username
         self.password = password
@@ -73,7 +73,7 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
         scheme = try container.decodeIfPresent(SocksProxyScheme.self, forKey: .scheme) ?? .socks5
-        host = try container.decode(String.self, forKey: .host)
+        host = Self.normalizeHost(try container.decode(String.self, forKey: .host))
         port = try container.decode(Int.self, forKey: .port)
         username = try container.decodeIfPresent(String.self, forKey: .username)
         // Passwords are kept in the keychain by SocksProxyRepository and are
@@ -163,11 +163,11 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
     /// A stable endpoint key useful for de-duplicating feed imports. It does
     /// not contain the password and therefore is safe to use in UI state.
     var identityKey: String {
-        "\(host.lowercased())|\(port)|\(username ?? "")"
+        "\(Self.normalizeHost(host).lowercased())|\(port)|\(username ?? "")"
     }
 
     var displayAddress: String {
-        Self.redactedURL(scheme: scheme, host: host, port: port, username: username)
+        Self.redactedURL(scheme: scheme, host: Self.normalizeHost(host), port: port, username: username)
     }
 
     var isAvailable: Bool { status == .available }
@@ -196,6 +196,19 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
         return value.removingPercentEncoding ?? value
     }
 
+    /// Network APIs expect an IPv6 host without URL-style brackets. Keep the
+    /// stored value canonical so values entered manually behave like imported
+    /// URL values and deduplication remains consistent.
+    static func normalizeHost(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 2,
+              trimmed.first == "[",
+              trimmed.last == "]" else {
+            return trimmed
+        }
+        return String(trimmed.dropFirst().dropLast())
+    }
+
     private static func hasExplicitPort(in value: String) -> Bool {
         guard let separator = value.range(of: "://") else { return false }
         let authorityStart = separator.upperBound
@@ -215,7 +228,8 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
         port: Int,
         username: String?
     ) -> String {
-        let hostPart = host.contains(":") && !host.hasPrefix("[") ? "[\(host)]" : host
+        let normalizedHost = normalizeHost(host)
+        let hostPart = normalizedHost.contains(":") ? "[\(normalizedHost)]" : normalizedHost
         let userPart: String
         if let username, !username.isEmpty {
             let encoded = username.addingPercentEncoding(withAllowedCharacters: .urlUserAllowed) ?? username

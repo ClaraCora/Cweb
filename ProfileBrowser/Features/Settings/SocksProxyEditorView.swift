@@ -92,7 +92,7 @@ struct SocksProxyEditorView: View {
     }
 
     private var normalizedHost: String {
-        host.trimmingCharacters(in: .whitespacesAndNewlines)
+        SocksProxy.normalizeHost(host)
     }
 
     private var parsedPort: Int? {

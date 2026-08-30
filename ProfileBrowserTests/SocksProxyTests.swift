@@ -43,6 +43,26 @@ struct SocksProxyTests {
     }
 
     @Test
+    func normalizesBracketedIPv6HostForStorageAndDisplay() throws {
+        let proxy = SocksProxy(
+            host: " [2001:db8::1] ",
+            port: 1080
+        )
+
+        #expect(proxy.host == "2001:db8::1")
+        #expect(proxy.displayAddress == "socks5://[2001:db8::1]:1080")
+        #expect(proxy.identityKey == "2001:db8::1|1080|")
+    }
+
+    @Test
+    func validationDefaultsToARealConnectProbe() {
+        let configuration = SocksProxyValidationConfiguration()
+
+        #expect(configuration.targetHost == "example.com")
+        #expect(configuration.targetPort == 80)
+    }
+
+    @Test
     func repositoryRoundTripsRecordsAndKeepsPasswordOutOfJSON() throws {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: UUID().uuidString, directoryHint: .isDirectory)
