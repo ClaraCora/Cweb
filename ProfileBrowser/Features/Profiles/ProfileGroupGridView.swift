@@ -7,6 +7,7 @@ struct ProfileGroupGridView: View {
     @State private var editorMode: ProfileEditorMode?
     @State private var showsBackup = false
     @State private var showsSocksProxyManager = false
+    @State private var showsSettings = false
     @State private var pendingGroupDeletion: ProfileGroup?
     @State private var pendingDeletionGroupName: String?
     @State private var navigationPath = NavigationPath()
@@ -29,6 +30,9 @@ struct ProfileGroupGridView: View {
                         Button("新建", systemImage: "plus") {
                             editorMode = .create
                         }
+                        Button("设置", systemImage: "gearshape") {
+                            showsSettings = true
+                        }
                         Menu {
                             Button("备份", systemImage: "lock.doc") {
                                 showsBackup = true
@@ -46,6 +50,11 @@ struct ProfileGroupGridView: View {
                 }
                 .navigationDestination(isPresented: $showsSocksProxyManager) {
                     SocksProxyListView()
+                }
+                .sheet(isPresented: $showsSettings) {
+                    NavigationStack {
+                        SettingsView()
+                    }
                 }
                 .sheet(item: $editorMode) { mode in
                     ProfileEditorView(profile: mode.profile) { submission in

@@ -7,7 +7,6 @@ struct SocksProxyListView: View {
     @State private var editorMode: SocksProxyEditorMode?
     @State private var showsImport = false
     @State private var showsPresets = false
-    @State private var showsSettings = false
     @State private var pendingClear = false
     @State private var pendingDelete: SocksProxy?
     @State private var isValidating = false
@@ -41,10 +40,6 @@ struct SocksProxyListView: View {
                     Button("管理预设链接", systemImage: "list.bullet.rectangle") {
                         showsPresets = true
                     }
-                    Button("验证设置", systemImage: "gearshape") {
-                        showsSettings = true
-                    }
-                    .disabled(isValidating)
                     Divider()
                     Button("清空全部代理", systemImage: "trash", role: .destructive) {
                         pendingClear = true
@@ -81,9 +76,6 @@ struct SocksProxyListView: View {
         }
         .sheet(isPresented: $showsPresets) {
             SocksProxyPresetListView()
-        }
-        .navigationDestination(isPresented: $showsSettings) {
-            SocksProxySettingsView(settings: model.socksProxyValidationSettings)
         }
         .alert("清空全部代理？", isPresented: $pendingClear) {
             Button("清空", role: .destructive) {
