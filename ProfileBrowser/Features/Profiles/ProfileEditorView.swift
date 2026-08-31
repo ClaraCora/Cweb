@@ -138,10 +138,7 @@ struct ProfileEditorView: View {
                     .pickerStyle(.menu)
 
                     if let socksProxyNumber {
-                        if let proxy = SocksProxyValidationService.proxy(
-                            forDisplayNumber: socksProxyNumber,
-                            in: model.socksProxies
-                        ) {
+                        if let proxy = model.socksProxy(forDisplayNumber: socksProxyNumber) {
                             LabeledContent("当前代理", value: proxy.displayAddress)
                         } else {
                             Text("当前没有第 \(socksProxyNumber) 号代理，重新拉取或验证后会按这个编号使用。")
@@ -258,7 +255,7 @@ struct ProfileEditorView: View {
     }
 
     private var rankedProxyOptions: [SocksProxyRanking] {
-        SocksProxyValidationService.ranked(model.socksProxies)
+        model.rankedSocksProxies
     }
 }
 

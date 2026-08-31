@@ -7,6 +7,7 @@ final class AppModel {
     private(set) var profiles: [BrowserProfile] = []
     private(set) var socksProxies: [SocksProxy] = []
     private(set) var proxyPresets: [SocksProxyPreset] = []
+    private(set) var socksProxyValidationSettings: SocksProxyValidationSettings = .defaults
     var presentedError: PresentedError?
     var busyProfileID: UUID?
     var busyGroupName: String?
@@ -17,7 +18,7 @@ final class AppModel {
     private let profileRepository: ProfileRepository
     private let socksProxyRepository: SocksProxyRepository
     private let socksProxyImportService: SocksProxyImportService
-    private let socksProxyValidationService: SocksProxyValidationService
+    private let socksProxyValidationServiceOverride: SocksProxyValidationService?
 
     init(
         profileRepository: ProfileRepository = ProfileRepository(),
@@ -25,15 +26,16 @@ final class AppModel {
         websiteDataStores: WebsiteDataStoreManager = WebsiteDataStoreManager(),
         socksProxyRepository: SocksProxyRepository = SocksProxyRepository(),
         socksProxyImportService: SocksProxyImportService = SocksProxyImportService(),
-        socksProxyValidationService: SocksProxyValidationService = SocksProxyValidationService()
+        socksProxyValidationService: SocksProxyValidationService? = nil
     ) {
         self.profileRepository = profileRepository
         self.credentialVault = credentialVault
         self.websiteDataStores = websiteDataStores
         self.socksProxyRepository = socksProxyRepository
         self.socksProxyImportService = socksProxyImportService
-        self.socksProxyValidationService = socksProxyValidationService
+        self.socksProxyValidationServiceOverride = socksProxyValidationService
         reloadProfiles()
+        reloadSocksProxyValidationSettings()
         reloadSocksProxies()
     }
 
@@ -184,11 +186,23 @@ final class AppModel {
 
     // MARK: - SOCKS proxies
 
+    /// The single source of truth for volatile display numbers. Management,
+    /// profile editing, and browser launch must all use this ranking so a
+    /// number never resolves to different proxies in different screens.
+    var rankedSocksProxies: [SocksProxyRanking] {
+        ranked(socksProxies, using: socksProxyValidationSettings.sortMode)
+    }
+
     /// Returns the proxy currently occupying a profile's volatile display
     /// number. A profile deliberately stores the number, not this record's ID.
     func socksProxy(for profile: BrowserProfile) -> SocksProxy? {
         guard let number = profile.socksProxyNumber else { return nil }
-        return SocksProxyValidationService.proxy(forDisplayNumber: number, in: socksProxies)
+        return socksProxy(forDisplayNumber: number)
+    }
+
+    func socksProxy(forDisplayNumber number: Int) -> SocksProxy? {
+        guard number > 0 else { return nil }
+        return rankedSocksProxies.first(where: { $0.number == number })?.proxy
     }
 
     func addSocksProxy(_ proxy: SocksProxy) throws {
@@ -239,12 +253,38 @@ final class AppModel {
 
     func validateSocksProxies() async throws {
         guard !socksProxies.isEmpty else { return }
-        let validated = await socksProxyValidationService.validateAndSort(socksProxies)
-        // Keep only proxies that completed the real SOCKS CONNECT probe, then
-        // bound the ranked list so stale feed entries cannot grow the app's
-        // proxy store indefinitely. Display numbers are recalculated from this
-        // retained list after every batch validation.
-        let retained = Array(validated.filter { $0.status == .available }.prefix(30))
+
+        let settings = socksProxyValidationSettings.normalized
+        let originalOrder = socksProxies
+        let service = socksProxyValidationService(for: settings)
+        let results = await service.validate(
+            originalOrder,
+            maxConcurrent: settings.maxConcurrent
+        )
+        let resultsByID = Dictionary(
+            uniqueKeysWithValues: results.map { ($0.proxyID, $0) }
+        )
+        let validatedInOriginalOrder = originalOrder.map { proxy in
+            guard let result = resultsByID[proxy.id] else { return proxy }
+            return proxy.applying(result)
+        }
+
+        let candidates = settings.retainOnlyAvailable
+            ? validatedInOriginalOrder.filter { $0.status == .available }
+            : validatedInOriginalOrder
+        let candidatesByRank = ordered(candidates, using: settings.sortMode)
+        let selected: [SocksProxy]
+        if settings.maxRetainedCount == 0 {
+            selected = candidatesByRank
+        } else {
+            selected = Array(candidatesByRank.prefix(settings.maxRetainedCount))
+        }
+
+        // Persist the retained records in their pre-validation order. Ranking
+        // remains a derived view, allowing the user to switch back to input
+        // order without a previous latency sort having destroyed that order.
+        let selectedIDs = Set(selected.map(\.id))
+        let retained = validatedInOriginalOrder.filter { selectedIDs.contains($0.id) }
         try socksProxyRepository.save(retained)
         socksProxies = retained
     }
@@ -254,11 +294,50 @@ final class AppModel {
             throw SocksProxyError.notFound
         }
 
-        let result = await socksProxyValidationService.validate(proxy)
+        let service = socksProxyValidationService(for: socksProxyValidationSettings)
+        let result = await service.validate(proxy)
         let updated = socksProxies.map { $0.applying(result) }
-        let ranked = SocksProxyValidationService.sort(updated)
-        try socksProxyRepository.save(ranked)
-        socksProxies = ranked
+        // A single test updates status only. Retention is intentionally a
+        // batch policy, and sorting is derived by `rankedSocksProxies`.
+        try socksProxyRepository.save(updated)
+        socksProxies = updated
+    }
+
+    func updateSocksProxyValidationSettings(
+        _ settings: SocksProxyValidationSettings
+    ) throws {
+        let normalized = settings.normalized
+        let previousSettings = socksProxyValidationSettings
+        let validationRulesChanged = validationContextChanged(
+            from: previousSettings,
+            to: normalized
+        )
+
+        if validationRulesChanged {
+            let previousProxies = socksProxies
+            let invalidated = previousProxies.map { $0.invalidatingValidation() }
+            if invalidated != previousProxies {
+                try socksProxyRepository.save(invalidated)
+            }
+
+            do {
+                try socksProxyRepository.saveSettings(normalized)
+            } catch {
+                if invalidated != previousProxies {
+                    try? socksProxyRepository.save(previousProxies)
+                }
+                throw error
+            }
+            socksProxies = invalidated
+        } else {
+            try socksProxyRepository.saveSettings(normalized)
+        }
+
+        socksProxyValidationSettings = normalized
+    }
+
+    func resetSocksProxyValidationSettings() throws {
+        try updateSocksProxyValidationSettings(.defaults)
     }
 
     func updateOrAddProxyPreset(_ preset: SocksProxyPreset) throws {
@@ -403,6 +482,54 @@ final class AppModel {
         } catch {
             present(error)
         }
+    }
+
+    private func reloadSocksProxyValidationSettings() {
+        do {
+            socksProxyValidationSettings = try socksProxyRepository.loadSettings()
+        } catch {
+            socksProxyValidationSettings = .defaults
+            present(error)
+        }
+    }
+
+    private func socksProxyValidationService(
+        for settings: SocksProxyValidationSettings
+    ) -> SocksProxyValidationService {
+        socksProxyValidationServiceOverride
+            ?? SocksProxyValidationService(configuration: settings.validationConfiguration)
+    }
+
+    private func ranked(
+        _ proxies: [SocksProxy],
+        using sortMode: SocksProxySortMode
+    ) -> [SocksProxyRanking] {
+        ordered(proxies, using: sortMode).enumerated().map { index, proxy in
+            SocksProxyRanking(number: index + 1, proxy: proxy)
+        }
+    }
+
+    private func ordered(
+        _ proxies: [SocksProxy],
+        using sortMode: SocksProxySortMode
+    ) -> [SocksProxy] {
+        switch sortMode {
+        case .latencyAscending:
+            return SocksProxyValidationService.sort(proxies)
+        case .inputOrder:
+            return proxies
+        }
+    }
+
+    private func validationContextChanged(
+        from previous: SocksProxyValidationSettings,
+        to updated: SocksProxyValidationSettings
+    ) -> Bool {
+        let previous = previous.normalized
+        let updated = updated.normalized
+        return previous.targetHost != updated.targetHost
+            || previous.targetPort != updated.targetPort
+            || previous.verifiesTLS != updated.verifiesTLS
     }
 
     private func persist() throws {

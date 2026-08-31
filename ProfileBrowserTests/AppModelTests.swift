@@ -190,4 +190,104 @@ struct AppModelTests {
         )
         #expect(refreshedModel.socksProxy(for: profile)?.id == refreshedSlow.id)
     }
+
+    @Test
+    func batchValidationHonorsRetentionAndKeepsPersistedInputOrder() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let profileURL = directory.appending(path: "profiles.json")
+        let proxyURL = directory.appending(path: "proxies.json")
+        let settingsURL = directory.appending(path: "settings.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let first = SocksProxy(host: "slow.example", port: 1080)
+        let second = SocksProxy(host: "fast.example", port: 1080)
+        let third = SocksProxy(host: "offline.example", port: 1080)
+        let profileRepository = ProfileRepository(fileURL: profileURL)
+        let proxyRepository = SocksProxyRepository(
+            fileURL: proxyURL,
+            settingsFileURL: settingsURL,
+            credentialStore: SocksProxyCredentialStore(inMemory: true)
+        )
+        try proxyRepository.save([first, second, third])
+
+        let probe = AppModelStubProbe(results: [
+            first.id: SocksProxyProbeResult(status: .available, latencyMilliseconds: 80),
+            second.id: SocksProxyProbeResult(status: .available, latencyMilliseconds: 20),
+            third.id: SocksProxyProbeResult(status: .unavailable, message: "offline")
+        ])
+        let model = AppModel(
+            profileRepository: profileRepository,
+            socksProxyRepository: proxyRepository,
+            socksProxyValidationService: SocksProxyValidationService(timeout: 1, probe: probe)
+        )
+        try model.updateSocksProxyValidationSettings(
+            SocksProxyValidationSettings(
+                retainOnlyAvailable: true,
+                maxRetainedCount: 2,
+                sortMode: .latencyAscending
+            )
+        )
+
+        try await model.validateSocksProxies()
+
+        #expect(model.socksProxies.map(\.id) == [first.id, second.id])
+        #expect(try proxyRepository.load().map(\.id) == [first.id, second.id])
+        #expect(model.rankedSocksProxies.map(\.proxy.id) == [second.id, first.id])
+        #expect(model.socksProxy(forDisplayNumber: 1)?.id == second.id)
+    }
+
+    @Test
+    func inputOrderSettingKeepsDisplayNumbersAndTargetChangesInvalidateResults() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let profileURL = directory.appending(path: "profiles.json")
+        let proxyURL = directory.appending(path: "proxies.json")
+        let settingsURL = directory.appending(path: "settings.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let first = SocksProxy(
+            host: "first.example",
+            port: 1080,
+            latencyMilliseconds: 20,
+            status: .available
+        )
+        let second = SocksProxy(
+            host: "second.example",
+            port: 1080,
+            latencyMilliseconds: 10,
+            status: .available
+        )
+        let profileRepository = ProfileRepository(fileURL: profileURL)
+        let proxyRepository = SocksProxyRepository(
+            fileURL: proxyURL,
+            settingsFileURL: settingsURL,
+            credentialStore: SocksProxyCredentialStore(inMemory: true)
+        )
+        try proxyRepository.save([first, second])
+        let model = AppModel(
+            profileRepository: profileRepository,
+            socksProxyRepository: proxyRepository
+        )
+
+        try model.updateSocksProxyValidationSettings(
+            SocksProxyValidationSettings(sortMode: .inputOrder)
+        )
+        #expect(model.rankedSocksProxies.map(\.proxy.id) == [first.id, second.id])
+        #expect(model.socksProxy(forDisplayNumber: 1)?.id == first.id)
+
+        try model.updateSocksProxyValidationSettings(
+            SocksProxyValidationSettings(targetHost: "different.example")
+        )
+        #expect(model.socksProxies.allSatisfy { $0.status == .untested })
+        #expect(model.socksProxies.allSatisfy { $0.latencyMilliseconds == nil })
+    }
+}
+
+private struct AppModelStubProbe: SocksProxyProbe {
+    let results: [UUID: SocksProxyProbeResult]
+
+    func probe(_ proxy: SocksProxy, timeout: TimeInterval) async throws -> SocksProxyProbeResult {
+        results[proxy.id] ?? SocksProxyProbeResult(status: .unavailable, message: "missing result")
+    }
 }

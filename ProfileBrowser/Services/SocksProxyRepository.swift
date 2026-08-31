@@ -7,12 +7,14 @@ struct SocksProxyRepository {
     private let fileManager: FileManager
     private let fileURL: URL
     private let presetsFileURL: URL
+    private let settingsFileURL: URL
     private let credentialStore: SocksProxyCredentialStore
 
     init(
         fileManager: FileManager = .default,
         fileURL: URL? = nil,
         presetsFileURL: URL? = nil,
+        settingsFileURL: URL? = nil,
         credentialStore: SocksProxyCredentialStore = SocksProxyCredentialStore()
     ) {
         self.fileManager = fileManager
@@ -29,6 +31,8 @@ struct SocksProxyRepository {
 
         self.presetsFileURL = presetsFileURL
             ?? baseURL.appending(path: "socks-proxy-presets.json", directoryHint: .notDirectory)
+        self.settingsFileURL = settingsFileURL
+            ?? baseURL.appending(path: "socks-proxy-settings.json", directoryHint: .notDirectory)
         self.credentialStore = credentialStore
     }
 
@@ -84,6 +88,18 @@ struct SocksProxyRepository {
 
     func savePresets(_ presets: [SocksProxyPreset]) throws {
         try saveArray(presets, to: presetsFileURL)
+    }
+
+    func loadSettings() throws -> SocksProxyValidationSettings {
+        guard fileManager.fileExists(atPath: settingsFileURL.path) else {
+            return .defaults
+        }
+        let value: SocksProxyValidationSettings = try loadValue(from: settingsFileURL)
+        return value.normalized
+    }
+
+    func saveSettings(_ settings: SocksProxyValidationSettings) throws {
+        try saveValue(settings.normalized, to: settingsFileURL)
     }
 
     @discardableResult
@@ -193,14 +209,22 @@ struct SocksProxyRepository {
 
     private func loadArray<T: Decodable>(from url: URL) throws -> [T] {
         guard fileManager.fileExists(atPath: url.path) else { return [] }
+        return try loadValue(from: url)
+    }
+
+    private func loadValue<T: Decodable>(from url: URL) throws -> T {
         let data = try Data(contentsOf: url)
-        return try Self.decoder.decode([T].self, from: data)
+        return try Self.decoder.decode(T.self, from: data)
     }
 
     private func saveArray<T: Encodable>(_ values: [T], to url: URL) throws {
+        try saveValue(values, to: url)
+    }
+
+    private func saveValue<T: Encodable>(_ value: T, to url: URL) throws {
         let directory = url.deletingLastPathComponent()
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-        let data = try Self.encoder.encode(values)
+        let data = try Self.encoder.encode(value)
         try data.write(to: url, options: [.atomic, .completeFileProtection])
     }
 

@@ -64,6 +64,43 @@ struct SocksProxyTests {
     }
 
     @Test
+    func validationSettingsNormalizeAndRoundTrip() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let proxyURL = directory.appending(path: "proxies.json")
+        let settingsURL = directory.appending(path: "settings.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let repository = SocksProxyRepository(
+            fileURL: proxyURL,
+            settingsFileURL: settingsURL,
+            credentialStore: SocksProxyCredentialStore(inMemory: true)
+        )
+        let input = SocksProxyValidationSettings(
+            retainOnlyAvailable: false,
+            maxRetainedCount: -10,
+            sortMode: .inputOrder,
+            targetHost: " bad host ",
+            targetPort: 70_000,
+            verifiesTLS: false,
+            timeoutSeconds: 90,
+            maxConcurrent: 0
+        )
+
+        try repository.saveSettings(input)
+        let loaded = try repository.loadSettings()
+
+        #expect(loaded.retainOnlyAvailable == false)
+        #expect(loaded.maxRetainedCount == 0)
+        #expect(loaded.sortMode == .inputOrder)
+        #expect(loaded.targetHost == "example.com")
+        #expect(loaded.targetPort == 65_535)
+        #expect(loaded.verifiesTLS == false)
+        #expect(loaded.timeoutSeconds == 60)
+        #expect(loaded.maxConcurrent == 1)
+    }
+
+    @Test
     func staleValidationIsInvalidatedAfterProbeProtocolUpgrade() {
         var proxy = SocksProxy(
             host: "127.0.0.1",

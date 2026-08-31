@@ -7,6 +7,7 @@ struct SocksProxyListView: View {
     @State private var editorMode: SocksProxyEditorMode?
     @State private var showsImport = false
     @State private var showsPresets = false
+    @State private var showsSettings = false
     @State private var pendingClear = false
     @State private var pendingDelete: SocksProxy?
     @State private var isValidating = false
@@ -40,6 +41,10 @@ struct SocksProxyListView: View {
                     Button("管理预设链接", systemImage: "list.bullet.rectangle") {
                         showsPresets = true
                     }
+                    Button("验证设置", systemImage: "gearshape") {
+                        showsSettings = true
+                    }
+                    .disabled(isValidating)
                     Divider()
                     Button("清空全部代理", systemImage: "trash", role: .destructive) {
                         pendingClear = true
@@ -76,6 +81,9 @@ struct SocksProxyListView: View {
         }
         .sheet(isPresented: $showsPresets) {
             SocksProxyPresetListView()
+        }
+        .navigationDestination(isPresented: $showsSettings) {
+            SocksProxySettingsView(settings: model.socksProxyValidationSettings)
         }
         .alert("清空全部代理？", isPresented: $pendingClear) {
             Button("清空", role: .destructive) {
@@ -179,9 +187,10 @@ struct SocksProxyListView: View {
             HStack {
                 Text("代理列表")
                 Spacer()
-                Text("验证 HTTPS/TLS 后按延迟排序")
+                Text(validationSummary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing)
             }
         }
     }
@@ -229,12 +238,28 @@ struct SocksProxyListView: View {
                 .textCase(nil)
             }
         } footer: {
-            Text("预设链接只会在你点击“拉取”时访问网络，可保存多个来源。代理验证会通过 SOCKS 访问 HTTPS 测试站点；无法完成 TLS 的节点不会保留。")
+            Text(validationFooter)
         }
     }
 
     private var rankedProxies: [SocksProxyRanking] {
-        SocksProxyValidationService.ranked(model.socksProxies)
+        model.rankedSocksProxies
+    }
+
+    private var validationSummary: String {
+        let settings = model.socksProxyValidationSettings
+        let retention = settings.retainOnlyAvailable ? "仅保留可用" : "保留全部"
+        let count = settings.maxRetainedCount == 0 ? "不限数量" : "最多 \(settings.maxRetainedCount) 个"
+        return "\(retention) · \(count) · \(settings.sortMode.title)"
+    }
+
+    private var validationFooter: String {
+        let settings = model.socksProxyValidationSettings
+        let target = "\(settings.targetHost):\(settings.targetPort)"
+        let probe = settings.verifiesTLS ? "SOCKS CONNECT 和 HTTPS/TLS" : "SOCKS CONNECT"
+        let retention = settings.retainOnlyAvailable ? "只保留可用代理" : "保留全部测试结果"
+        let count = settings.maxRetainedCount == 0 ? "不限数量" : "最多保留 \(settings.maxRetainedCount) 个"
+        return "预设链接只会在你点击“拉取”时访问网络，可保存多个来源。批量验证会测试 \(target) 的 \(probe)，\(retention)，\(count)。"
     }
 
     private var deleteAlertBinding: Binding<Bool> {
@@ -262,7 +287,12 @@ struct SocksProxyListView: View {
             }
             do {
                 try await model.validateSocksProxies()
-                statusMessage = "批量测试完成，已保留可用且延迟最低的前 30 个代理。"
+                let settings = model.socksProxyValidationSettings
+                let count = settings.maxRetainedCount == 0
+                    ? "不限数量"
+                    : "最多 \(settings.maxRetainedCount) 个"
+                let availability = settings.retainOnlyAvailable ? "仅保留可用代理" : "保留全部测试结果"
+                statusMessage = "批量测试完成：\(availability)，\(count)，\(settings.sortMode.title)。"
             } catch {
                 model.present(error)
             }
