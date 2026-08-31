@@ -5,10 +5,11 @@ struct ProfileListView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
 
-    let groupName: String
-    let onDeleteGroup: ((String) -> Void)?
+    let groupID: UUID
+    let onDeleteGroup: ((UUID) -> Void)?
 
     @State private var editorMode: ProfileEditorMode?
+    @State private var groupEditor: ProfileGroup?
     @State private var pendingGroupDeletion: ProfileGroup?
     @State private var pendingDeletion: BrowserProfile?
     @State private var pendingClear: BrowserProfile?
@@ -16,8 +17,8 @@ struct ProfileListView: View {
     @State private var activeProfile: BrowserProfile?
     @State private var editMode: EditMode = .inactive
 
-    init(groupName: String, onDeleteGroup: ((String) -> Void)? = nil) {
-        self.groupName = groupName
+    init(groupID: UUID, onDeleteGroup: ((UUID) -> Void)? = nil) {
+        self.groupID = groupID
         self.onDeleteGroup = onDeleteGroup
     }
 
@@ -25,7 +26,7 @@ struct ProfileListView: View {
         @Bindable var model = model
 
         content
-            .navigationTitle(groupName)
+            .navigationTitle(currentGroup?.name ?? "分组")
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(item: $activeProfile) { profile in
                 BrowserView(profile: profile, socksProxy: model.socksProxy(for: profile))
@@ -37,16 +38,29 @@ struct ProfileListView: View {
                         editorMode = .create
                     }
                     Menu {
-                        Button("删除整个分组", systemImage: "trash", role: .destructive) {
-                            pendingGroupDeletion = ProfileGroup(name: groupName, profiles: visibleProfiles)
+                        if let currentGroup {
+                            Button("编辑分组", systemImage: "pencil") {
+                                groupEditor = currentGroup
+                            }
                         }
+                        Button("删除整个分组", systemImage: "trash", role: .destructive) {
+                            if let currentGroup {
+                                pendingGroupDeletion = currentGroup
+                            }
+                        }
+                        .disabled(currentGroup == nil)
                     } label: {
                         Label("更多", systemImage: "ellipsis.circle")
                     }
                 }
             }
             .sheet(item: $editorMode) { mode in
-                ProfileEditorView(profile: mode.profile) { submission in
+                ProfileEditorView(
+                    profile: mode.profile,
+                    defaultGroupName: mode.profile == nil && currentGroup?.name != "未分组"
+                        ? currentGroup?.name
+                        : nil
+                ) { submission in
                     switch submission {
                     case .create(let name, let groupName, let homePage, let userAgent, let color, let socksProxyNumber, let autofillUsername, let autofillPassword):
                         try model.addProfile(
@@ -68,10 +82,20 @@ struct ProfileListView: View {
                     }
                 }
             }
+            .sheet(item: $groupEditor) { group in
+                ProfileGroupEditorView(group: group) { name, code, emoji in
+                    try model.updateGroup(
+                        id: group.id,
+                        name: name,
+                        code: code,
+                        emoji: emoji
+                    )
+                }
+            }
             .alert("删除整个分组？", isPresented: groupDeletionAlertBinding, presenting: pendingGroupDeletion) { group in
                 Button("删除", role: .destructive) {
                     pendingGroupDeletion = nil
-                    requestGroupDeletion(group.name)
+                    requestGroupDeletion(group.id)
                 }
                 Button("取消", role: .cancel) {}
             } message: { group in
@@ -82,7 +106,7 @@ struct ProfileListView: View {
                     pendingDeletion = nil
                     if visibleProfiles.count == 1,
                        model.profiles.contains(where: { $0.id == profile.id }) {
-                        requestGroupDeletion(groupName)
+                        requestGroupDeletion(groupID)
                     } else {
                         Task { await model.deleteProfile(profile) }
                     }
@@ -151,7 +175,16 @@ struct ProfileListView: View {
     }
 
     private var visibleProfiles: [BrowserProfile] {
-        model.sortedProfiles.filter { $0.displayGroupName == groupName }
+        model.sortedProfiles.filter { profile in
+            if let profileGroupID = profile.groupID {
+                return profileGroupID == groupID
+            }
+            return profile.displayGroupName == currentGroup?.name
+        }
+    }
+
+    private var currentGroup: ProfileGroup? {
+        model.profileGroups.first { $0.id == groupID }
     }
 
     private func profileButton(for profile: BrowserProfile) -> some View {
@@ -238,16 +271,16 @@ struct ProfileListView: View {
         )
     }
 
-    private func requestGroupDeletion(_ name: String) {
+    private func requestGroupDeletion(_ id: UUID) {
         if let onDeleteGroup {
-            onDeleteGroup(name)
+            onDeleteGroup(id)
             return
         }
 
         dismiss()
         Task { @MainActor in
             await Task.yield()
-            await model.deleteProfiles(inGroupNamed: name)
+            await model.deleteProfiles(inGroupID: id)
         }
     }
 }

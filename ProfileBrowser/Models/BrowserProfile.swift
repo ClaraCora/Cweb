@@ -7,6 +7,15 @@ struct BrowserProfile: Identifiable, Codable, Hashable, Sendable {
     let id: UUID
     var name: String
     var groupName: String?
+    /// Stable identifier of the group this profile belongs to.  This is
+    /// optional to keep profiles written by older versions decodable; legacy
+    /// records continue to use `groupName` until they are migrated.
+    var groupID: UUID?
+    /// Optional group code/emoji copied onto each member so metadata remains
+    /// part of the existing profiles.json format.  AppModel keeps all members
+    /// of one group synchronized when the group is edited.
+    var groupCode: String?
+    var groupEmoji: String?
     let websiteDataStoreID: UUID
     var userAgent: String
     let fingerprintSeed: UUID
@@ -25,6 +34,9 @@ struct BrowserProfile: Identifiable, Codable, Hashable, Sendable {
         id: UUID = UUID(),
         name: String,
         groupName: String? = nil,
+        groupID: UUID? = nil,
+        groupCode: String? = nil,
+        groupEmoji: String? = nil,
         websiteDataStoreID: UUID = UUID(),
         userAgent: String = BrowserProfile.defaultUserAgent,
         fingerprintSeed: UUID = UUID(),
@@ -39,6 +51,9 @@ struct BrowserProfile: Identifiable, Codable, Hashable, Sendable {
         self.id = id
         self.name = name
         self.groupName = groupName
+        self.groupID = groupID
+        self.groupCode = groupCode
+        self.groupEmoji = groupEmoji
         self.websiteDataStoreID = websiteDataStoreID
         self.userAgent = userAgent
         self.fingerprintSeed = fingerprintSeed

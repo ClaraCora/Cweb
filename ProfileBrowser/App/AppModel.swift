@@ -35,6 +35,7 @@ final class AppModel {
         self.socksProxyImportService = socksProxyImportService
         self.socksProxyValidationServiceOverride = socksProxyValidationService
         reloadProfiles()
+        migrateGroupMetadataIfNeeded()
         reloadSocksProxyValidationSettings()
         reloadSocksProxies()
     }
@@ -46,20 +47,35 @@ final class AppModel {
     }
 
     var profileGroups: [ProfileGroup] {
+        // Group identity is persisted on every profile so a rename does not
+        // invalidate a navigation destination that is already on screen.
+        // The fallback key keeps this projection safe for a profile loaded
+        // from an older file before migration has completed.
         var groupedProfiles: [String: [BrowserProfile]] = [:]
         var groupOrder: [String] = []
 
         for profile in sortedProfiles {
-            let groupName = profile.displayGroupName
-            if groupedProfiles[groupName] == nil {
-                groupOrder.append(groupName)
+            let key = profile.groupID.map { "id:\($0.uuidString)" }
+                ?? "name:\(profile.displayGroupName)"
+            if groupedProfiles[key] == nil {
+                groupOrder.append(key)
             }
-            groupedProfiles[groupName, default: []].append(profile)
+            groupedProfiles[key, default: []].append(profile)
         }
 
-        return groupOrder.compactMap { name in
-            guard let profiles = groupedProfiles[name] else { return nil }
-            return ProfileGroup(name: name, profiles: profiles)
+        return groupOrder.compactMap { key in
+            guard let profiles = groupedProfiles[key], let first = profiles.first else {
+                return nil
+            }
+            return ProfileGroup(
+                // A legacy profile that could not be migrated still gets a
+                // deterministic in-memory identity for this projection.
+                id: first.groupID ?? first.id,
+                name: first.displayGroupName,
+                code: first.groupCode,
+                emoji: first.groupEmoji,
+                profiles: profiles
+            )
         }
     }
 
@@ -73,16 +89,27 @@ final class AppModel {
         autofillUsername: String? = nil,
         autofillPassword: String? = nil
     ) throws {
+        let normalizedGroupName = normalizedOptional(groupName)
+        let group = groupMetadata(named: normalizedGroupName)
         let profile = BrowserProfile(
             name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-            groupName: normalizedOptional(groupName),
+            groupName: normalizedGroupName,
+            groupID: group?.id ?? UUID(),
+            groupCode: group?.code,
+            groupEmoji: group?.emoji,
             userAgent: userAgent.trimmingCharacters(in: .whitespacesAndNewlines),
             homePage: homePage,
             color: color,
             socksProxyNumber: normalizedProxyNumber(socksProxyNumber)
         )
+        let oldProfiles = profiles
         profiles.append(profile)
-        try persist()
+        do {
+            try persist()
+        } catch {
+            profiles = oldProfiles
+            throw error
+        }
         try saveAutofillCredentialIfNeeded(
             profileID: profile.id,
             homePage: profile.homePage,
@@ -92,8 +119,16 @@ final class AppModel {
     }
 
     func addImportedProfile(_ profile: BrowserProfile) throws {
-        profiles.append(profile)
-        try persist()
+        var value = profile
+        assignGroupMetadata(to: &value)
+        let oldProfiles = profiles
+        profiles.append(value)
+        do {
+            try persist()
+        } catch {
+            profiles = oldProfiles
+            throw error
+        }
     }
 
     func duplicateProfile(_ profile: BrowserProfile) throws {
@@ -105,6 +140,9 @@ final class AppModel {
         let duplicate = BrowserProfile(
             name: nextDuplicateName(for: profile.name),
             groupName: profile.groupName,
+            groupID: profile.groupID,
+            groupCode: profile.groupCode,
+            groupEmoji: profile.groupEmoji,
             userAgent: profile.userAgent,
             homePage: profile.homePage,
             color: profile.color,
@@ -162,6 +200,72 @@ final class AppModel {
         }
     }
 
+    /// Updates the metadata shared by a group and keeps every member attached
+    /// to the same stable group identity.  Profile names that were derived
+    /// from the old group name are updated as well; custom names are left
+    /// untouched so a group rename cannot erase deliberate labels.
+    func updateGroup(
+        id: UUID,
+        name: String,
+        code: String? = nil,
+        emoji: String? = nil
+    ) throws {
+        guard let existingGroup = profileGroups.first(where: { $0.id == id }) else {
+            throw ProfileError.groupNotFound
+        }
+
+        let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedName.isEmpty else {
+            throw ProfileError.groupNameEmpty
+        }
+        let nameTaken = profileGroups.contains {
+            $0.id != id && $0.name == normalizedName
+        }
+        guard !nameTaken else {
+            throw ProfileError.groupNameAlreadyExists
+        }
+
+        let normalizedCode = normalizedOptional(code)
+        let normalizedEmoji = normalizedGroupEmoji(emoji)
+        let oldProfiles = profiles
+        let oldName = existingGroup.name
+
+        for index in profiles.indices {
+            let belongsToGroup = profiles[index].groupID == id
+                || (profiles[index].groupID == nil
+                    && profiles[index].displayGroupName == oldName)
+            guard belongsToGroup else { continue }
+
+            profiles[index].groupID = id
+            profiles[index].groupName = normalizedName
+            profiles[index].groupCode = normalizedCode
+            profiles[index].groupEmoji = normalizedEmoji
+            profiles[index].name = linkedProfileName(
+                profiles[index].name,
+                replacingGroupName: oldName,
+                with: normalizedName
+            )
+            profiles[index].updatedAt = .now
+        }
+
+        do {
+            try persist()
+        } catch {
+            profiles = oldProfiles
+            throw error
+        }
+    }
+
+    /// More descriptive alias for callers that treat this as a rename action.
+    func renameGroup(
+        id: UUID,
+        name: String,
+        code: String? = nil,
+        emoji: String? = nil
+    ) throws {
+        try updateGroup(id: id, name: name, code: code, emoji: emoji)
+    }
+
     func updateProfile(
         _ updatedProfile: BrowserProfile,
         autofillUsername: String? = nil,
@@ -170,12 +274,23 @@ final class AppModel {
         guard let index = profiles.firstIndex(where: { $0.id == updatedProfile.id }) else {
             throw ProfileError.notFound
         }
+        let previousProfile = profiles[index]
         var value = updatedProfile
         value.groupName = normalizedOptional(value.groupName)
+        assignGroupMetadata(
+            to: &value,
+            preserving: previousProfile,
+            whenGroupNameUnchanged: value.groupName == previousProfile.groupName
+        )
         value.socksProxyNumber = normalizedProxyNumber(value.socksProxyNumber)
         value.updatedAt = .now
         profiles[index] = value
-        try persist()
+        do {
+            try persist()
+        } catch {
+            profiles[index] = previousProfile
+            throw error
+        }
         try saveAutofillCredentialIfNeeded(
             profileID: value.id,
             homePage: value.homePage,
@@ -438,11 +553,26 @@ final class AppModel {
     }
 
     func deleteProfiles(inGroupNamed groupName: String) async {
-        let profilesToDelete = profiles.filter { $0.displayGroupName == groupName }
+        guard let group = profileGroups.first(where: { $0.name == groupName }) else {
+            return
+        }
+        await deleteProfiles(inGroupID: group.id)
+    }
+
+    func deleteProfiles(inGroupID groupID: UUID) async {
+        guard let targetGroup = profileGroups.first(where: { $0.id == groupID }) else {
+            return
+        }
+        let targetName = targetGroup.name
+        let profilesToDelete = profiles.filter { profile in
+            profile.groupID == groupID
+                || (profile.groupID == nil
+                    && profile.displayGroupName == targetName)
+        }
         guard !profilesToDelete.isEmpty else { return }
         guard !isDestructiveOperationInProgress else { return }
 
-        busyGroupName = groupName
+        busyGroupName = targetName
         defer { busyGroupName = nil }
 
         do {
@@ -464,6 +594,151 @@ final class AppModel {
         } catch {
             present(error)
         }
+    }
+
+    // MARK: - Group metadata
+
+    /// Adds stable group IDs and normalizes copied metadata for files written
+    /// by versions that only stored `groupName`.  The migration is deliberately
+    /// performed once at launch and written back atomically through the existing
+    /// profile repository, so old installations do not need a second data file.
+    private func migrateGroupMetadataIfNeeded() {
+        guard !profiles.isEmpty else { return }
+
+        let originalProfiles = profiles
+        var idByName: [String: UUID] = [:]
+        var nameByID: [UUID: String] = [:]
+        var codeByID: [UUID: String] = [:]
+        var emojiByID: [UUID: String] = [:]
+        var migrated = profiles
+
+        for index in migrated.indices {
+            let profile = migrated[index]
+            let displayName = profile.displayGroupName
+            let candidateID = profile.groupID
+
+            let groupID: UUID
+            if let existingID = idByName[displayName] {
+                // The first profile in a name bucket defines its stable ID.
+                // This also repairs older files that accidentally assigned a
+                // different ID to one member of the same group.
+                groupID = existingID
+            } else if let candidateID, nameByID[candidateID] == nil {
+                groupID = candidateID
+                idByName[displayName] = candidateID
+                nameByID[candidateID] = displayName
+            } else {
+                groupID = UUID()
+                idByName[displayName] = groupID
+                nameByID[groupID] = displayName
+            }
+
+            nameByID[groupID] = nameByID[groupID] ?? displayName
+            if codeByID[groupID] == nil,
+               let code = normalizedOptional(profile.groupCode) {
+                codeByID[groupID] = code
+            }
+            if emojiByID[groupID] == nil,
+               let emoji = normalizedGroupEmoji(profile.groupEmoji) {
+                emojiByID[groupID] = emoji
+            }
+
+            migrated[index].groupID = groupID
+            migrated[index].groupName = normalizedOptional(profile.groupName)
+        }
+
+        for index in migrated.indices {
+            guard let groupID = migrated[index].groupID else { continue }
+            migrated[index].groupCode = codeByID[groupID]
+            migrated[index].groupEmoji = emojiByID[groupID]
+        }
+
+        guard migrated != originalProfiles else { return }
+        profiles = migrated
+        do {
+            try persist()
+        } catch {
+            profiles = originalProfiles
+            present(error)
+        }
+    }
+
+    private func groupMetadata(named groupName: String?) -> (id: UUID, code: String?, emoji: String?)? {
+        let displayName = groupName ?? "未分组"
+        guard let group = profileGroups.first(where: { $0.name == displayName }) else {
+            return nil
+        }
+        return (group.id, group.code, group.emoji)
+    }
+
+    /// Assigns a profile to an existing group when possible, otherwise creates
+    /// a new stable identity.  Metadata is copied from the first member of the
+    /// target group, keeping all cards consistent after per-profile edits.
+    private func assignGroupMetadata(
+        to profile: inout BrowserProfile,
+        preserving previousProfile: BrowserProfile? = nil,
+        whenGroupNameUnchanged: Bool = false
+    ) {
+        let normalizedName = normalizedOptional(profile.groupName)
+        profile.groupName = normalizedName
+
+        if whenGroupNameUnchanged,
+           let previousProfile,
+           let previousID = previousProfile.groupID {
+            profile.groupID = previousID
+            profile.groupCode = previousProfile.groupCode
+            profile.groupEmoji = previousProfile.groupEmoji
+            return
+        }
+
+        if let group = groupMetadata(named: normalizedName) {
+            profile.groupID = group.id
+            profile.groupCode = group.code
+            profile.groupEmoji = group.emoji
+            return
+        }
+
+        // A new group name must receive a fresh identity.  Reusing an old
+        // profile's ID here would make a renamed/moved profile appear in two
+        // unrelated groups that happen to share no metadata.
+        profile.groupID = UUID()
+        profile.groupCode = normalizedOptional(profile.groupCode)
+        profile.groupEmoji = normalizedGroupEmoji(profile.groupEmoji)
+    }
+
+    private func linkedProfileName(
+        _ profileName: String,
+        replacingGroupName oldName: String,
+        with newName: String
+    ) -> String {
+        guard oldName != newName else { return profileName }
+        guard !oldName.isEmpty, profileName.hasPrefix(oldName) else {
+            return profileName
+        }
+
+        let suffix = String(profileName.dropFirst(oldName.count))
+        // Names such as “站点 1”, “站点-主账号” and “站点一” are common
+        // generated labels.  Preserve their suffix while changing only the
+        // group-derived prefix; unrelated custom names remain untouched.
+        guard suffix.isEmpty
+            || suffix.first?.isNumber == true
+            || suffix.first?.isLetter == false
+            || suffix.first == "_"
+            || suffix.first == "-"
+            || suffix.first == " "
+            || suffix.first == "·"
+        else {
+            return profileName
+        }
+        return newName + suffix
+    }
+
+    private func normalizedGroupEmoji(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else { return nil }
+        // Keep a compact card layout while allowing composed emoji (one
+        // Character can contain multiple Unicode scalars).
+        return String(trimmed.prefix(4))
     }
 
     private func reloadSocksProxies() {
@@ -648,6 +923,9 @@ struct PresentedError: Identifiable {
 
 enum ProfileError: LocalizedError {
     case notFound
+    case groupNotFound
+    case groupNameEmpty
+    case groupNameAlreadyExists
     case autofillCredentialsIncomplete
     case invalidAutofillOrigin
 
@@ -655,6 +933,12 @@ enum ProfileError: LocalizedError {
         switch self {
         case .notFound:
             return "找不到这个浏览器环境。"
+        case .groupNotFound:
+            return "找不到这个分组。"
+        case .groupNameEmpty:
+            return "分组名称不能为空。"
+        case .groupNameAlreadyExists:
+            return "已经存在同名分组，请换一个名称。"
         case .autofillCredentialsIncomplete:
             return "自动填充账号和密码需要同时填写，或都留空。"
         case .invalidAutofillOrigin:

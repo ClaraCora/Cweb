@@ -76,6 +76,55 @@ struct AppModelTests {
     }
 
     @Test
+    func updatingGroupPersistsMetadataAndRenamesDerivedProfileNames() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let fileURL = directory.appending(path: "profiles.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let derived = BrowserProfile(name: "旧站点 1", groupName: "旧站点")
+        let custom = BrowserProfile(name: "主账号", groupName: "旧站点")
+        let repository = ProfileRepository(fileURL: fileURL)
+        try repository.save([derived, custom])
+
+        let model = AppModel(profileRepository: repository)
+        let group = try #require(model.profileGroups.first)
+        try model.updateGroup(id: group.id, name: "新站点", code: "NEW", emoji: "🧪")
+
+        #expect(model.profileGroups.map(\.name) == ["新站点"])
+        #expect(model.profileGroups[0].displayCode == "NEW")
+        #expect(model.profileGroups[0].displayEmoji == "🧪")
+        #expect(model.profiles[0].name == "新站点 1")
+        #expect(model.profiles[1].name == "主账号")
+        #expect(model.profiles.allSatisfy { $0.groupName == "新站点" })
+
+        let reloaded = AppModel(profileRepository: repository)
+        #expect(reloaded.profileGroups.first?.id == group.id)
+        #expect(reloaded.profileGroups.first?.displayEmoji == "🧪")
+        #expect(reloaded.profiles[0].name == "新站点 1")
+    }
+
+    @Test
+    func duplicateGroupNamesAreRejectedWithoutChangingProfiles() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let fileURL = directory.appending(path: "profiles.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let first = BrowserProfile(name: "一", groupName: "甲")
+        let second = BrowserProfile(name: "二", groupName: "乙")
+        let repository = ProfileRepository(fileURL: fileURL)
+        try repository.save([first, second])
+        let model = AppModel(profileRepository: repository)
+        let source = try #require(model.profileGroups.first)
+
+        #expect(throws: ProfileError.groupNameAlreadyExists) {
+            try model.updateGroup(id: source.id, name: "乙", code: nil, emoji: nil)
+        }
+        #expect(model.profiles.map(\.groupName) == ["甲", "乙"])
+    }
+
+    @Test
     func deletingProfileRemovesPersistedProfileAndCredentials() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: UUID().uuidString, directoryHint: .isDirectory)

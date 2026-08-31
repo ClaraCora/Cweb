@@ -8,8 +8,9 @@ struct ProfileGroupGridView: View {
     @State private var showsBackup = false
     @State private var showsSocksProxyManager = false
     @State private var showsSettings = false
+    @State private var groupEditor: ProfileGroup?
     @State private var pendingGroupDeletion: ProfileGroup?
-    @State private var pendingDeletionGroupName: String?
+    @State private var pendingDeletionGroupID: UUID?
     @State private var navigationPath = NavigationPath()
 
     var body: some View {
@@ -19,9 +20,9 @@ struct ProfileGroupGridView: View {
             content
                 .navigationTitle("分组")
                 .navigationBarTitleDisplayMode(.inline)
-                .navigationDestination(for: String.self) { groupName in
+                .navigationDestination(for: UUID.self) { groupID in
                     ProfileListView(
-                        groupName: groupName,
+                        groupID: groupID,
                         onDeleteGroup: deleteGroupAndReturnHome
                     )
                 }
@@ -56,6 +57,16 @@ struct ProfileGroupGridView: View {
                         SettingsView()
                     }
                 }
+                .sheet(item: $groupEditor) { group in
+                    ProfileGroupEditorView(group: group) { name, code, emoji in
+                        try model.updateGroup(
+                            id: group.id,
+                            name: name,
+                            code: code,
+                            emoji: emoji
+                        )
+                    }
+                }
                 .sheet(item: $editorMode) { mode in
                     ProfileEditorView(profile: mode.profile) { submission in
                         switch submission {
@@ -82,7 +93,7 @@ struct ProfileGroupGridView: View {
                 .alert("删除整个分组？", isPresented: groupDeletionAlertBinding, presenting: pendingGroupDeletion) { group in
                     Button("删除", role: .destructive) {
                         pendingGroupDeletion = nil
-                        deleteGroupAndReturnHome(group.name)
+                        deleteGroupAndReturnHome(group.id)
                     }
                     Button("取消", role: .cancel) {}
                 } message: { group in
@@ -123,7 +134,7 @@ struct ProfileGroupGridView: View {
                     spacing: 12
                 ) {
                     ForEach(model.profileGroups) { group in
-                        NavigationLink(value: group.name) {
+                        NavigationLink(value: group.id) {
                             ProfileGroupCard(
                                 group: group,
                                 isBusy: model.busyGroupName == group.name
@@ -132,6 +143,9 @@ struct ProfileGroupGridView: View {
                         .buttonStyle(.plain)
                         .disabled(model.busyGroupName == group.name)
                         .contextMenu {
+                            Button("编辑分组", systemImage: "pencil") {
+                                groupEditor = group
+                            }
                             Button("删除整个分组", systemImage: "trash", role: .destructive) {
                                 pendingGroupDeletion = group
                             }
@@ -152,9 +166,9 @@ struct ProfileGroupGridView: View {
         )
     }
 
-    private func deleteGroupAndReturnHome(_ groupName: String) {
+    private func deleteGroupAndReturnHome(_ groupID: UUID) {
         let wasAtHome = navigationPath.isEmpty
-        pendingDeletionGroupName = groupName
+        pendingDeletionGroupID = groupID
         if !wasAtHome {
             navigationPath = NavigationPath()
             return
@@ -164,11 +178,11 @@ struct ProfileGroupGridView: View {
     }
 
     private func schedulePendingGroupDeletion() {
-        guard let groupName = pendingDeletionGroupName else { return }
-        pendingDeletionGroupName = nil
+        guard let groupID = pendingDeletionGroupID else { return }
+        pendingDeletionGroupID = nil
         Task { @MainActor in
             await Task.yield()
-            await model.deleteProfiles(inGroupNamed: groupName)
+            await model.deleteProfiles(inGroupID: groupID)
         }
     }
 }
@@ -179,24 +193,34 @@ private struct ProfileGroupCard: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "rectangle.3.group.fill")
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(group.color.color)
-                .frame(width: 28, height: 28)
+            Text(group.displayEmoji)
+                .font(.title2)
+                .frame(width: 34, height: 34)
+                .background(group.color.color.opacity(0.14), in: Circle())
+                .accessibilityHidden(true)
 
-            Text(group.name)
-                .font(.headline)
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.78)
-                .layoutPriority(1)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(group.name)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+                        .layoutPriority(1)
+                    if let code = group.displayCode {
+                        Text(code)
+                            .font(.caption.monospaced().weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Text("\(group.profiles.count) 个环境")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
 
             Spacer(minLength: 4)
-
-            Text("\(group.profiles.count)")
-                .font(.subheadline.monospacedDigit().weight(.semibold))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
 
             if isBusy {
                 ProgressView()
@@ -221,7 +245,7 @@ private struct ProfileGroupCard: View {
         }
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(group.name)，\(group.profiles.count) 个环境")
+        .accessibilityLabel("\(group.displayEmoji)，\(group.name)\(group.displayCode.map { "，代号 \($0)" } ?? "")，\(group.profiles.count) 个环境")
         .accessibilityHint("进入分组")
     }
 }

@@ -21,12 +21,13 @@ struct ProfileEditorView: View {
 
     init(
         profile: BrowserProfile?,
+        defaultGroupName: String? = nil,
         onSave: @escaping (ProfileEditorSubmission) throws -> Void
     ) {
         self.originalProfile = profile
         self.onSave = onSave
         _name = State(initialValue: profile?.name ?? "")
-        _groupName = State(initialValue: profile?.groupName ?? "")
+        _groupName = State(initialValue: profile?.groupName ?? defaultGroupName ?? "")
         _homePageText = State(initialValue: profile?.homePage.absoluteString ?? BrowserProfile.defaultHomePage.absoluteString)
         _userAgent = State(initialValue: profile?.userAgent ?? BrowserProfile.defaultUserAgent)
         _selectedUserAgentName = State(initialValue: BrowserProfile.userAgentPresetName(for: profile?.userAgent))

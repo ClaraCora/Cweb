@@ -81,6 +81,12 @@ struct BackupService {
                 id: newID,
                 name: profile.name,
                 groupName: profile.groupName,
+                // Group IDs are local to the source profile collection and
+                // must be remapped by AppModel when an import is added.  The
+                // user-facing metadata can safely travel with the profile.
+                groupID: nil,
+                groupCode: profile.groupCode,
+                groupEmoji: profile.groupEmoji,
                 websiteDataStoreID: UUID(),
                 userAgent: profile.userAgent,
                 fingerprintSeed: UUID(),
