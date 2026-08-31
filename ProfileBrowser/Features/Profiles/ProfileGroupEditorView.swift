@@ -60,6 +60,12 @@ struct ProfileGroupEditorView: View {
                 }
 
                 Section {
+                    Text("修改分组名称会同步组内环境的所属分组。以旧分组名称开头的环境名会保留后缀并自动更新；手动命名的环境不会被覆盖。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section {
                     LazyVGrid(
                         columns: [
                             GridItem(.adaptive(minimum: 48), spacing: 8)
