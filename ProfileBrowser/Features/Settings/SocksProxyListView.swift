@@ -10,6 +10,7 @@ struct SocksProxyListView: View {
     @State private var pendingClear = false
     @State private var pendingDelete: SocksProxy?
     @State private var isValidating = false
+    @State private var testingProxyID: UUID?
     @State private var statusMessage: String?
 
     var body: some View {
@@ -51,7 +52,9 @@ struct SocksProxyListView: View {
         }
         .overlay {
             if isValidating {
-                ProgressView("正在验证")
+                ProgressView(
+                    testingProxyID == nil ? "正在批量验证" : "正在测试代理"
+                )
                     .padding(.horizontal, 20)
                     .padding(.vertical, 14)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -137,12 +140,21 @@ struct SocksProxyListView: View {
                         Button("删除", systemImage: "trash", role: .destructive) {
                             pendingDelete = ranking.proxy
                         }
+                        Button("测试", systemImage: "bolt.horizontal") {
+                            validateProxy(ranking.proxy)
+                        }
+                        .tint(.green)
+                        .disabled(isValidating)
                         Button("编辑", systemImage: "pencil") {
                             editorMode = .edit(ranking.proxy)
                         }
                         .tint(.indigo)
                     }
                     .contextMenu {
+                        Button("测试代理", systemImage: "bolt.horizontal") {
+                            validateProxy(ranking.proxy)
+                        }
+                        .disabled(isValidating)
                         Button("编辑代理", systemImage: "pencil") {
                             editorMode = .edit(ranking.proxy)
                         }
@@ -242,10 +254,33 @@ struct SocksProxyListView: View {
     private func validateProxies() {
         guard !isValidating else { return }
         isValidating = true
+        testingProxyID = nil
         Task { @MainActor in
-            defer { isValidating = false }
+            defer {
+                isValidating = false
+                testingProxyID = nil
+            }
             do {
                 try await model.validateSocksProxies()
+                statusMessage = "批量测试完成，已保留可用且延迟最低的前 30 个代理。"
+            } catch {
+                model.present(error)
+            }
+        }
+    }
+
+    private func validateProxy(_ proxy: SocksProxy) {
+        guard !isValidating else { return }
+        isValidating = true
+        testingProxyID = proxy.id
+        Task { @MainActor in
+            defer {
+                isValidating = false
+                testingProxyID = nil
+            }
+            do {
+                try await model.validateSocksProxy(proxy)
+                statusMessage = "单独测试完成。"
             } catch {
                 model.present(error)
             }

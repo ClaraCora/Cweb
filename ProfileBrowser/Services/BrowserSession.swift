@@ -15,6 +15,8 @@ final class BrowserSession {
     var presentedError: PresentedError?
 
     private var hasStarted = false
+    private var navigationTask: Task<Void, Never>?
+    private var navigationGeneration = 0
     private let proxyConfigurationError: String?
 
     init(profile: BrowserProfile, socksProxy: SocksProxy? = nil) {
@@ -28,11 +30,6 @@ final class BrowserSession {
         var proxyConfigurationError: String?
         if let socksProxy, let endpoint = Self.endpoint(for: socksProxy) {
             var proxyConfiguration = ProxyConfiguration(socksv5Proxy: endpoint)
-            // An empty match domain is Network's default-domain wildcard.
-            // Without it WebKit may leave ordinary page requests outside the
-            // proxy configuration, depending on the OS release.
-            proxyConfiguration.matchDomains = [""]
-            proxyConfiguration.excludedDomains = []
             // Never fall back to a direct connection if the selected proxy
             // fails. That would expose the environment's real network path.
             proxyConfiguration.allowFailover = false
@@ -115,7 +112,7 @@ final class BrowserSession {
             return
         }
         addressText = url.absoluteString
-        page.load(url)
+        startNavigation { page.load(url) }
     }
 
     func syncAddressBar(with url: URL?) {
@@ -125,12 +122,12 @@ final class BrowserSession {
 
     func goBack() {
         guard let item = page.backForwardList.backList.last else { return }
-        page.load(item)
+        startNavigation { page.load(item) }
     }
 
     func goForward() {
         guard let item = page.backForwardList.forwardList.first else { return }
-        page.load(item)
+        startNavigation { page.load(item) }
     }
 
     func goHome() {
@@ -139,10 +136,73 @@ final class BrowserSession {
 
     func reloadOrStop() {
         if page.isLoading {
+            navigationTask?.cancel()
+            navigationTask = nil
+            navigationGeneration += 1
             page.stopLoading()
         } else {
-            page.reload()
+            startNavigation { page.reload() }
         }
+    }
+
+    /// Starts a WebPage navigation and observes the sequence it returns.
+    /// Discarding this sequence hides the underlying proxy, DNS, TLS, and
+    /// connection errors, leaving the user with a blank page. Keeping one task
+    /// per active navigation also ensures a cancelled/previous load cannot
+    /// surface an error after a newer navigation has begun.
+    private func startNavigation<S: AsyncSequence>(
+        _ makeSequence: () -> S
+    ) where S.Element == WebPage.NavigationEvent {
+        navigationTask?.cancel()
+        navigationTask = nil
+        navigationGeneration += 1
+        let generation = navigationGeneration
+        // Evaluate the loading API only after cancelling the previous task.
+        // WebPage stops its current load when the task observing the previous
+        // sequence is cancelled; reversing this order could stop the new load.
+        let sequence = makeSequence()
+
+        navigationTask = Task { @MainActor [weak self] in
+            do {
+                for try await _ in sequence { }
+            } catch {
+                guard !Task.isCancelled,
+                      let self,
+                      self.navigationGeneration == generation else { return }
+                self.presentedError = PresentedError(
+                    message: Self.navigationErrorMessage(error)
+                )
+            }
+
+            guard let self,
+                  self.navigationGeneration == generation else { return }
+            self.navigationTask = nil
+        }
+    }
+
+    private static func navigationErrorMessage(_ error: Error) -> String {
+        if let navigationError = error as? WebPage.NavigationError {
+            switch navigationError {
+            case .failedProvisionalNavigation(let underlyingError):
+                let detail = underlyingError.localizedDescription
+                return detail.isEmpty ? "页面加载失败，请检查代理和网络连接。" : "页面加载失败：\(detail)"
+            case .invalidURL:
+                return "页面地址无效。"
+            case .pageClosed:
+                return "页面已关闭，无法继续加载。"
+            case .webContentProcessTerminated:
+                return "网页进程已终止，请重试。"
+            @unknown default:
+                return "页面加载失败，请检查代理和网络连接。"
+            }
+        }
+
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain {
+            return "网络请求失败（\(nsError.code)）：\(nsError.localizedDescription)"
+        }
+        let detail = error.localizedDescription
+        return detail.isEmpty ? "页面加载失败，请检查代理和网络连接。" : detail
     }
 
     func fill(_ credential: StoredCredential) async throws -> CredentialFillResult {

@@ -201,7 +201,15 @@ final class AppModel {
         }
 
         var value = proxy
-        if existing.identityKey != proxy.identityKey || existing.scheme != proxy.scheme {
+        // Any endpoint or credential change invalidates the previous probe.
+        // `identityKey` intentionally omits the password so feed refreshes can
+        // retain a record ID when credentials rotate; editing a password here
+        // must still force a fresh validation before the proxy is considered
+        // usable again.
+        let contentChanged = existing.identityKey != proxy.identityKey
+            || existing.scheme != proxy.scheme
+            || existing.password != proxy.password
+        if contentChanged {
             value.latencyMilliseconds = nil
             value.status = .untested
             value.lastCheckedAt = nil
@@ -232,8 +240,25 @@ final class AppModel {
     func validateSocksProxies() async throws {
         guard !socksProxies.isEmpty else { return }
         let validated = await socksProxyValidationService.validateAndSort(socksProxies)
-        try socksProxyRepository.save(validated)
-        socksProxies = validated
+        // Keep only proxies that completed the real SOCKS CONNECT probe, then
+        // bound the ranked list so stale feed entries cannot grow the app's
+        // proxy store indefinitely. Display numbers are recalculated from this
+        // retained list after every batch validation.
+        let retained = Array(validated.filter { $0.status == .available }.prefix(30))
+        try socksProxyRepository.save(retained)
+        socksProxies = retained
+    }
+
+    func validateSocksProxy(_ proxy: SocksProxy) async throws {
+        guard socksProxies.contains(where: { $0.id == proxy.id }) else {
+            throw SocksProxyError.notFound
+        }
+
+        let result = await socksProxyValidationService.validate(proxy)
+        let updated = socksProxies.map { $0.applying(result) }
+        let ranked = SocksProxyValidationService.sort(updated)
+        try socksProxyRepository.save(ranked)
+        socksProxies = ranked
     }
 
     func updateOrAddProxyPreset(_ preset: SocksProxyPreset) throws {
