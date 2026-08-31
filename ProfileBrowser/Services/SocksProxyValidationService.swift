@@ -36,19 +36,24 @@ struct SocksProxyValidationConfiguration: Sendable, Hashable {
     /// The probe performs a SOCKS CONNECT request after the
     /// greeting/authentication handshake. This catches proxies that accept a
     /// handshake but cannot actually carry browser traffic. The default target
-    /// is an HTTPS port; TLS itself is intentionally left to WebKit, which has
-    /// the platform's complete TLS implementation and certificate validation.
+    /// is an HTTPS port, and the optional TLS check uses URLSession's platform
+    /// implementation and certificate validation.
     var targetHost: String?
     var targetPort: Int
+    /// Also perform a real HTTPS request through the same SOCKS configuration.
+    /// This catches nodes that accept CONNECT on port 443 but fail during TLS.
+    var verifiesTLS: Bool
 
     init(
         timeout: TimeInterval = 8,
         targetHost: String? = "example.com",
-        targetPort: Int = 443
+        targetPort: Int = 443,
+        verifiesTLS: Bool = true
     ) {
         self.timeout = max(0.1, timeout)
         self.targetHost = targetHost
         self.targetPort = min(65_535, max(1, targetPort))
+        self.verifiesTLS = verifiesTLS
     }
 }
 
@@ -201,6 +206,7 @@ enum SocksProxyValidationError: LocalizedError, Equatable, Sendable {
     case authenticationRequired
     case authenticationFailed
     case targetConnectionFailed
+    case tlsHandshakeFailed
     case unsupportedAddress
 
     var errorDescription: String? {
@@ -219,6 +225,8 @@ enum SocksProxyValidationError: LocalizedError, Equatable, Sendable {
             return "代理账号或密码验证失败。"
         case .targetConnectionFailed:
             return "代理无法连接测试目标。"
+        case .tlsHandshakeFailed:
+            return "代理无法完成 HTTPS/TLS 握手。"
         case .unsupportedAddress:
             return "测试目标地址过长，无法通过 SOCKS5 发送。"
         }
@@ -295,6 +303,21 @@ struct NetworkSocksProxyProbe: SocksProxyProbe {
                 on: connection,
                 timeout: timeout
             )
+            if configuration.verifiesTLS {
+                // The raw SOCKS connection has already proved the proxy can
+                // reach the target. Close it before running the same request
+                // through URLSession, which performs the platform TLS and
+                // certificate checks used by real HTTPS traffic.
+                connection.cancel()
+                try await Self.verifyHTTPS(
+                    proxy: proxy,
+                    proxyHost: proxyHost,
+                    proxyPort: port,
+                    host: targetHost,
+                    targetPort: configuration.targetPort,
+                    timeout: timeout
+                )
+            }
         }
 
         let latency = max(1, Int(Date().timeIntervalSince(startedAt) * 1_000))
@@ -336,6 +359,83 @@ struct NetworkSocksProxyProbe: SocksProxyProbe {
             throw SocksProxyValidationError.invalidHandshake
         }
         _ = try await receiveExact(addressLength + 2, from: connection, timeout: timeout)
+    }
+
+    private static func verifyHTTPS(
+        proxy: SocksProxy,
+        proxyHost: String,
+        proxyPort: NWEndpoint.Port,
+        host: String,
+        targetPort: Int,
+        timeout: TimeInterval
+    ) async throws {
+        guard let targetURL = targetURL(host: host, port: targetPort) else {
+            throw SocksProxyValidationError.unsupportedAddress
+        }
+
+        var proxyConfiguration = ProxyConfiguration(
+            socksv5Proxy: .hostPort(host: NWEndpoint.Host(proxyHost), port: proxyPort)
+        )
+        proxyConfiguration.allowFailover = false
+        if let username = proxy.username,
+           let password = proxy.password {
+            proxyConfiguration.applyCredential(username: username, password: password)
+        }
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = timeout
+        configuration.timeoutIntervalForResource = timeout
+        configuration.waitsForConnectivity = false
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.proxyConfigurations = [proxyConfiguration]
+
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+
+        var request = URLRequest(url: targetURL)
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.timeoutInterval = timeout
+        do {
+            let (_, response) = try await session.data(for: request)
+            guard response is HTTPURLResponse else {
+                throw SocksProxyValidationError.tlsHandshakeFailed
+            }
+        } catch is CancellationError {
+            throw SocksProxyValidationError.connectionCancelled
+        } catch let error as SocksProxyValidationError {
+            throw error
+        } catch let error as URLError {
+            switch error.code {
+            case .timedOut:
+                throw SocksProxyValidationError.timeout
+            case .cancelled:
+                throw SocksProxyValidationError.connectionCancelled
+            case .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed:
+                throw SocksProxyValidationError.connectionFailed
+            default:
+                throw SocksProxyValidationError.tlsHandshakeFailed
+            }
+        } catch {
+            throw SocksProxyValidationError.tlsHandshakeFailed
+        }
+    }
+
+    private static func targetURL(host: String, port: Int) -> URL? {
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedHost.isEmpty,
+              trimmedHost.count <= 253,
+              trimmedHost.rangeOfCharacter(from: .whitespacesAndNewlines) == nil,
+              !trimmedHost.contains(where: { "/?#".contains($0) }),
+              (1...65_535).contains(port) else {
+            return nil
+        }
+
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = trimmedHost
+        components.port = port
+        components.path = "/"
+        return components.url
     }
 
     private static func waitUntilReady(

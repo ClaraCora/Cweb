@@ -179,7 +179,7 @@ struct SocksProxyListView: View {
             HStack {
                 Text("代理列表")
                 Spacer()
-                Text("验证后按延迟排序")
+                Text("验证 HTTPS/TLS 后按延迟排序")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -229,7 +229,7 @@ struct SocksProxyListView: View {
                 .textCase(nil)
             }
         } footer: {
-            Text("预设链接只会在你点击“拉取”时访问网络，可保存多个来源。")
+            Text("预设链接只会在你点击“拉取”时访问网络，可保存多个来源。代理验证会通过 SOCKS 访问 HTTPS 测试站点；无法完成 TLS 的节点不会保留。")
         }
     }
 

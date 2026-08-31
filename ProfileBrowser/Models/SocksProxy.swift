@@ -17,10 +17,9 @@ enum SocksProxyStatus: String, Codable, CaseIterable, Hashable, Sendable {
 
 struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
     /// Increment when the validation protocol changes. Older records are
-    /// re-tested before they can be used. Validation now ends after a SOCKS5
-    /// CONNECT to the HTTPS test port; TLS is deliberately handled by WebKit
-    /// instead of a hand-written ClientHello.
-    static let currentValidationRevision = 3
+    /// re-tested before they can be used. Validation now includes a real HTTPS
+    /// request, so a proxy accepted by the older TCP-only check is stale.
+    static let currentValidationRevision = 4
 
     let id: UUID
     var scheme: SocksProxyScheme

@@ -60,6 +60,7 @@ struct SocksProxyTests {
 
         #expect(configuration.targetHost == "example.com")
         #expect(configuration.targetPort == 443)
+        #expect(configuration.verifiesTLS)
     }
 
     @Test
