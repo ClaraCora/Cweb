@@ -184,7 +184,7 @@ final class BrowserSession {
         if let navigationError = error as? WebPage.NavigationError {
             switch navigationError {
             case .failedProvisionalNavigation(let underlyingError):
-                let detail = underlyingError.localizedDescription
+                let detail = Self.networkErrorDetail(underlyingError)
                 return detail.isEmpty ? "页面加载失败，请检查代理和网络连接。" : "页面加载失败：\(detail)"
             case .invalidURL:
                 return "页面地址无效。"
@@ -199,10 +199,20 @@ final class BrowserSession {
 
         let nsError = error as NSError
         if nsError.domain == NSURLErrorDomain {
-            return "网络请求失败（\(nsError.code)）：\(nsError.localizedDescription)"
+            return "网络请求失败：\(Self.networkErrorDetail(error))"
         }
         let detail = error.localizedDescription
         return detail.isEmpty ? "页面加载失败，请检查代理和网络连接。" : detail
+    }
+
+    private static func networkErrorDetail(_ error: Error) -> String {
+        let nsError = error as NSError
+        let description = nsError.localizedDescription
+        guard nsError.domain == NSURLErrorDomain else { return description }
+        let code = nsError.code
+        return description.isEmpty
+            ? "\(nsError.domain) \(code)"
+            : "\(description)（\(nsError.domain) \(code)）"
     }
 
     func fill(_ credential: StoredCredential) async throws -> CredentialFillResult {

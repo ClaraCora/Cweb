@@ -16,6 +16,12 @@ enum SocksProxyStatus: String, Codable, CaseIterable, Hashable, Sendable {
 }
 
 struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
+    /// Increment when the validation protocol changes. Older records are
+    /// re-tested before they can be used. Validation now ends after a SOCKS5
+    /// CONNECT to the HTTPS test port; TLS is deliberately handled by WebKit
+    /// instead of a hand-written ClientHello.
+    static let currentValidationRevision = 3
+
     let id: UUID
     var scheme: SocksProxyScheme
     var host: String
@@ -26,6 +32,7 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
     var status: SocksProxyStatus
     var lastCheckedAt: Date?
     var validationMessage: String?
+    var validationRevision: Int
     /// A redacted source value retained for editing and display. Passwords
     /// are intentionally omitted from this value.
     var sourceURLString: String?
@@ -41,6 +48,7 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
         status: SocksProxyStatus = .untested,
         lastCheckedAt: Date? = nil,
         validationMessage: String? = nil,
+        validationRevision: Int = SocksProxy.currentValidationRevision,
         sourceURLString: String? = nil
     ) {
         self.id = id
@@ -53,6 +61,7 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
         self.status = status
         self.lastCheckedAt = lastCheckedAt
         self.validationMessage = validationMessage
+        self.validationRevision = validationRevision
         self.sourceURLString = sourceURLString
     }
 
@@ -66,6 +75,7 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
         case status
         case lastCheckedAt
         case validationMessage
+        case validationRevision
         case sourceURLString
     }
 
@@ -83,6 +93,9 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
         status = try container.decodeIfPresent(SocksProxyStatus.self, forKey: .status) ?? .untested
         lastCheckedAt = try container.decodeIfPresent(Date.self, forKey: .lastCheckedAt)
         validationMessage = try container.decodeIfPresent(String.self, forKey: .validationMessage)
+        // Records without a revision are intentionally treated as stale by
+        // AppModel whenever the validation protocol changes.
+        validationRevision = try container.decodeIfPresent(Int.self, forKey: .validationRevision) ?? 0
         sourceURLString = try container.decodeIfPresent(String.self, forKey: .sourceURLString)
     }
 
@@ -97,6 +110,7 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
         try container.encode(status, forKey: .status)
         try container.encodeIfPresent(lastCheckedAt, forKey: .lastCheckedAt)
         try container.encodeIfPresent(validationMessage, forKey: .validationMessage)
+        try container.encode(validationRevision, forKey: .validationRevision)
         try container.encodeIfPresent(sourceURLString, forKey: .sourceURLString)
     }
 
@@ -188,6 +202,17 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
         copy.status = result.status
         copy.lastCheckedAt = result.checkedAt
         copy.validationMessage = result.message
+        copy.validationRevision = Self.currentValidationRevision
+        return copy
+    }
+
+    func invalidatingValidation() -> SocksProxy {
+        var copy = self
+        copy.latencyMilliseconds = nil
+        copy.status = .untested
+        copy.lastCheckedAt = nil
+        copy.validationMessage = nil
+        copy.validationRevision = Self.currentValidationRevision
         return copy
     }
 

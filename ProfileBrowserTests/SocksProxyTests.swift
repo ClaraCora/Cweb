@@ -55,11 +55,31 @@ struct SocksProxyTests {
     }
 
     @Test
-    func validationDefaultsToARealConnectProbe() {
+    func validationDefaultsToHTTPSConnectProbe() {
         let configuration = SocksProxyValidationConfiguration()
 
         #expect(configuration.targetHost == "example.com")
-        #expect(configuration.targetPort == 80)
+        #expect(configuration.targetPort == 443)
+    }
+
+    @Test
+    func staleValidationIsInvalidatedAfterProbeProtocolUpgrade() {
+        var proxy = SocksProxy(
+            host: "127.0.0.1",
+            port: 1080,
+            latencyMilliseconds: 12,
+            status: .available,
+            lastCheckedAt: .now,
+            validationMessage: nil,
+            validationRevision: 1
+        )
+
+        proxy = proxy.invalidatingValidation()
+
+        #expect(proxy.status == .untested)
+        #expect(proxy.latencyMilliseconds == nil)
+        #expect(proxy.lastCheckedAt == nil)
+        #expect(proxy.validationRevision == SocksProxy.currentValidationRevision)
     }
 
     @Test

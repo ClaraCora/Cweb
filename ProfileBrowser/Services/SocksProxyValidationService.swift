@@ -35,14 +35,16 @@ struct SocksProxyValidationConfiguration: Sendable, Hashable {
     var timeout: TimeInterval
     /// The probe performs a SOCKS CONNECT request after the
     /// greeting/authentication handshake. This catches proxies that accept a
-    /// handshake but cannot actually carry browser traffic.
+    /// handshake but cannot actually carry browser traffic. The default target
+    /// is an HTTPS port; TLS itself is intentionally left to WebKit, which has
+    /// the platform's complete TLS implementation and certificate validation.
     var targetHost: String?
     var targetPort: Int
 
     init(
         timeout: TimeInterval = 8,
         targetHost: String? = "example.com",
-        targetPort: Int = 80
+        targetPort: Int = 443
     ) {
         self.timeout = max(0.1, timeout)
         self.targetHost = targetHost

@@ -389,7 +389,16 @@ final class AppModel {
 
     private func reloadSocksProxies() {
         do {
-            socksProxies = try socksProxyRepository.load()
+            let loadedProxies = try socksProxyRepository.load()
+            let migratedProxies = loadedProxies.map { proxy in
+                proxy.validationRevision == SocksProxy.currentValidationRevision
+                    ? proxy
+                    : proxy.invalidatingValidation()
+            }
+            if migratedProxies != loadedProxies {
+                try socksProxyRepository.save(migratedProxies)
+            }
+            socksProxies = migratedProxies
             proxyPresets = try socksProxyRepository.loadPresets()
         } catch {
             present(error)
