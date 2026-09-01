@@ -16,7 +16,7 @@ struct ProfileBrowserApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ProfileGroupGridView()
+            AppRootView()
                 .environment(model)
                 .tint(Color("AccentColor"))
                 .preferredColorScheme(preferredColorScheme)

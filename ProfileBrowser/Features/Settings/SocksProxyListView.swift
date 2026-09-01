@@ -21,8 +21,8 @@ struct SocksProxyListView: View {
             presetSection
         }
         .listStyle(.insetGrouped)
-        .navigationTitle("SOCKS 代理")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("代理")
+        .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button("验证", systemImage: "bolt.horizontal") {

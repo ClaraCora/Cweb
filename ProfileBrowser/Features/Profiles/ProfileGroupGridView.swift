@@ -5,9 +5,6 @@ struct ProfileGroupGridView: View {
     @Environment(AppModel.self) private var model
 
     @State private var editorMode: ProfileEditorMode?
-    @State private var showsBackup = false
-    @State private var showsSocksProxyManager = false
-    @State private var showsSettings = false
     @State private var showsGroupOrder = false
     @State private var groupEditor: ProfileGroup?
     @State private var pendingGroupDeletion: ProfileGroup?
@@ -20,7 +17,7 @@ struct ProfileGroupGridView: View {
         NavigationStack(path: $navigationPath) {
             content
                 .navigationTitle("分组")
-                .navigationBarTitleDisplayMode(.inline)
+                .navigationBarTitleDisplayMode(.large)
                 .navigationDestination(for: UUID.self) { groupID in
                     ProfileListView(
                         groupID: groupID,
@@ -29,38 +26,15 @@ struct ProfileGroupGridView: View {
                 }
                 .toolbar {
                     ToolbarItemGroup(placement: .topBarTrailing) {
+                        Button("分组排序", systemImage: "arrow.up.arrow.down") {
+                            showsGroupOrder = true
+                        }
+                        .disabled(model.profileGroups.count < 2)
+
                         Button("新建", systemImage: "plus") {
                             editorMode = .create
                         }
                         .disabled(!model.isProfileStoreAvailable)
-                        Button("设置", systemImage: "gearshape") {
-                            showsSettings = true
-                        }
-                        Menu {
-                            Button("分组排序", systemImage: "arrow.up.arrow.down") {
-                                showsGroupOrder = true
-                            }
-                            .disabled(model.profileGroups.count < 2)
-                            Button("备份", systemImage: "lock.doc") {
-                                showsBackup = true
-                            }
-                            Button("SOCKS 代理", systemImage: "network") {
-                                showsSocksProxyManager = true
-                            }
-                        } label: {
-                            Label("更多", systemImage: "ellipsis.circle")
-                        }
-                    }
-                }
-                .sheet(isPresented: $showsBackup) {
-                    BackupView()
-                }
-                .navigationDestination(isPresented: $showsSocksProxyManager) {
-                    SocksProxyListView()
-                }
-                .sheet(isPresented: $showsSettings) {
-                    NavigationStack {
-                        SettingsView()
                     }
                 }
                 .sheet(isPresented: $showsGroupOrder) {
@@ -271,13 +245,13 @@ private struct ProfileGroupCard: View {
         .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
         .background(
             group.color.color.opacity(0.14),
-            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
         )
         .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .strokeBorder(group.color.color.opacity(0.24), lineWidth: 0.5)
         }
-        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(group.displayEmoji)，\(group.name)\(group.displayCode.map { "，代号 \($0)" } ?? "")，\(group.profiles.count) 个环境")
         .accessibilityHint("进入分组")

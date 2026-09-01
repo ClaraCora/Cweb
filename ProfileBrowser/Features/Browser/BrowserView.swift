@@ -16,40 +16,20 @@ struct BrowserView: View {
     var body: some View {
         @Bindable var session = session
 
-        VStack(spacing: 0) {
-            BrowserAddressBar(session: session)
-
-            ProgressView(value: session.page.estimatedProgress)
-                .progressViewStyle(.linear)
-                .tint(session.profile.color.color)
-                .opacity(session.page.isLoading ? 1 : 0)
-                .frame(height: 2)
-                .accessibilityHidden(!session.page.isLoading)
-
-            WebView(session.page)
-                .webViewBackForwardNavigationGestures(.enabled)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            BrowserToolbar(
-                canGoBack: session.canGoBack,
-                canGoForward: session.canGoForward,
-                isLoading: session.page.isLoading,
-                credentialsEnabled: session.currentOrigin?.isSecure == true,
-                goBack: session.goBack,
-                goForward: session.goForward,
-                goHome: session.goHome,
-                reloadOrStop: session.reloadOrStop,
-                showCredentials: { showsCredentials = true },
-                showDiagnostics: { showsDiagnostics = true }
-            )
-            .padding(.horizontal, 12)
-            .padding(.vertical, 4)
-            .background(.bar)
-            .overlay(alignment: .top) {
-                Divider()
+        WebView(session.page)
+            .webViewBackForwardNavigationGestures(.enabled)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                BrowserBottomChrome(
+                    session: session,
+                    credentialsEnabled: session.currentOrigin?.isSecure == true,
+                    showCredentials: { showsCredentials = true },
+                    showDiagnostics: { showsDiagnostics = true }
+                )
             }
-        }
         .navigationTitle(session.profile.name)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarVisibility(.hidden, for: .tabBar)
         .toolbar {
             ToolbarItem(placement: .principal) {
                 Label(session.profile.name, systemImage: "person.crop.square.fill")
@@ -57,14 +37,6 @@ struct BrowserView: View {
                     .font(.headline)
                     .lineLimit(1)
                     .accessibilityLabel("当前环境：\(session.profile.name)")
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("填充密码", systemImage: "key.fill") {
-                    showsCredentials = true
-                }
-                .tint(Color.accentColor)
-                .disabled(session.currentOrigin?.isSecure != true)
-                .accessibilityLabel("填充密码")
             }
         }
         .onChange(of: session.page.url) { _, newURL in
@@ -99,34 +71,79 @@ struct BrowserView: View {
 }
 
 @MainActor
+private struct BrowserBottomChrome: View {
+    @Bindable var session: BrowserSession
+    let credentialsEnabled: Bool
+    let showCredentials: () -> Void
+    let showDiagnostics: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ProgressView(value: session.page.estimatedProgress)
+                .progressViewStyle(.linear)
+                .tint(session.profile.color.color)
+                .opacity(session.page.isLoading ? 1 : 0)
+                .frame(height: 2)
+                .accessibilityHidden(!session.page.isLoading)
+
+            BrowserAddressBar(session: session)
+
+            BrowserToolbar(
+                canGoBack: session.canGoBack,
+                canGoForward: session.canGoForward,
+                credentialsEnabled: credentialsEnabled,
+                goBack: session.goBack,
+                goForward: session.goForward,
+                goHome: session.goHome,
+                showCredentials: showCredentials,
+                showDiagnostics: showDiagnostics
+            )
+            .padding(.horizontal, 12)
+            .padding(.vertical, 2)
+        }
+        .background(.bar)
+        .overlay(alignment: .top) {
+            Divider()
+        }
+    }
+}
+
+@MainActor
 private struct BrowserAddressBar: View {
     @Bindable var session: BrowserSession
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: session.currentOrigin?.isSecure == true ? "lock.fill" : "globe")
-                .foregroundStyle(session.currentOrigin?.isSecure == true ? .green : .secondary)
-                .frame(width: 20)
-                .accessibilityLabel(session.currentOrigin?.isSecure == true ? "安全连接" : "网址")
+            HStack(spacing: 8) {
+                Image(systemName: session.currentOrigin?.isSecure == true ? "lock.fill" : "globe")
+                    .foregroundStyle(session.currentOrigin?.isSecure == true ? .green : .secondary)
+                    .frame(width: 20)
+                    .accessibilityLabel(session.currentOrigin?.isSecure == true ? "安全连接" : "网址")
 
-            TextField("网址或搜索内容", text: $session.addressText)
-                .keyboardType(.URL)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .submitLabel(.go)
-                .onSubmit(session.navigateFromAddressBar)
-                .accessibilityLabel("地址")
+                TextField("网址或搜索内容", text: $session.addressText)
+                    .keyboardType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .submitLabel(.go)
+                    .lineLimit(1)
+                    .onSubmit(session.navigateFromAddressBar)
+                    .accessibilityLabel("地址")
 
-            Button("前往", systemImage: "arrow.right.circle.fill") {
-                session.navigateFromAddressBar()
+                Button(
+                    session.page.isLoading ? "停止" : "刷新",
+                    systemImage: session.page.isLoading ? "xmark" : "arrow.clockwise"
+                ) {
+                    session.reloadOrStop()
+                }
+                .labelStyle(.iconOnly)
+                .frame(minWidth: 44, minHeight: 44)
+                .accessibilityLabel(session.page.isLoading ? "停止载入" : "重新载入")
             }
-            .labelStyle(.iconOnly)
-            .font(.title3)
-            .frame(minWidth: 44, minHeight: 44)
+            .padding(.leading, 12)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .padding(.horizontal, 12)
-        .frame(minHeight: 52)
-        .background(.bar)
+        .padding(.vertical, 6)
     }
 }
 
@@ -134,12 +151,10 @@ private struct BrowserAddressBar: View {
 private struct BrowserToolbar: View {
     let canGoBack: Bool
     let canGoForward: Bool
-    let isLoading: Bool
     let credentialsEnabled: Bool
     let goBack: () -> Void
     let goForward: () -> Void
     let goHome: () -> Void
-    let reloadOrStop: () -> Void
     let showCredentials: () -> Void
     let showDiagnostics: () -> Void
 
@@ -151,13 +166,18 @@ private struct BrowserToolbar: View {
             Spacer()
             toolbarButton("主页", systemImage: "house", action: goHome)
             Spacer()
-            toolbarButton(isLoading ? "停止" : "刷新", systemImage: isLoading ? "xmark" : "arrow.clockwise", action: reloadOrStop)
+            toolbarButton("自动填充", systemImage: "key.fill", disabled: !credentialsEnabled, action: showCredentials)
             Spacer()
-            toolbarButton("凭据", systemImage: "key", disabled: !credentialsEnabled, action: showCredentials)
-            Spacer()
-            toolbarButton("诊断", systemImage: "waveform.path.ecg", action: showDiagnostics)
+            Menu {
+                Button("网页诊断", systemImage: "waveform.path.ecg", action: showDiagnostics)
+            } label: {
+                Label("更多", systemImage: "ellipsis.circle")
+                    .labelStyle(.iconOnly)
+                    .frame(minWidth: 44, minHeight: 44)
+            }
+            .accessibilityLabel("更多")
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, minHeight: 48)
     }
 
     private func toolbarButton(

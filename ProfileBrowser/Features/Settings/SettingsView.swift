@@ -4,7 +4,6 @@ import SwiftUI
 @MainActor
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
     @AppStorage(AppSettings.appearanceModeKey) private var appearanceModeRaw = AppSettings.defaultAppearanceMode
     @State private var showsBackup = false
 
@@ -19,30 +18,24 @@ struct SettingsView: View {
         Form {
             Section {
                 NavigationLink {
-                    SocksProxyListView()
+                    SocksProxySettingsView(settings: model.socksProxyValidationSettings)
                 } label: {
                     Label {
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("SOCKS 代理")
-                            Text("管理、导入和测试代理节点 · \(proxySummary)")
+                            Text("验证与保留规则")
+                            Text(proxyPolicySummary)
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
                     } icon: {
-                        Image(systemName: "network")
+                        Image(systemName: "slider.horizontal.3")
                             .foregroundStyle(.tint)
                     }
                 }
-
-                NavigationLink {
-                    SocksProxySettingsView(settings: model.socksProxyValidationSettings)
-                } label: {
-                    Label("SOCKS 验证设置", systemImage: "slider.horizontal.3")
-                }
             } header: {
-                Text("网络与代理")
+                Text("代理策略")
             } footer: {
-                Text("代理验证只会在你主动执行验证时联网。")
+                Text("代理节点、导入和测试位于“代理”页。验证只会在你主动执行时联网。")
             }
 
             Section("外观") {
@@ -77,21 +70,17 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .navigationTitle("设置")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button("完成") { dismiss() }
-            }
-        }
+        .navigationBarTitleDisplayMode(.large)
         .sheet(isPresented: $showsBackup) {
             BackupView()
         }
     }
 
-    private var proxySummary: String {
-        let available = model.socksProxies.reduce(into: 0) { count, proxy in
-            if proxy.status == .available { count += 1 }
-        }
-        return "\(model.socksProxies.count) 个节点，\(available) 个可用"
+    private var proxyPolicySummary: String {
+        let settings = model.socksProxyValidationSettings
+        let count = settings.maxRetainedCount == 0
+            ? "不限保留数量"
+            : "最多保留 \(settings.maxRetainedCount) 个"
+        return "\(settings.sortMode.title) · \(count)"
     }
 }
