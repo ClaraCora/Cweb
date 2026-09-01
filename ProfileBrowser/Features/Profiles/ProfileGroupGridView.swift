@@ -207,21 +207,19 @@ private struct ProfileGroupCard: View {
                 .background(group.color.color.opacity(0.14), in: Circle())
                 .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(group.name)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.78)
-                        .layoutPriority(1)
-                    if let code = group.displayCode {
-                        Text(code)
-                            .font(.caption.monospaced().weight(.medium))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(group.name)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+                    .layoutPriority(1)
+
+                Text(group.displayCode ?? "未设置代号")
+                    .font(.subheadline.monospaced().weight(.medium))
+                    .foregroundStyle(group.displayCode == nil ? .tertiary : .secondary)
+                    .lineLimit(1)
+
                 Text("\(group.profiles.count) 个环境")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -242,7 +240,7 @@ private struct ProfileGroupCard: View {
             }
         }
         .padding(.horizontal, 14)
-        .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 104, alignment: .leading)
         .background(
             group.color.color.opacity(0.14),
             in: RoundedRectangle(cornerRadius: 8, style: .continuous)
