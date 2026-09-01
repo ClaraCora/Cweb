@@ -35,24 +35,20 @@ struct SocksProxyValidationConfiguration: Sendable, Hashable {
     var timeout: TimeInterval
     /// The probe performs a SOCKS CONNECT request after the
     /// greeting/authentication handshake. This catches proxies that accept a
-    /// handshake but cannot actually carry browser traffic. The default target
-    /// is an HTTPS port, and the optional TLS check uses URLSession's platform
-    /// implementation and certificate validation.
-    var targetHost: String?
-    var targetPort: Int
+    /// handshake but cannot actually carry browser traffic. The full URL is
+    /// retained so the optional HTTPS check can request a lightweight path.
+    var targetURL: URL?
     /// Also perform a real HTTPS request through the same SOCKS configuration.
     /// This catches nodes that accept CONNECT on port 443 but fail during TLS.
     var verifiesTLS: Bool
 
     init(
         timeout: TimeInterval = 8,
-        targetHost: String? = "example.com",
-        targetPort: Int = 443,
+        targetURL: URL? = URL(string: "https://example.com/"),
         verifiesTLS: Bool = true
     ) {
         self.timeout = max(0.1, timeout)
-        self.targetHost = targetHost
-        self.targetPort = min(65_535, max(1, targetPort))
+        self.targetURL = targetURL
         self.verifiesTLS = verifiesTLS
     }
 }
@@ -296,10 +292,12 @@ struct NetworkSocksProxyProbe: SocksProxyProbe {
             throw SocksProxyValidationError.invalidHandshake
         }
 
-        if let targetHost = configuration.targetHost {
+        if let targetURL = configuration.targetURL,
+           let targetHost = targetURL.host {
+            let targetPort = targetURL.port ?? 443
             try await Self.connectToTarget(
                 host: targetHost,
-                port: configuration.targetPort,
+                port: targetPort,
                 on: connection,
                 timeout: timeout
             )
@@ -313,8 +311,7 @@ struct NetworkSocksProxyProbe: SocksProxyProbe {
                     proxy: proxy,
                     proxyHost: proxyHost,
                     proxyPort: port,
-                    host: targetHost,
-                    targetPort: configuration.targetPort,
+                    targetURL: targetURL,
                     timeout: timeout
                 )
             }
@@ -365,14 +362,9 @@ struct NetworkSocksProxyProbe: SocksProxyProbe {
         proxy: SocksProxy,
         proxyHost: String,
         proxyPort: NWEndpoint.Port,
-        host: String,
-        targetPort: Int,
+        targetURL: URL,
         timeout: TimeInterval
     ) async throws {
-        guard let targetURL = targetURL(host: host, port: targetPort) else {
-            throw SocksProxyValidationError.unsupportedAddress
-        }
-
         var proxyConfiguration = ProxyConfiguration(
             socksv5Proxy: .hostPort(host: NWEndpoint.Host(proxyHost), port: proxyPort)
         )
@@ -418,24 +410,6 @@ struct NetworkSocksProxyProbe: SocksProxyProbe {
         } catch {
             throw SocksProxyValidationError.tlsHandshakeFailed
         }
-    }
-
-    private static func targetURL(host: String, port: Int) -> URL? {
-        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedHost.isEmpty,
-              trimmedHost.count <= 253,
-              trimmedHost.rangeOfCharacter(from: .whitespacesAndNewlines) == nil,
-              !trimmedHost.contains(where: { "/?#".contains($0) }),
-              (1...65_535).contains(port) else {
-            return nil
-        }
-
-        var components = URLComponents()
-        components.scheme = "https"
-        components.host = trimmedHost
-        components.port = port
-        components.path = "/"
-        return components.url
     }
 
     private static func waitUntilReady(

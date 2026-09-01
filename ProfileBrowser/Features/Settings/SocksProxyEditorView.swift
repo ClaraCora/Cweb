@@ -1,14 +1,16 @@
 import SwiftUI
 
-/// Editor for one SOCKS proxy record. The record ID is retained when editing
-/// so profiles that reference the current ranking can continue to use it.
+/// Editing retains the record ID; copying keeps the entered values but saves
+/// a new, untested record after the endpoint identity has changed.
 @MainActor
 struct SocksProxyEditorView: View {
     @Environment(\.dismiss) private var dismiss
 
     private let originalProxy: SocksProxy?
+    private let isCopy: Bool
     private let onSave: (SocksProxy) throws -> Void
 
+    @State private var code: String
     @State private var scheme: SocksProxyScheme
     @State private var host: String
     @State private var port: String
@@ -18,10 +20,13 @@ struct SocksProxyEditorView: View {
 
     init(
         proxy: SocksProxy? = nil,
+        isCopy: Bool = false,
         onSave: @escaping (SocksProxy) throws -> Void
     ) {
         originalProxy = proxy
+        self.isCopy = isCopy
         self.onSave = onSave
+        _code = State(initialValue: proxy?.displayCode ?? "")
         _scheme = State(initialValue: proxy?.scheme ?? .socks5)
         _host = State(initialValue: proxy?.host ?? "")
         _port = State(initialValue: proxy.map { String($0.port) } ?? "1080")
@@ -32,6 +37,12 @@ struct SocksProxyEditorView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("标识") {
+                    TextField("代号（可选）", text: $code)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
+
                 Section("代理地址") {
                     Picker("协议", selection: $scheme) {
                         ForEach(SocksProxyScheme.allCases, id: \.self) { value in
@@ -60,7 +71,7 @@ struct SocksProxyEditorView: View {
                         .autocorrectionDisabled()
                 }
 
-                if let originalProxy {
+                if let originalProxy, !isCopy {
                     Section("状态") {
                         LabeledContent("地址", value: originalProxy.displayAddress)
                         LabeledContent("可用性", value: statusText(originalProxy.status))
@@ -70,7 +81,7 @@ struct SocksProxyEditorView: View {
                     }
                 }
             }
-            .navigationTitle(originalProxy == nil ? "添加代理" : "编辑代理")
+            .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -93,6 +104,11 @@ struct SocksProxyEditorView: View {
 
     private var normalizedHost: String {
         SocksProxy.normalizeHost(host)
+    }
+
+    private var navigationTitle: String {
+        if isCopy { return "复制代理" }
+        return originalProxy == nil ? "添加代理" : "编辑代理"
     }
 
     private var parsedPort: Int? {
@@ -145,19 +161,26 @@ struct SocksProxyEditorView: View {
             normalizedPassword = nil
         }
         var proxy = SocksProxy(
-            id: originalProxy?.id ?? UUID(),
+            id: isCopy ? UUID() : (originalProxy?.id ?? UUID()),
+            code: code,
             scheme: scheme,
             host: normalizedHost,
             port: parsedPort,
             username: normalizedUsername.isEmpty ? nil : normalizedUsername,
             password: normalizedPassword,
-            latencyMilliseconds: originalProxy?.latencyMilliseconds,
-            status: originalProxy?.status ?? .untested,
-            lastCheckedAt: originalProxy?.lastCheckedAt,
-            validationMessage: originalProxy?.validationMessage,
+            latencyMilliseconds: isCopy ? nil : originalProxy?.latencyMilliseconds,
+            status: isCopy ? .untested : (originalProxy?.status ?? .untested),
+            lastCheckedAt: isCopy ? nil : originalProxy?.lastCheckedAt,
+            validationMessage: isCopy ? nil : originalProxy?.validationMessage,
             sourceURLString: originalProxy?.sourceURLString
         )
         proxy.sourceURLString = proxy.displayAddress
+        if isCopy, proxy.identityKey == originalProxy?.identityKey {
+            presentedError = PresentedError(
+                message: "复制代理时，请修改主机、端口或用户名后再保存。"
+            )
+            return
+        }
 
         do {
             try onSave(proxy)

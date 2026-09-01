@@ -61,8 +61,8 @@ struct SocksProxyListView: View {
             }
         }
         .sheet(item: $editorMode) { mode in
-            SocksProxyEditorView(proxy: mode.proxy) { proxy in
-                if mode.proxy == nil {
+            SocksProxyEditorView(proxy: mode.proxy, isCopy: mode.isCopy) { proxy in
+                if mode.createsNewRecord {
                     try model.addSocksProxy(proxy)
                 } else {
                     try model.updateSocksProxy(proxy)
@@ -158,6 +158,9 @@ struct SocksProxyListView: View {
                         Button("编辑代理", systemImage: "pencil") {
                             editorMode = .edit(ranking.proxy)
                         }
+                        Button("复制代理", systemImage: "doc.on.doc") {
+                            editorMode = .copy(ranking.proxy)
+                        }
                         Button("删除代理", systemImage: "trash", role: .destructive) {
                             pendingDelete = ranking.proxy
                         }
@@ -247,7 +250,7 @@ struct SocksProxyListView: View {
 
     private var validationFooter: String {
         let settings = model.socksProxyValidationSettings
-        let target = "\(settings.targetHost):\(settings.targetPort)"
+        let target = settings.targetURLString
         let probe = settings.verifiesTLS ? "SOCKS CONNECT 和 HTTPS/TLS" : "SOCKS CONNECT"
         let retention = settings.retainOnlyAvailable ? "只保留可用代理" : "保留全部测试结果"
         let count = settings.maxRetainedCount == 0 ? "不限数量" : "最多保留 \(settings.maxRetainedCount) 个"
@@ -338,9 +341,19 @@ private struct SocksProxyRow: View {
                     .background(Color.accentColor.opacity(0.12), in: Circle())
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(ranking.proxy.displayAddress)
-                        .font(.body.monospaced())
-                        .lineLimit(1)
+                    if let code = ranking.proxy.displayCode {
+                        Text(code)
+                            .font(.body.weight(.medium))
+                            .lineLimit(1)
+                        Text(ranking.proxy.displayAddress)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    } else {
+                        Text(ranking.proxy.displayAddress)
+                            .font(.body.monospaced())
+                            .lineLimit(1)
+                    }
                     HStack(spacing: 8) {
                         statusLabel
                         if let latency = ranking.proxy.latencyMilliseconds {
@@ -366,7 +379,14 @@ private struct SocksProxyRow: View {
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("第 \(ranking.number) 号，\(ranking.proxy.displayAddress)，\(statusText)")
+        .accessibilityLabel("第 \(ranking.number) 号，\(accessibilityName)，\(statusText)")
+    }
+
+    private var accessibilityName: String {
+        guard let code = ranking.proxy.displayCode else {
+            return ranking.proxy.displayAddress
+        }
+        return "代号 \(code)，\(ranking.proxy.displayAddress)"
     }
 
     @ViewBuilder
@@ -525,18 +545,32 @@ private struct SocksProxyPresetListView: View {
 private enum SocksProxyEditorMode: Identifiable {
     case create
     case edit(SocksProxy)
+    case copy(SocksProxy)
 
     var id: String {
         switch self {
         case .create: "create"
         case .edit(let proxy): proxy.id.uuidString
+        case .copy(let proxy): "copy-\(proxy.id.uuidString)"
         }
     }
 
     var proxy: SocksProxy? {
         switch self {
         case .create: nil
-        case .edit(let proxy): proxy
+        case .edit(let proxy), .copy(let proxy): proxy
+        }
+    }
+
+    var isCopy: Bool {
+        if case .copy = self { return true }
+        return false
+    }
+
+    var createsNewRecord: Bool {
+        switch self {
+        case .create, .copy: true
+        case .edit: false
         }
     }
 }

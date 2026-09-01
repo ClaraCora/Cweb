@@ -132,7 +132,7 @@ struct ProfileEditorView: View {
                     ) {
                         Text("不使用代理").tag(0)
                         ForEach(rankedProxyOptions) { option in
-                            Text("第 \(option.number) 号 · \(option.proxy.displayAddress)")
+                            Text("第 \(option.number) 号 · \(option.proxy.displayCode ?? option.proxy.displayAddress)")
                                 .tag(option.number)
                         }
                     }
@@ -140,6 +140,9 @@ struct ProfileEditorView: View {
 
                     if let socksProxyNumber {
                         if let proxy = model.socksProxy(forDisplayNumber: socksProxyNumber) {
+                            if let code = proxy.displayCode {
+                                LabeledContent("代号", value: code)
+                            }
                             LabeledContent("当前代理", value: proxy.displayAddress)
                         } else {
                             Text("当前没有第 \(socksProxyNumber) 号代理，重新拉取或验证后会按这个编号使用。")

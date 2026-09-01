@@ -148,6 +148,7 @@ struct SocksProxyRepository {
                 guard contentChanged else { continue }
                 var refreshed = SocksProxy(
                     id: existing.id,
+                    code: existing.code,
                     scheme: proxy.scheme,
                     host: proxy.host,
                     port: proxy.port,
@@ -187,6 +188,7 @@ struct SocksProxyRepository {
                 let existing = proxies[index]
                 proxies[index] = SocksProxy(
                     id: existing.id,
+                    code: existing.code,
                     scheme: refreshed.scheme,
                     host: refreshed.host,
                     port: refreshed.port,

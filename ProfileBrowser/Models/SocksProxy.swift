@@ -22,6 +22,7 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
     static let currentValidationRevision = 4
 
     let id: UUID
+    var code: String?
     var scheme: SocksProxyScheme
     var host: String
     var port: Int
@@ -38,6 +39,7 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
 
     init(
         id: UUID = UUID(),
+        code: String? = nil,
         scheme: SocksProxyScheme = .socks5,
         host: String,
         port: Int,
@@ -51,6 +53,7 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
         sourceURLString: String? = nil
     ) {
         self.id = id
+        self.code = Self.normalizeCode(code)
         self.scheme = scheme
         self.host = Self.normalizeHost(host)
         self.port = port
@@ -66,6 +69,7 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id
+        case code
         case scheme
         case host
         case port
@@ -81,6 +85,7 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
+        code = Self.normalizeCode(try container.decodeIfPresent(String.self, forKey: .code))
         scheme = try container.decodeIfPresent(SocksProxyScheme.self, forKey: .scheme) ?? .socks5
         host = Self.normalizeHost(try container.decode(String.self, forKey: .host))
         port = try container.decode(Int.self, forKey: .port)
@@ -101,6 +106,7 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
+        try container.encodeIfPresent(Self.normalizeCode(code), forKey: .code)
         try container.encode(scheme, forKey: .scheme)
         try container.encode(host, forKey: .host)
         try container.encode(port, forKey: .port)
@@ -183,6 +189,10 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
         Self.redactedURL(scheme: scheme, host: Self.normalizeHost(host), port: port, username: username)
     }
 
+    var displayCode: String? {
+        Self.normalizeCode(code)
+    }
+
     var isAvailable: Bool { status == .available }
 
     var latency: Int? { latencyMilliseconds }
@@ -231,6 +241,12 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
             return trimmed
         }
         return String(trimmed.dropFirst().dropLast())
+    }
+
+    private static func normalizeCode(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private static func hasExplicitPort(in value: String) -> Bool {

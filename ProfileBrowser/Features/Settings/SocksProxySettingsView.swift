@@ -71,19 +71,11 @@ struct SocksProxySettingsView: View {
             .textCase(nil)
 
             Section("测试目标") {
-                TextField("测试主机", text: $draft.targetHost)
+                TextField("HTTPS 测速地址", text: $draft.targetURLString, axis: .vertical)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
-
-                TextField("测试端口", value: $draft.targetPort, format: .number)
-                    .keyboardType(.numberPad)
-
-                if !isValidTargetPort {
-                    Label("端口必须是 1 到 65535 之间的数字。", systemImage: "info.circle")
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                }
+                    .lineLimit(1...3)
 
                 Toggle("验证 HTTPS / TLS", isOn: $draft.verifiesTLS)
 
@@ -91,8 +83,8 @@ struct SocksProxySettingsView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
-                if !isValidTargetHost {
-                    Label("请输入主机名或 IP 地址，不要包含路径、查询参数或空格。", systemImage: "info.circle")
+                if !isValidTargetURL {
+                    Label("请输入完整的 HTTPS 地址，例如 https://www.gstatic.com/generate_204。", systemImage: "info.circle")
                         .font(.footnote)
                         .foregroundStyle(.red)
                 }
@@ -105,7 +97,7 @@ struct SocksProxySettingsView: View {
                 }
                 .disabled(draft == SocksProxyValidationSettings.defaults)
             } footer: {
-                Text("默认值：只保留可用代理、最多 30 个、按延迟排序，使用 example.com:443 并验证 TLS。数量限制只在下一次批量测试时生效。")
+                Text("默认值：只保留可用代理、最多 30 个、按延迟排序，使用 https://example.com/ 并验证 TLS。数量限制只在下一次批量测试时生效。")
             }
         }
         .navigationTitle("SOCKS 验证设置")
@@ -120,7 +112,7 @@ struct SocksProxySettingsView: View {
                 Button("保存") {
                     save()
                 }
-                .disabled(!hasChanges || !isValidTargetHost || !isValidTargetPort)
+                .disabled(!hasChanges || !isValidTargetURL)
             }
         }
         .alert("恢复默认设置？", isPresented: $showsResetConfirmation) {
@@ -144,18 +136,8 @@ struct SocksProxySettingsView: View {
         draft.normalized != model.socksProxyValidationSettings.normalized
     }
 
-    private var isValidTargetHost: Bool {
-        let host = draft.targetHost.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !host.isEmpty,
-              host.rangeOfCharacter(from: .whitespacesAndNewlines) == nil,
-              !host.contains(where: { "/?#".contains($0) }) else {
-            return false
-        }
-        return true
-    }
-
-    private var isValidTargetPort: Bool {
-        (1...65_535).contains(draft.targetPort)
+    private var isValidTargetURL: Bool {
+        SocksProxyValidationSettings.targetURL(from: draft.targetURLString) != nil
     }
 
     private var retentionDescription: String {

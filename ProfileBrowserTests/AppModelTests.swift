@@ -386,7 +386,7 @@ struct AppModelTests {
         #expect(model.socksProxy(forDisplayNumber: 1)?.id == first.id)
 
         try model.updateSocksProxyValidationSettings(
-            SocksProxyValidationSettings(targetHost: "different.example")
+            SocksProxyValidationSettings(targetURLString: "https://example.com/generate_204")
         )
         #expect(model.socksProxies.allSatisfy { $0.status == .untested })
         #expect(model.socksProxies.allSatisfy { $0.latencyMilliseconds == nil })

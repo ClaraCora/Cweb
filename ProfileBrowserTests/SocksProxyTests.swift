@@ -45,21 +45,43 @@ struct SocksProxyTests {
     @Test
     func normalizesBracketedIPv6HostForStorageAndDisplay() throws {
         let proxy = SocksProxy(
+            code: "  香港主力  ",
             host: " [2001:db8::1] ",
             port: 1080
         )
 
+        #expect(proxy.displayCode == "香港主力")
         #expect(proxy.host == "2001:db8::1")
         #expect(proxy.displayAddress == "socks5://[2001:db8::1]:1080")
         #expect(proxy.identityKey == "2001:db8::1|1080|")
     }
 
     @Test
+    func decodesLegacyRecordWithoutCode() throws {
+        let id = UUID()
+        let data = Data(
+            """
+            {
+              "id": "\(id.uuidString)",
+              "host": "127.0.0.1",
+              "port": 1080
+            }
+            """.utf8
+        )
+
+        let proxy = try JSONDecoder().decode(SocksProxy.self, from: data)
+
+        #expect(proxy.id == id)
+        #expect(proxy.displayCode == nil)
+        #expect(proxy.scheme == .socks5)
+        #expect(proxy.status == .untested)
+    }
+
+    @Test
     func validationDefaultsToHTTPSConnectProbe() {
         let configuration = SocksProxyValidationConfiguration()
 
-        #expect(configuration.targetHost == "example.com")
-        #expect(configuration.targetPort == 443)
+        #expect(configuration.targetURL?.absoluteString == "https://example.com/")
         #expect(configuration.verifiesTLS)
     }
 
@@ -80,8 +102,7 @@ struct SocksProxyTests {
             retainOnlyAvailable: false,
             maxRetainedCount: -10,
             sortMode: .inputOrder,
-            targetHost: " bad host ",
-            targetPort: 70_000,
+            targetURLString: " https://www.gstatic.com/generate_204 ",
             verifiesTLS: false,
             timeoutSeconds: 90,
             maxConcurrent: 0
@@ -93,11 +114,29 @@ struct SocksProxyTests {
         #expect(loaded.retainOnlyAvailable == false)
         #expect(loaded.maxRetainedCount == 0)
         #expect(loaded.sortMode == .inputOrder)
-        #expect(loaded.targetHost == "example.com")
-        #expect(loaded.targetPort == 65_535)
+        #expect(loaded.targetURLString == "https://www.gstatic.com/generate_204")
+        #expect(loaded.validationConfiguration.targetURL?.host == "www.gstatic.com")
+        #expect(loaded.validationConfiguration.targetURL?.path == "/generate_204")
         #expect(loaded.verifiesTLS == false)
         #expect(loaded.timeoutSeconds == 60)
         #expect(loaded.maxConcurrent == 1)
+        #expect(SocksProxyValidationSettings.targetURL(from: "http://example.com/") == nil)
+    }
+
+    @Test
+    func legacyValidationTargetMigratesHostAndPortToURL() throws {
+        let data = Data(
+            """
+            {
+              "targetHost": "legacy.example",
+              "targetPort": 8443
+            }
+            """.utf8
+        )
+
+        let settings = try JSONDecoder().decode(SocksProxyValidationSettings.self, from: data)
+
+        #expect(settings.normalized.targetURLString == "https://legacy.example:8443/")
     }
 
     @Test
@@ -134,11 +173,13 @@ struct SocksProxyTests {
             presetsFileURL: presetsURL,
             credentialStore: credentialStore
         )
-        let proxy = try SocksProxy(urlString: "socks5://alice:secret@127.0.0.1:1080")
+        var proxy = try SocksProxy(urlString: "socks5://alice:secret@127.0.0.1:1080")
+        proxy.code = "主力 VPS"
         try repository.save([proxy])
 
         let loaded = try repository.load()
         #expect(loaded == [proxy])
+        #expect(loaded[0].displayCode == "主力 VPS")
         let rawJSON = try String(contentsOf: fileURL)
         #expect(!rawJSON.contains("secret"))
 
@@ -174,7 +215,8 @@ struct SocksProxyTests {
         let repository = SocksProxyRepository(fileURL: fileURL, credentialStore: credentialStore)
         defer { try? FileManager.default.removeItem(at: directory) }
 
-        let original = try SocksProxy(urlString: "socks5://user:old@127.0.0.1:1080")
+        var original = try SocksProxy(urlString: "socks5://user:old@127.0.0.1:1080")
+        original.code = "固定代号"
         try repository.save([original])
         let refreshed = try SocksProxy(urlString: "socks5://user:new@127.0.0.1:1080")
 
@@ -182,6 +224,7 @@ struct SocksProxyTests {
 
         #expect(values.count == 1)
         #expect(values[0].id == original.id)
+        #expect(values[0].displayCode == "固定代号")
         #expect(values[0].password == "new")
         #expect(values[0].status == .untested)
     }
@@ -197,7 +240,8 @@ struct SocksProxyTests {
             fileURL: fileURL,
             credentialStore: SocksProxyCredentialStore(inMemory: true)
         )
-        let original = try SocksProxy(urlString: "socks5://alice:old@127.0.0.1:1080")
+        var original = try SocksProxy(urlString: "socks5://alice:old@127.0.0.1:1080")
+        original.code = "备用节点"
         try repository.save([original])
         let refreshed = try SocksProxy(urlString: "socks5://alice:new@127.0.0.1:1080")
 
@@ -205,6 +249,7 @@ struct SocksProxyTests {
 
         #expect(merged.count == 1)
         #expect(merged[0].id == original.id)
+        #expect(merged[0].displayCode == "备用节点")
         #expect(try repository.load()[0].password == "new")
     }
 

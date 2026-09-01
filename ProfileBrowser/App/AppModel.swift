@@ -851,8 +851,7 @@ final class AppModel {
     ) -> Bool {
         let previous = previous.normalized
         let updated = updated.normalized
-        return previous.targetHost != updated.targetHost
-            || previous.targetPort != updated.targetPort
+        return previous.targetURLString != updated.targetURLString
             || previous.verifiesTLS != updated.verifiesTLS
     }
 
