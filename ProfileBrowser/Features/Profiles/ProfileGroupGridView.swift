@@ -215,7 +215,7 @@ private struct ProfileGroupCard: View {
                     .minimumScaleFactor(0.78)
                     .layoutPriority(1)
 
-                Text(group.displayCode ?? "未设置代号")
+                Text(group.displayCode ?? " ")
                     .font(.subheadline.monospaced().weight(.medium))
                     .foregroundStyle(group.displayCode == nil ? .tertiary : .secondary)
                     .lineLimit(1)
