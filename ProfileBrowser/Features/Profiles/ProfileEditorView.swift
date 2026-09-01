@@ -13,6 +13,7 @@ struct ProfileEditorView: View {
     @State private var homePageText: String
     @State private var userAgent: String
     @State private var selectedUserAgentName: String?
+    @State private var generatedUserAgentsByGroup: [String: Set<String>] = [:]
     @State private var autofillUsername: String
     @State private var autofillPassword: String
     @State private var socksProxyNumber: Int?
@@ -96,7 +97,7 @@ struct ProfileEditorView: View {
                     .buttonStyle(.bordered)
                     .tint(Color.accentColor)
                     Button {
-                        userAgent = BrowserProfile.randomUserAgent(for: selectedUserAgentName)
+                        randomizeUserAgent()
                     } label: {
                         HStack {
                             Image(systemName: "shuffle")
@@ -120,6 +121,20 @@ struct ProfileEditorView: View {
                     }
                     .buttonStyle(.bordered)
                     .tint(Color.accentColor)
+
+                    if let details = BrowserProfile.userAgentDetails(for: userAgent) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("当前组合")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(details.summary)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+
+                    Text("随机生成只改变 User-Agent 声明，不会改变真实的 WebKit、屏幕、时区或硬件参数。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("SOCKS 代理") {
@@ -260,6 +275,38 @@ struct ProfileEditorView: View {
 
     private var rankedProxyOptions: [SocksProxyRanking] {
         model.rankedSocksProxies
+    }
+
+    private func randomizeUserAgent() {
+        let groupName = currentDisplayGroupName
+        var excludedValues = Set(
+            model.profiles.lazy
+                .filter {
+                    $0.id != originalProfile?.id
+                        && $0.displayGroupName == groupName
+                }
+                .map(\.userAgent)
+        )
+        excludedValues.formUnion(generatedUserAgentsByGroup[groupName, default: []])
+        excludedValues.insert(userAgent)
+
+        guard let value = BrowserProfile.uniqueRandomUserAgent(
+            for: selectedUserAgentName,
+            excluding: excludedValues
+        ) else {
+            localError = PresentedError(
+                message: "当前浏览器的可用 UA 组合已全部使用，请选择其他浏览器或手动填写。"
+            )
+            return
+        }
+
+        userAgent = value
+        generatedUserAgentsByGroup[groupName, default: []].insert(value)
+    }
+
+    private var currentDisplayGroupName: String {
+        let value = groupName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? "未分组" : value
     }
 }
 
