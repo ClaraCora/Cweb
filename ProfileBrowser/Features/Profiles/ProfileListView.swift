@@ -137,7 +137,7 @@ struct ProfileListView: View {
                 }
                 Button("取消", role: .cancel) {}
             } message: { profile in
-                Text("将使用“\(profile.name)”的独立网站数据和 User-Agent 打开主页。")
+                Text(entryConfirmationMessage(for: profile))
             }
             .alert(item: $model.presentedError) { error in
                 Alert(
@@ -192,6 +192,19 @@ struct ProfileListView: View {
 
     private var currentGroup: ProfileGroup? {
         model.profileGroups.first { $0.id == groupID }
+    }
+
+    private func entryConfirmationMessage(for profile: BrowserProfile) -> String {
+        let environment = "将使用“\(profile.name)”的独立网站数据和 User-Agent 打开主页。"
+        guard let proxyNumber = profile.socksProxyNumber else {
+            return "\(environment)\n\n代理：未选择，将使用设备当前网络。"
+        }
+        guard let proxy = model.socksProxy(for: profile) else {
+            return "\(environment)\n\n代理：已选择第 \(proxyNumber) 号，但该编号当前不存在；进入后不会改用直连。"
+        }
+
+        let name = proxy.displayCode.map { "\($0) · " } ?? ""
+        return "\(environment)\n\n代理：第 \(proxyNumber) 号 · \(name)\(proxy.displayAddress)。"
     }
 
     private func profileButton(for profile: BrowserProfile) -> some View {

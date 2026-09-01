@@ -11,6 +11,7 @@ struct SocksProxyEditorView: View {
     private let onSave: (SocksProxy) throws -> Void
 
     @State private var code: String
+    @State private var isLocked: Bool
     @State private var scheme: SocksProxyScheme
     @State private var host: String
     @State private var port: String
@@ -27,6 +28,7 @@ struct SocksProxyEditorView: View {
         self.isCopy = isCopy
         self.onSave = onSave
         _code = State(initialValue: proxy?.displayCode ?? "")
+        _isLocked = State(initialValue: isCopy ? false : (proxy?.isLocked ?? false))
         _scheme = State(initialValue: proxy?.scheme ?? .socks5)
         _host = State(initialValue: proxy?.host ?? "")
         _port = State(initialValue: proxy.map { String($0.port) } ?? "1080")
@@ -69,6 +71,12 @@ struct SocksProxyEditorView: View {
                     SecureField("密码", text: $password)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                }
+
+                Section {
+                    Toggle("锁定代理", isOn: $isLocked)
+                } footer: {
+                    Text("锁定后仍可编辑和测试，但不会被单独删除、批量删除、清空或验证结果裁剪。")
                 }
 
                 if let originalProxy, !isCopy {
@@ -163,6 +171,7 @@ struct SocksProxyEditorView: View {
         var proxy = SocksProxy(
             id: isCopy ? UUID() : (originalProxy?.id ?? UUID()),
             code: code,
+            isLocked: isLocked,
             scheme: scheme,
             host: normalizedHost,
             port: parsedPort,

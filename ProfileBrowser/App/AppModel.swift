@@ -464,17 +464,45 @@ final class AppModel {
         socksProxies = try socksProxyRepository.upsert(value)
     }
 
-    func deleteSocksProxy(_ proxy: SocksProxy) throws {
-        guard socksProxies.contains(where: { $0.id == proxy.id }) else {
+    func setSocksProxyLocked(_ isLocked: Bool, for proxy: SocksProxy) throws {
+        guard let index = socksProxies.firstIndex(where: { $0.id == proxy.id }) else {
             throw SocksProxyError.notFound
         }
-        try socksProxyRepository.delete(proxyID: proxy.id)
-        socksProxies.removeAll { $0.id == proxy.id }
+        guard socksProxies[index].isLocked != isLocked else { return }
+
+        var updated = socksProxies
+        updated[index].isLocked = isLocked
+        try socksProxyRepository.save(updated)
+        socksProxies = updated
     }
 
-    func clearSocksProxies() throws {
-        try socksProxyRepository.removeAll()
-        socksProxies = []
+    func deleteSocksProxy(_ proxy: SocksProxy) throws {
+        guard let existing = socksProxies.first(where: { $0.id == proxy.id }) else {
+            throw SocksProxyError.notFound
+        }
+        guard !existing.isLocked else {
+            throw SocksProxyError.proxyLocked
+        }
+        _ = try deleteSocksProxies(withIDs: Set([existing.id]))
+    }
+
+    @discardableResult
+    func deleteSocksProxies(withIDs ids: Set<UUID>) throws -> Int {
+        let deletableIDs = Set(socksProxies.lazy.filter { proxy in
+            ids.contains(proxy.id) && !proxy.isLocked
+        }.map(\.id))
+        guard !deletableIDs.isEmpty else { return 0 }
+
+        let retained = socksProxies.filter { !deletableIDs.contains($0.id) }
+        try socksProxyRepository.save(retained)
+        socksProxies = retained
+        return deletableIDs.count
+    }
+
+    @discardableResult
+    func clearSocksProxies() throws -> Int {
+        let unlockedIDs = Set(socksProxies.lazy.filter { !$0.isLocked }.map(\.id))
+        return try deleteSocksProxies(withIDs: unlockedIDs)
     }
 
     func importSocksProxies(from url: URL) async throws {
@@ -501,21 +529,26 @@ final class AppModel {
             return proxy.applying(result)
         }
 
+        let locked = validatedInOriginalOrder.filter(\.isLocked)
+        let unlocked = validatedInOriginalOrder.filter { !$0.isLocked }
         let candidates = settings.retainOnlyAvailable
-            ? validatedInOriginalOrder.filter { $0.status == .available }
-            : validatedInOriginalOrder
+            ? unlocked.filter { $0.status == .available }
+            : unlocked
         let candidatesByRank = ordered(candidates, using: settings.sortMode)
-        let selected: [SocksProxy]
+        let selectedUnlocked: [SocksProxy]
         if settings.maxRetainedCount == 0 {
-            selected = candidatesByRank
+            selectedUnlocked = candidatesByRank
         } else {
-            selected = Array(candidatesByRank.prefix(settings.maxRetainedCount))
+            let availableSlots = max(0, settings.maxRetainedCount - locked.count)
+            selectedUnlocked = Array(candidatesByRank.prefix(availableSlots))
         }
 
         // Persist the retained records in their pre-validation order. Ranking
         // remains a derived view, allowing the user to switch back to input
         // order without a previous latency sort having destroyed that order.
-        let selectedIDs = Set(selected.map(\.id))
+        // Locked records are always retained, even when unavailable or above
+        // the configured maximum.
+        let selectedIDs = Set(locked.map(\.id)).union(selectedUnlocked.map(\.id))
         let retained = validatedInOriginalOrder.filter { selectedIDs.contains($0.id) }
         try socksProxyRepository.save(retained)
         socksProxies = retained
@@ -1148,9 +1181,10 @@ enum ProfileError: LocalizedError {
     }
 }
 
-enum SocksProxyError: LocalizedError {
+enum SocksProxyError: LocalizedError, Equatable {
     case notFound
     case presetNotFound
+    case proxyLocked
 
     var errorDescription: String? {
         switch self {
@@ -1158,6 +1192,8 @@ enum SocksProxyError: LocalizedError {
             return "找不到这个 SOCKS 代理。"
         case .presetNotFound:
             return "找不到这个代理预设链接。"
+        case .proxyLocked:
+            return "这个 SOCKS 代理已锁定，请先解锁再删除。"
         }
     }
 }

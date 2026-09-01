@@ -4,6 +4,24 @@ import Testing
 
 struct SocksProxyTests {
     @Test
+    func legacyRecordWithoutLockFieldDefaultsToUnlocked() throws {
+        let id = UUID()
+        let data = Data(
+            """
+            {
+              "id": "\(id.uuidString)",
+              "host": "legacy.example",
+              "port": 1080
+            }
+            """.utf8
+        )
+
+        let proxy = try JSONDecoder().decode(SocksProxy.self, from: data)
+
+        #expect(!proxy.isLocked)
+    }
+
+    @Test
     func parsesAuthenticatedIPv6URLAndRedactsPassword() throws {
         let proxy = try SocksProxy(urlString: "socks5h://user:p%40ss@[2001:db8::1]:1080")
 
@@ -175,13 +193,20 @@ struct SocksProxyTests {
         )
         var proxy = try SocksProxy(urlString: "socks5://alice:secret@127.0.0.1:1080")
         proxy.code = "主力 VPS"
+        proxy.isLocked = true
         try repository.save([proxy])
 
         let loaded = try repository.load()
         #expect(loaded == [proxy])
         #expect(loaded[0].displayCode == "主力 VPS")
-        let rawJSON = try String(contentsOf: fileURL)
+        #expect(loaded[0].isLocked)
+        let rawData = try Data(contentsOf: fileURL)
+        let rawJSON = String(decoding: rawData, as: UTF8.self)
         #expect(!rawJSON.contains("secret"))
+        let rawRecords = try #require(
+            JSONSerialization.jsonObject(with: rawData) as? [[String: Any]]
+        )
+        #expect(rawRecords[0]["isLocked"] as? Bool == true)
 
         let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
         let presets = [
@@ -217,6 +242,7 @@ struct SocksProxyTests {
 
         var original = try SocksProxy(urlString: "socks5://user:old@127.0.0.1:1080")
         original.code = "固定代号"
+        original.isLocked = true
         try repository.save([original])
         let refreshed = try SocksProxy(urlString: "socks5://user:new@127.0.0.1:1080")
 
@@ -225,6 +251,7 @@ struct SocksProxyTests {
         #expect(values.count == 1)
         #expect(values[0].id == original.id)
         #expect(values[0].displayCode == "固定代号")
+        #expect(values[0].isLocked)
         #expect(values[0].password == "new")
         #expect(values[0].status == .untested)
     }
@@ -242,6 +269,7 @@ struct SocksProxyTests {
         )
         var original = try SocksProxy(urlString: "socks5://alice:old@127.0.0.1:1080")
         original.code = "备用节点"
+        original.isLocked = true
         try repository.save([original])
         let refreshed = try SocksProxy(urlString: "socks5://alice:new@127.0.0.1:1080")
 
@@ -250,6 +278,7 @@ struct SocksProxyTests {
         #expect(merged.count == 1)
         #expect(merged[0].id == original.id)
         #expect(merged[0].displayCode == "备用节点")
+        #expect(merged[0].isLocked)
         #expect(try repository.load()[0].password == "new")
     }
 

@@ -367,6 +367,95 @@ struct AppModelTests {
     }
 
     @Test
+    func lockedProxiesSurviveSingleBatchAndClearDeletion() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let profileURL = directory.appending(path: "profiles.json")
+        let proxyURL = directory.appending(path: "proxies.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let locked = SocksProxy(isLocked: true, host: "locked.example", port: 1080)
+        let batchDelete = SocksProxy(host: "batch.example", port: 1080)
+        let clearDelete = SocksProxy(host: "clear.example", port: 1080)
+        let profileRepository = ProfileRepository(fileURL: profileURL)
+        let proxyRepository = SocksProxyRepository(
+            fileURL: proxyURL,
+            credentialStore: SocksProxyCredentialStore(inMemory: true)
+        )
+        try proxyRepository.save([locked, batchDelete, clearDelete])
+        let model = AppModel(
+            profileRepository: profileRepository,
+            socksProxyRepository: proxyRepository
+        )
+
+        try model.setSocksProxyLocked(false, for: locked)
+        let unlockedReloaded = try proxyRepository.load()
+        #expect(!unlockedReloaded[0].isLocked)
+        try model.setSocksProxyLocked(true, for: locked)
+        let lockedReloaded = try proxyRepository.load()
+        #expect(lockedReloaded[0].isLocked)
+
+        #expect(throws: SocksProxyError.proxyLocked) {
+            try model.deleteSocksProxy(locked)
+        }
+        let batchCount = try model.deleteSocksProxies(
+            withIDs: Set([locked.id, batchDelete.id])
+        )
+        #expect(batchCount == 1)
+        #expect(model.socksProxies.map(\.id) == [locked.id, clearDelete.id])
+
+        let clearCount = try model.clearSocksProxies()
+        #expect(clearCount == 1)
+        #expect(model.socksProxies.map(\.id) == [locked.id])
+        #expect(try proxyRepository.load().map(\.id) == [locked.id])
+    }
+
+    @Test
+    func lockedProxySurvivesValidationRetentionRules() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let profileURL = directory.appending(path: "profiles.json")
+        let proxyURL = directory.appending(path: "proxies.json")
+        let settingsURL = directory.appending(path: "settings.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let locked = SocksProxy(isLocked: true, host: "locked.example", port: 1080)
+        let fast = SocksProxy(host: "fast.example", port: 1080)
+        let slow = SocksProxy(host: "slow.example", port: 1080)
+        let profileRepository = ProfileRepository(fileURL: profileURL)
+        let proxyRepository = SocksProxyRepository(
+            fileURL: proxyURL,
+            settingsFileURL: settingsURL,
+            credentialStore: SocksProxyCredentialStore(inMemory: true)
+        )
+        try proxyRepository.save([locked, fast, slow])
+
+        let probe = AppModelStubProbe(results: [
+            locked.id: SocksProxyProbeResult(status: .unavailable, message: "offline"),
+            fast.id: SocksProxyProbeResult(status: .available, latencyMilliseconds: 20),
+            slow.id: SocksProxyProbeResult(status: .available, latencyMilliseconds: 80)
+        ])
+        let model = AppModel(
+            profileRepository: profileRepository,
+            socksProxyRepository: proxyRepository,
+            socksProxyValidationService: SocksProxyValidationService(timeout: 1, probe: probe)
+        )
+        try model.updateSocksProxyValidationSettings(
+            SocksProxyValidationSettings(
+                retainOnlyAvailable: true,
+                maxRetainedCount: 2,
+                sortMode: .latencyAscending
+            )
+        )
+
+        try await model.validateSocksProxies()
+
+        #expect(model.socksProxies.map(\.id) == [locked.id, fast.id])
+        #expect(model.socksProxies.first?.status == .unavailable)
+        #expect(try proxyRepository.load().map(\.id) == [locked.id, fast.id])
+    }
+
+    @Test
     func batchValidationHonorsRetentionAndKeepsPersistedInputOrder() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: UUID().uuidString, directoryHint: .isDirectory)

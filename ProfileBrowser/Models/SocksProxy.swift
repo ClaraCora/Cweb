@@ -23,6 +23,7 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
 
     let id: UUID
     var code: String?
+    var isLocked: Bool
     var scheme: SocksProxyScheme
     var host: String
     var port: Int
@@ -40,6 +41,7 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
     init(
         id: UUID = UUID(),
         code: String? = nil,
+        isLocked: Bool = false,
         scheme: SocksProxyScheme = .socks5,
         host: String,
         port: Int,
@@ -54,6 +56,7 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
     ) {
         self.id = id
         self.code = Self.normalizeCode(code)
+        self.isLocked = isLocked
         self.scheme = scheme
         self.host = Self.normalizeHost(host)
         self.port = port
@@ -70,6 +73,7 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case id
         case code
+        case isLocked
         case scheme
         case host
         case port
@@ -86,6 +90,7 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
         code = Self.normalizeCode(try container.decodeIfPresent(String.self, forKey: .code))
+        isLocked = try container.decodeIfPresent(Bool.self, forKey: .isLocked) ?? false
         scheme = try container.decodeIfPresent(SocksProxyScheme.self, forKey: .scheme) ?? .socks5
         host = Self.normalizeHost(try container.decode(String.self, forKey: .host))
         port = try container.decode(Int.self, forKey: .port)
@@ -107,6 +112,7 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
         try container.encodeIfPresent(Self.normalizeCode(code), forKey: .code)
+        try container.encode(isLocked, forKey: .isLocked)
         try container.encode(scheme, forKey: .scheme)
         try container.encode(host, forKey: .host)
         try container.encode(port, forKey: .port)

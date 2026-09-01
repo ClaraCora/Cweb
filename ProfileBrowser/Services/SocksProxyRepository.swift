@@ -149,6 +149,7 @@ struct SocksProxyRepository {
                 var refreshed = SocksProxy(
                     id: existing.id,
                     code: existing.code,
+                    isLocked: existing.isLocked,
                     scheme: proxy.scheme,
                     host: proxy.host,
                     port: proxy.port,
@@ -189,6 +190,7 @@ struct SocksProxyRepository {
                 proxies[index] = SocksProxy(
                     id: existing.id,
                     code: existing.code,
+                    isLocked: existing.isLocked,
                     scheme: refreshed.scheme,
                     host: refreshed.host,
                     port: refreshed.port,
