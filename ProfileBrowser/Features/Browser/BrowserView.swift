@@ -30,15 +30,6 @@ struct BrowserView: View {
         .navigationTitle(session.profile.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbarVisibility(.hidden, for: .tabBar)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Label(session.profile.name, systemImage: "person.crop.square.fill")
-                    .foregroundStyle(session.profile.color.color)
-                    .font(.headline)
-                    .lineLimit(1)
-                    .accessibilityLabel("当前环境：\(session.profile.name)")
-            }
-        }
         .onChange(of: session.page.url) { _, newURL in
             session.syncAddressBar(with: newURL)
         }
