@@ -25,13 +25,18 @@ struct BackupView: View {
                     Button("导出加密备份", systemImage: "lock.doc") {
                         exportBackup()
                     }
-                    .disabled(exportPassword.count < 8 || exportPassword != confirmPassword)
+                    .disabled(
+                        !model.isProfileStoreAvailable
+                            || exportPassword.count < 8
+                            || exportPassword != confirmPassword
+                    )
                 }
 
                 Section("导入") {
                     Button("选择备份文件", systemImage: "doc.badge.arrow.up") {
                         showsImporter = true
                     }
+                    .disabled(!model.isProfileStoreAvailable)
                     Text("导入会新增环境，不会覆盖已有环境。网站 Cookie 和缓存不在备份中。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -102,6 +107,10 @@ struct BackupView: View {
     @State private var pendingImportURL: URL?
 
     private func exportBackup() {
+        guard model.isProfileStoreAvailable else {
+            presentedError = PresentedError(message: ProfileError.profileStoreUnavailable.localizedDescription)
+            return
+        }
         do {
             backupDocument = BackupDocument(data: try BackupService(vault: model.credentialVault).export(profiles: model.profiles, password: exportPassword))
             showsExporter = true
@@ -112,6 +121,10 @@ struct BackupView: View {
 
     private func importBackup() {
         guard let url = pendingImportURL else { return }
+        guard model.isProfileStoreAvailable else {
+            presentedError = PresentedError(message: ProfileError.profileStoreUnavailable.localizedDescription)
+            return
+        }
         do {
             let accessed = url.startAccessingSecurityScopedResource()
             defer { if accessed { url.stopAccessingSecurityScopedResource() } }

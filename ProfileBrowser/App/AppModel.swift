@@ -8,6 +8,8 @@ final class AppModel {
     private(set) var socksProxies: [SocksProxy] = []
     private(set) var proxyPresets: [SocksProxyPreset] = []
     private(set) var socksProxyValidationSettings: SocksProxyValidationSettings = .defaults
+    private(set) var isLoadingProfiles = true
+    private(set) var isProfileStoreAvailable = false
     var presentedError: PresentedError?
     var busyProfileID: UUID?
     var busyGroupName: String?
@@ -35,7 +37,9 @@ final class AppModel {
         self.socksProxyImportService = socksProxyImportService
         self.socksProxyValidationServiceOverride = socksProxyValidationService
         reloadProfiles()
-        migrateGroupMetadataIfNeeded()
+        if isProfileStoreAvailable {
+            migrateGroupMetadataIfNeeded()
+        }
         reloadSocksProxyValidationSettings()
         reloadSocksProxies()
     }
@@ -44,6 +48,45 @@ final class AppModel {
         // The persisted array is the user's explicit order. Opening an environment
         // updates its metadata, but must never move it in the list.
         profiles
+    }
+
+    /// Retries a transient startup read without ever treating a failed read as
+    /// an empty store.  The first retry is immediate; later retries cover the
+    /// short window in which iOS can still be restoring protected file access.
+    func retryLoadingProfiles() async {
+        guard !isProfileStoreAvailable else { return }
+        isLoadingProfiles = true
+
+        var lastError: Error?
+        for delay in [UInt64(0), 150_000_000, 350_000_000, 700_000_000] {
+            guard !Task.isCancelled else {
+                isLoadingProfiles = false
+                return
+            }
+            if delay > 0 {
+                try? await Task.sleep(nanoseconds: delay)
+                guard !Task.isCancelled else {
+                    isLoadingProfiles = false
+                    return
+                }
+            }
+
+            do {
+                profiles = try profileRepository.load()
+                isProfileStoreAvailable = true
+                isLoadingProfiles = false
+                migrateGroupMetadataIfNeeded()
+                return
+            } catch {
+                lastError = error
+            }
+        }
+
+        isLoadingProfiles = false
+        let detail = lastError?.localizedDescription ?? "未知错误"
+        presentedError = PresentedError(
+            message: "环境数据暂时无法读取，App 已停止写入以保护原文件。请稍后重试。\n\n原因：\(detail)"
+        )
     }
 
     var profileGroups: [ProfileGroup] {
@@ -591,8 +634,14 @@ final class AppModel {
     private func reloadProfiles() {
         do {
             profiles = try profileRepository.load()
+            isProfileStoreAvailable = true
+            isLoadingProfiles = false
         } catch {
-            present(error)
+            // Keep the store unavailable until a retry succeeds.  Presenting
+            // an empty array as valid here would allow a later action to
+            // overwrite the user's intact profiles.json.
+            isProfileStoreAvailable = false
+            isLoadingProfiles = true
         }
     }
 
@@ -808,6 +857,9 @@ final class AppModel {
     }
 
     private func persist() throws {
+        guard isProfileStoreAvailable else {
+            throw ProfileError.profileStoreUnavailable
+        }
         try profileRepository.save(profiles)
     }
 
@@ -871,10 +923,12 @@ final class AppModel {
     private func saveCachedBalance(_ balance: String, for profileID: UUID) {
         guard let index = profiles.firstIndex(where: { $0.id == profileID }) else { return }
         guard profiles[index].cachedBalance != balance else { return }
+        let previousBalance = profiles[index].cachedBalance
         profiles[index].cachedBalance = balance
         do {
-            try profileRepository.save(profiles)
+            try persist()
         } catch {
+            profiles[index].cachedBalance = previousBalance
             present(error)
         }
     }
@@ -923,6 +977,7 @@ struct PresentedError: Identifiable {
 
 enum ProfileError: LocalizedError {
     case notFound
+    case profileStoreUnavailable
     case groupNotFound
     case groupNameEmpty
     case groupNameAlreadyExists
@@ -933,6 +988,8 @@ enum ProfileError: LocalizedError {
         switch self {
         case .notFound:
             return "找不到这个浏览器环境。"
+        case .profileStoreUnavailable:
+            return "环境数据尚未成功读取。为保护原文件，本次修改没有保存，请先重试读取。"
         case .groupNotFound:
             return "找不到这个分组。"
         case .groupNameEmpty:

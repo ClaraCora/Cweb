@@ -5,6 +5,66 @@ import Testing
 @MainActor
 struct AppModelTests {
     @Test
+    func transientProfileReadFailureRecoversWithoutShowingAnEmptyStore() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let fileURL = directory.appending(path: "profiles.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let expected = BrowserProfile(name: "保留的环境", groupName: "工作")
+        let writer = ProfileRepository(fileURL: fileURL)
+        try writer.save([expected])
+
+        var readAttempt = 0
+        let repository = ProfileRepository(fileURL: fileURL) { url in
+            readAttempt += 1
+            if readAttempt == 1 {
+                throw CocoaError(.fileReadUnknown)
+            }
+            return try Data(contentsOf: url)
+        }
+        let model = AppModel(profileRepository: repository)
+
+        #expect(model.isLoadingProfiles)
+        #expect(!model.isProfileStoreAvailable)
+        #expect(model.profiles.isEmpty)
+
+        await model.retryLoadingProfiles()
+
+        #expect(!model.isLoadingProfiles)
+        #expect(model.isProfileStoreAvailable)
+        #expect(model.profiles.map(\.id) == [expected.id])
+        #expect(model.profileGroups.map(\.name) == ["工作"])
+    }
+
+    @Test
+    func unavailableProfileStoreCannotBeOverwrittenAsEmpty() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let fileURL = directory.appending(path: "profiles.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let originalData = Data("not available yet".utf8)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try originalData.write(to: fileURL)
+        let repository = ProfileRepository(fileURL: fileURL) { _ in
+            throw CocoaError(.fileReadNoPermission)
+        }
+        let model = AppModel(profileRepository: repository)
+
+        #expect(throws: ProfileError.profileStoreUnavailable) {
+            try model.addProfile(
+                name: "不能覆盖",
+                homePage: BrowserProfile.defaultHomePage,
+                userAgent: BrowserProfile.defaultUserAgent,
+                color: .indigo
+            )
+        }
+        #expect(model.profiles.isEmpty)
+        #expect(try Data(contentsOf: fileURL) == originalData)
+    }
+
+    @Test
     func openingProfileDoesNotChangePersistedOrder() throws {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: UUID().uuidString, directoryHint: .isDirectory)

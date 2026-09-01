@@ -31,6 +31,7 @@ struct ProfileGroupGridView: View {
                         Button("新建", systemImage: "plus") {
                             editorMode = .create
                         }
+                        .disabled(!model.isProfileStoreAvailable)
                         Button("设置", systemImage: "gearshape") {
                             showsSettings = true
                         }
@@ -110,12 +111,33 @@ struct ProfileGroupGridView: View {
                     guard count == 0 else { return }
                     schedulePendingGroupDeletion()
                 }
+                .task {
+                    await model.retryLoadingProfiles()
+                }
         }
     }
 
     @ViewBuilder
     private var content: some View {
-        if model.profileGroups.isEmpty {
+        if model.isLoadingProfiles {
+            ContentUnavailableView {
+                Label("正在读取环境", systemImage: "externaldrive")
+            } description: {
+                Text("正在等待本地环境数据可用。")
+            }
+            .accessibilityElement(children: .combine)
+        } else if !model.isProfileStoreAvailable {
+            ContentUnavailableView {
+                Label("无法读取环境", systemImage: "externaldrive.badge.exclamationmark")
+            } description: {
+                Text("原数据没有被修改，可以重新尝试读取。")
+            } actions: {
+                Button("重新读取", systemImage: "arrow.clockwise") {
+                    Task { await model.retryLoadingProfiles() }
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        } else if model.profileGroups.isEmpty {
             ContentUnavailableView {
                 Label("还没有分组", systemImage: "rectangle.3.group.badge.plus")
             } actions: {

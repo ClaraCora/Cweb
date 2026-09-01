@@ -3,9 +3,15 @@ import Foundation
 struct ProfileRepository {
     private let fileManager: FileManager
     private let fileURL: URL
+    private let readData: (URL) throws -> Data
 
-    init(fileManager: FileManager = .default, fileURL: URL? = nil) {
+    init(
+        fileManager: FileManager = .default,
+        fileURL: URL? = nil,
+        readData: @escaping (URL) throws -> Data = { try Data(contentsOf: $0) }
+    ) {
         self.fileManager = fileManager
+        self.readData = readData
 
         if let fileURL {
             self.fileURL = fileURL
@@ -19,27 +25,30 @@ struct ProfileRepository {
 
     func load() throws -> [BrowserProfile] {
         guard fileManager.fileExists(atPath: fileURL.path) else { return [] }
-        let data = try Data(contentsOf: fileURL)
-        return try Self.decoder.decode([BrowserProfile].self, from: data)
+        let data = try readData(fileURL)
+        return try Self.makeDecoder().decode([BrowserProfile].self, from: data)
     }
 
     func save(_ profiles: [BrowserProfile]) throws {
         let directory = fileURL.deletingLastPathComponent()
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-        let data = try Self.encoder.encode(profiles)
-        try data.write(to: fileURL, options: [.atomic, .completeFileProtection])
+        let data = try Self.makeEncoder().encode(profiles)
+        try data.write(
+            to: fileURL,
+            options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+        )
     }
 
-    private static let encoder: JSONEncoder = {
+    private static func makeEncoder() -> JSONEncoder {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         return encoder
-    }()
+    }
 
-    private static let decoder: JSONDecoder = {
+    private static func makeDecoder() -> JSONDecoder {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return decoder
-    }()
+    }
 }
