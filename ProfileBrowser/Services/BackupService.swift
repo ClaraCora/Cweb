@@ -87,6 +87,7 @@ struct BackupService {
                 groupID: nil,
                 groupCode: profile.groupCode,
                 groupEmoji: profile.groupEmoji,
+                groupSortOrder: profile.groupSortOrder,
                 websiteDataStoreID: UUID(),
                 userAgent: profile.userAgent,
                 fingerprintSeed: UUID(),

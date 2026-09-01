@@ -16,6 +16,7 @@ struct BrowserProfile: Identifiable, Codable, Hashable, Sendable {
     /// of one group synchronized when the group is edited.
     var groupCode: String?
     var groupEmoji: String?
+    var groupSortOrder: Int?
     let websiteDataStoreID: UUID
     var userAgent: String
     let fingerprintSeed: UUID
@@ -37,6 +38,7 @@ struct BrowserProfile: Identifiable, Codable, Hashable, Sendable {
         groupID: UUID? = nil,
         groupCode: String? = nil,
         groupEmoji: String? = nil,
+        groupSortOrder: Int? = nil,
         websiteDataStoreID: UUID = UUID(),
         userAgent: String = BrowserProfile.defaultUserAgent,
         fingerprintSeed: UUID = UUID(),
@@ -54,6 +56,7 @@ struct BrowserProfile: Identifiable, Codable, Hashable, Sendable {
         self.groupID = groupID
         self.groupCode = groupCode
         self.groupEmoji = groupEmoji
+        self.groupSortOrder = groupSortOrder
         self.websiteDataStoreID = websiteDataStoreID
         self.userAgent = userAgent
         self.fingerprintSeed = fingerprintSeed

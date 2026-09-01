@@ -133,6 +133,72 @@ struct AppModelTests {
         #expect(model.profileGroups.map(\.name) == ["工作", "未分组", "测试"])
         #expect(model.profileGroups[0].profiles.map(\.id) == [profiles[0].id, profiles[2].id])
         #expect(model.profileGroups[1].profiles.map(\.id) == [profiles[1].id])
+
+        let migratedGroupIDs = model.profileGroups.map(\.id)
+        let reloaded = AppModel(profileRepository: repository)
+        #expect(reloaded.profileGroups.map(\.id) == migratedGroupIDs)
+        #expect(reloaded.profileGroups.map(\.sortOrder) == [0, 1, 2])
+    }
+
+    @Test
+    func movingGroupsPersistsWithoutChangingEnvironmentOrder() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let fileURL = directory.appending(path: "profiles.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let profiles = [
+            BrowserProfile(name: "甲一", groupName: "甲"),
+            BrowserProfile(name: "乙一", groupName: "乙"),
+            BrowserProfile(name: "甲二", groupName: "甲"),
+            BrowserProfile(name: "丙一", groupName: "丙"),
+            BrowserProfile(name: "乙二", groupName: "乙")
+        ]
+        let repository = ProfileRepository(fileURL: fileURL)
+        try repository.save(profiles)
+        let model = AppModel(profileRepository: repository)
+        let originalProfileIDs = model.profiles.map(\.id)
+
+        try model.moveGroups(
+            fromOffsets: IndexSet(integer: 0),
+            toOffset: 3
+        )
+
+        #expect(model.profileGroups.map(\.name) == ["乙", "丙", "甲"])
+        #expect(model.profiles.map(\.id) == originalProfileIDs)
+
+        let reloaded = AppModel(profileRepository: repository)
+        #expect(reloaded.profileGroups.map(\.name) == ["乙", "丙", "甲"])
+        #expect(reloaded.profiles.map(\.id) == originalProfileIDs)
+        #expect(reloaded.profileGroups.map(\.sortOrder) == [0, 1, 2])
+    }
+
+    @Test
+    func importingProfilesAppendsNewGroupsInTheirSavedOrder() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let fileURL = directory.appending(path: "profiles.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let existing = BrowserProfile(name: "已有", groupName: "已有组")
+        let imported = [
+            BrowserProfile(name: "甲一", groupName: "甲", groupSortOrder: 2),
+            BrowserProfile(name: "乙一", groupName: "乙", groupSortOrder: 0),
+            BrowserProfile(name: "甲二", groupName: "甲", groupSortOrder: 2)
+        ]
+        let repository = ProfileRepository(fileURL: fileURL)
+        try repository.save([existing])
+        let model = AppModel(profileRepository: repository)
+
+        try model.addImportedProfiles(imported)
+
+        #expect(model.profileGroups.map(\.name) == ["已有组", "乙", "甲"])
+        #expect(model.profiles.map(\.id) == [existing.id] + imported.map(\.id))
+        #expect(model.profileGroups.last?.profiles.map(\.name) == ["甲一", "甲二"])
+
+        let reloaded = AppModel(profileRepository: repository)
+        #expect(reloaded.profileGroups.map(\.name) == ["已有组", "乙", "甲"])
+        #expect(reloaded.profiles.map(\.id) == [existing.id] + imported.map(\.id))
     }
 
     @Test

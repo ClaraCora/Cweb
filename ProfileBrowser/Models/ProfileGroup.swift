@@ -13,6 +13,7 @@ struct ProfileGroup: Identifiable, Hashable, Sendable {
     var name: String
     var code: String?
     var emoji: String?
+    var sortOrder: Int
     var profiles: [BrowserProfile]
 
     /// Designated initializer used by AppModel's grouped projection.
@@ -21,12 +22,14 @@ struct ProfileGroup: Identifiable, Hashable, Sendable {
         name: String,
         code: String? = nil,
         emoji: String? = nil,
+        sortOrder: Int = .max,
         profiles: [BrowserProfile]
     ) {
         self.id = id
         self.name = name
         self.code = code
         self.emoji = emoji
+        self.sortOrder = sortOrder
         self.profiles = profiles
     }
 

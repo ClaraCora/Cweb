@@ -14,6 +14,7 @@ struct ProfileListView: View {
     @State private var pendingDeletion: BrowserProfile?
     @State private var pendingClear: BrowserProfile?
     @State private var pendingEntry: BrowserProfile?
+    @State private var ipDetectionProfile: BrowserProfile?
     @State private var activeProfile: BrowserProfile?
     @State private var editMode: EditMode = .inactive
 
@@ -91,6 +92,12 @@ struct ProfileListView: View {
                         emoji: emoji
                     )
                 }
+            }
+            .sheet(item: $ipDetectionProfile) { profile in
+                IPDetectionView(
+                    profile: profile,
+                    socksProxy: model.socksProxy(for: profile)
+                )
             }
             .alert("删除整个分组？", isPresented: groupDeletionAlertBinding, presenting: pendingGroupDeletion) { group in
                 Button("删除", role: .destructive) {
@@ -225,6 +232,9 @@ struct ProfileListView: View {
                 } catch {
                     model.present(error)
                 }
+            }
+            Button("IP 检测", systemImage: "network") {
+                ipDetectionProfile = profile
             }
             Button("余额清零", systemImage: "dollarsign.arrow.trianglehead.counterclockwise") {
                 do {

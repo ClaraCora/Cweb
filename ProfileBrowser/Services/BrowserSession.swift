@@ -96,6 +96,23 @@ final class BrowserSession {
         navigate(to: profile.homePage)
     }
 
+    /// Creates a document for diagnostics without loading the profile's home
+    /// page. The same isolated data store, User-Agent, and SOCKS configuration
+    /// are retained, including the no-direct-failover policy.
+    func prepareForNetworkDiagnostics() async throws {
+        if let proxyConfigurationError {
+            throw BrowserSessionDiagnosticError(message: proxyConfigurationError)
+        }
+
+        do {
+            for try await _ in page.load(URL(string: "about:blank")!) { }
+        } catch {
+            throw BrowserSessionDiagnosticError(
+                message: Self.navigationErrorMessage(error)
+            )
+        }
+    }
+
     func navigateFromAddressBar() {
         guard let url = Self.resolveAddress(addressText) else {
             presentedError = PresentedError(message: "请输入有效的网址或搜索内容。")
@@ -319,4 +336,10 @@ enum CredentialFillError: LocalizedError {
     var errorDescription: String? {
         "页面地址已经变化，请重新选择凭据。"
     }
+}
+
+struct BrowserSessionDiagnosticError: LocalizedError {
+    let message: String
+
+    var errorDescription: String? { message }
 }

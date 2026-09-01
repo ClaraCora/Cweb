@@ -8,6 +8,7 @@ struct ProfileGroupGridView: View {
     @State private var showsBackup = false
     @State private var showsSocksProxyManager = false
     @State private var showsSettings = false
+    @State private var showsGroupOrder = false
     @State private var groupEditor: ProfileGroup?
     @State private var pendingGroupDeletion: ProfileGroup?
     @State private var pendingDeletionGroupID: UUID?
@@ -36,6 +37,10 @@ struct ProfileGroupGridView: View {
                             showsSettings = true
                         }
                         Menu {
+                            Button("分组排序", systemImage: "arrow.up.arrow.down") {
+                                showsGroupOrder = true
+                            }
+                            .disabled(model.profileGroups.count < 2)
                             Button("备份", systemImage: "lock.doc") {
                                 showsBackup = true
                             }
@@ -57,6 +62,9 @@ struct ProfileGroupGridView: View {
                     NavigationStack {
                         SettingsView()
                     }
+                }
+                .sheet(isPresented: $showsGroupOrder) {
+                    ProfileGroupOrderView()
                 }
                 .sheet(item: $groupEditor) { group in
                     ProfileGroupEditorView(group: group) { name, code, emoji in
@@ -168,6 +176,10 @@ struct ProfileGroupGridView: View {
                             Button("编辑分组", systemImage: "pencil") {
                                 groupEditor = group
                             }
+                            Button("调整分组排序", systemImage: "arrow.up.arrow.down") {
+                                showsGroupOrder = true
+                            }
+                            .disabled(model.profileGroups.count < 2)
                             Button("删除整个分组", systemImage: "trash", role: .destructive) {
                                 pendingGroupDeletion = group
                             }

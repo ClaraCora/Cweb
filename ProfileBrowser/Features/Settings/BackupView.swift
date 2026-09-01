@@ -129,9 +129,7 @@ struct BackupView: View {
             let accessed = url.startAccessingSecurityScopedResource()
             defer { if accessed { url.stopAccessingSecurityScopedResource() } }
             let profiles = try BackupService(vault: model.credentialVault).importProfiles(from: Data(contentsOf: url), password: importPassword)
-            for profile in profiles {
-                try model.addImportedProfile(profile)
-            }
+            try model.addImportedProfiles(profiles)
             showsImportPassword = false
             statusMessage = "已新增 \(profiles.count) 个环境。"
         } catch {

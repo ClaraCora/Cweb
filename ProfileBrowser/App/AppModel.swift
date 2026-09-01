@@ -106,7 +106,7 @@ final class AppModel {
             groupedProfiles[key, default: []].append(profile)
         }
 
-        return groupOrder.compactMap { key in
+        let groups = groupOrder.compactMap { key -> ProfileGroup? in
             guard let profiles = groupedProfiles[key], let first = profiles.first else {
                 return nil
             }
@@ -117,9 +117,16 @@ final class AppModel {
                 name: first.displayGroupName,
                 code: first.groupCode,
                 emoji: first.groupEmoji,
+                sortOrder: first.groupSortOrder ?? .max,
                 profiles: profiles
             )
         }
+        return groups.enumerated().sorted { lhs, rhs in
+            if lhs.element.sortOrder != rhs.element.sortOrder {
+                return lhs.element.sortOrder < rhs.element.sortOrder
+            }
+            return lhs.offset < rhs.offset
+        }.map(\.element)
     }
 
     func addProfile(
@@ -140,6 +147,7 @@ final class AppModel {
             groupID: group?.id ?? UUID(),
             groupCode: group?.code,
             groupEmoji: group?.emoji,
+            groupSortOrder: group?.sortOrder ?? nextGroupSortOrder,
             userAgent: userAgent.trimmingCharacters(in: .whitespacesAndNewlines),
             homePage: homePage,
             color: color,
@@ -162,10 +170,74 @@ final class AppModel {
     }
 
     func addImportedProfile(_ profile: BrowserProfile) throws {
-        var value = profile
-        assignGroupMetadata(to: &value)
+        try addImportedProfiles([profile])
+    }
+
+    func addImportedProfiles(_ importedProfiles: [BrowserProfile]) throws {
+        guard !importedProfiles.isEmpty else { return }
+
+        let existingGroupsByName = Dictionary(
+            uniqueKeysWithValues: profileGroups.map { ($0.name, $0) }
+        )
+        var firstIndexByNewGroupName: [String: Int] = [:]
+        var preferredOrderByNewGroupName: [String: Int] = [:]
+        for (index, profile) in importedProfiles.enumerated() {
+            let name = profile.displayGroupName
+            guard existingGroupsByName[name] == nil else { continue }
+            firstIndexByNewGroupName[name] = firstIndexByNewGroupName[name] ?? index
+            if preferredOrderByNewGroupName[name] == nil,
+               let sortOrder = profile.groupSortOrder,
+               sortOrder >= 0 {
+                preferredOrderByNewGroupName[name] = sortOrder
+            }
+        }
+
+        let orderedNewGroupNames = firstIndexByNewGroupName.keys.sorted { left, right in
+            switch (preferredOrderByNewGroupName[left], preferredOrderByNewGroupName[right]) {
+            case let (leftOrder?, rightOrder?) where leftOrder != rightOrder:
+                return leftOrder < rightOrder
+            case (.some, .none):
+                return true
+            case (.none, .some):
+                return false
+            default:
+                return firstIndexByNewGroupName[left, default: .max]
+                    < firstIndexByNewGroupName[right, default: .max]
+            }
+        }
+
+        let firstNewSortOrder = nextGroupSortOrder
+        var newMetadataByName: [String: (id: UUID, code: String?, emoji: String?, sortOrder: Int)] = [:]
+        for (offset, groupName) in orderedNewGroupNames.enumerated() {
+            let firstProfile = importedProfiles.first { $0.displayGroupName == groupName }
+            newMetadataByName[groupName] = (
+                id: UUID(),
+                code: normalizedOptional(firstProfile?.groupCode),
+                emoji: normalizedGroupEmoji(firstProfile?.groupEmoji),
+                sortOrder: firstNewSortOrder + offset
+            )
+        }
+
+        let values = importedProfiles.map { importedProfile in
+            var value = importedProfile
+            value.groupName = normalizedOptional(value.groupName)
+            let groupName = value.displayGroupName
+            if let group = existingGroupsByName[groupName] {
+                value.groupID = group.id
+                value.groupCode = group.code
+                value.groupEmoji = group.emoji
+                value.groupSortOrder = group.sortOrder
+            } else if let metadata = newMetadataByName[groupName] {
+                value.groupID = metadata.id
+                value.groupCode = metadata.code
+                value.groupEmoji = metadata.emoji
+                value.groupSortOrder = metadata.sortOrder
+            }
+            return value
+        }
+
         let oldProfiles = profiles
-        profiles.append(value)
+        profiles.append(contentsOf: values)
         do {
             try persist()
         } catch {
@@ -186,6 +258,7 @@ final class AppModel {
             groupID: profile.groupID,
             groupCode: profile.groupCode,
             groupEmoji: profile.groupEmoji,
+            groupSortOrder: profile.groupSortOrder,
             userAgent: profile.userAgent,
             homePage: profile.homePage,
             color: profile.color,
@@ -283,6 +356,7 @@ final class AppModel {
             profiles[index].groupName = normalizedName
             profiles[index].groupCode = normalizedCode
             profiles[index].groupEmoji = normalizedEmoji
+            profiles[index].groupSortOrder = existingGroup.sortOrder
             profiles[index].name = linkedProfileName(
                 profiles[index].name,
                 replacingGroupName: oldName,
@@ -567,6 +641,43 @@ final class AppModel {
         }
     }
 
+    func moveGroups(fromOffsets offsets: IndexSet, toOffset destination: Int) throws {
+        guard !offsets.isEmpty else { return }
+
+        let currentGroups = profileGroups
+        let currentIDs = currentGroups.map(\.id)
+        let movingIDs = offsets.sorted().compactMap { currentIDs[safe: $0] }
+        guard movingIDs.count == offsets.count else { return }
+
+        var reorderedIDs = currentIDs.enumerated()
+            .filter { !offsets.contains($0.offset) }
+            .map(\.element)
+        let removedBeforeDestination = offsets.filter { $0 < destination }.count
+        let insertionIndex = max(0, min(reorderedIDs.count, destination - removedBeforeDestination))
+        reorderedIDs.insert(contentsOf: movingIDs, at: insertionIndex)
+
+        let groupByID = Dictionary(uniqueKeysWithValues: currentGroups.map { ($0.id, $0) })
+        let oldProfiles = profiles
+        for (sortOrder, groupID) in reorderedIDs.enumerated() {
+            guard let group = groupByID[groupID] else { continue }
+            for index in profiles.indices {
+                let belongsToGroup = profiles[index].groupID == groupID
+                    || (profiles[index].groupID == nil
+                        && profiles[index].displayGroupName == group.name)
+                guard belongsToGroup else { continue }
+                profiles[index].groupID = groupID
+                profiles[index].groupSortOrder = sortOrder
+            }
+        }
+
+        do {
+            try persist()
+        } catch {
+            profiles = oldProfiles
+            throw error
+        }
+    }
+
     func clearWebsiteData(for profile: BrowserProfile) async {
         guard profiles.contains(where: { $0.id == profile.id }) else { return }
         guard !isDestructiveOperationInProgress else { return }
@@ -659,6 +770,8 @@ final class AppModel {
         var nameByID: [UUID: String] = [:]
         var codeByID: [UUID: String] = [:]
         var emojiByID: [UUID: String] = [:]
+        var candidateOrderByID: [UUID: Int] = [:]
+        var groupIDsInDiscoveryOrder: [UUID] = []
         var migrated = profiles
 
         for index in migrated.indices {
@@ -683,6 +796,14 @@ final class AppModel {
             }
 
             nameByID[groupID] = nameByID[groupID] ?? displayName
+            if !groupIDsInDiscoveryOrder.contains(groupID) {
+                groupIDsInDiscoveryOrder.append(groupID)
+            }
+            if candidateOrderByID[groupID] == nil,
+               let sortOrder = profile.groupSortOrder,
+               sortOrder >= 0 {
+                candidateOrderByID[groupID] = sortOrder
+            }
             if codeByID[groupID] == nil,
                let code = normalizedOptional(profile.groupCode) {
                 codeByID[groupID] = code
@@ -696,10 +817,27 @@ final class AppModel {
             migrated[index].groupName = normalizedOptional(profile.groupName)
         }
 
+        let orderedGroupIDs = groupIDsInDiscoveryOrder.enumerated().sorted { lhs, rhs in
+            switch (candidateOrderByID[lhs.element], candidateOrderByID[rhs.element]) {
+            case let (left?, right?) where left != right:
+                return left < right
+            case (.some, .none):
+                return true
+            case (.none, .some):
+                return false
+            default:
+                return lhs.offset < rhs.offset
+            }
+        }.map(\.element)
+        let sortOrderByID = Dictionary(
+            uniqueKeysWithValues: orderedGroupIDs.enumerated().map { ($0.element, $0.offset) }
+        )
+
         for index in migrated.indices {
             guard let groupID = migrated[index].groupID else { continue }
             migrated[index].groupCode = codeByID[groupID]
             migrated[index].groupEmoji = emojiByID[groupID]
+            migrated[index].groupSortOrder = sortOrderByID[groupID]
         }
 
         guard migrated != originalProfiles else { return }
@@ -712,12 +850,12 @@ final class AppModel {
         }
     }
 
-    private func groupMetadata(named groupName: String?) -> (id: UUID, code: String?, emoji: String?)? {
+    private func groupMetadata(named groupName: String?) -> (id: UUID, code: String?, emoji: String?, sortOrder: Int)? {
         let displayName = groupName ?? "未分组"
         guard let group = profileGroups.first(where: { $0.name == displayName }) else {
             return nil
         }
-        return (group.id, group.code, group.emoji)
+        return (group.id, group.code, group.emoji, group.sortOrder)
     }
 
     /// Assigns a profile to an existing group when possible, otherwise creates
@@ -737,6 +875,7 @@ final class AppModel {
             profile.groupID = previousID
             profile.groupCode = previousProfile.groupCode
             profile.groupEmoji = previousProfile.groupEmoji
+            profile.groupSortOrder = previousProfile.groupSortOrder
             return
         }
 
@@ -744,6 +883,7 @@ final class AppModel {
             profile.groupID = group.id
             profile.groupCode = group.code
             profile.groupEmoji = group.emoji
+            profile.groupSortOrder = group.sortOrder
             return
         }
 
@@ -753,6 +893,11 @@ final class AppModel {
         profile.groupID = UUID()
         profile.groupCode = normalizedOptional(profile.groupCode)
         profile.groupEmoji = normalizedGroupEmoji(profile.groupEmoji)
+        profile.groupSortOrder = nextGroupSortOrder
+    }
+
+    private var nextGroupSortOrder: Int {
+        (profileGroups.map(\.sortOrder).filter { $0 != .max }.max() ?? -1) + 1
     }
 
     private func linkedProfileName(
