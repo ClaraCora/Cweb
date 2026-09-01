@@ -25,10 +25,12 @@ struct IPDetectionView: View {
                     LabeledContent("网络路径", value: networkPathDescription)
                 }
 
-                Section("检测结果") {
+                Section {
                     ProbeResultRow(title: "IPv4", systemImage: "4.circle", state: ipv4)
                     ProbeResultRow(title: "IPv6", systemImage: "6.circle", state: ipv6)
                     ProbeResultRow(title: "WebRTC", systemImage: "dot.radiowaves.left.and.right", state: webRTC)
+                } header: {
+                    Text("检测结果")
                 } footer: {
                     Text("WebRTC 显示网页可见的候选地址；它与 IPv4、IPv6 出口不一致时，可能存在独立的网络路径。")
                 }
