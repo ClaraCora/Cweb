@@ -444,7 +444,11 @@ struct AppModelTests {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         let repository = ProfileRepository(fileURL: profileURL)
-        let model = AppModel(profileRepository: repository)
+        let vault = CredentialVault(inMemory: true)
+        let model = AppModel(
+            profileRepository: repository,
+            credentialVault: vault
+        )
         try model.addProfile(
             name: "环境", groupName: "甲", homePage: BrowserProfile.defaultHomePage,
             userAgent: BrowserProfile.defaultUserAgent, color: .indigo, socksProxyNumber: 1
