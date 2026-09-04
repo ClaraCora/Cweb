@@ -1291,7 +1291,7 @@ struct PresentedError: Identifiable {
     let message: String
 }
 
-enum ProfileError: LocalizedError {
+enum ProfileError: LocalizedError, Equatable {
     case notFound
     case profileStoreUnavailable
     case groupNotFound
