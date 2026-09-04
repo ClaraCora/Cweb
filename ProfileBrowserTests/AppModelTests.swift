@@ -367,6 +367,134 @@ struct AppModelTests {
     }
 
     @Test
+    func socksProxyNumbersAreUniqueWithinOneGroupButReusableAcrossGroups() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let profileURL = directory.appending(path: "profiles.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let repository = ProfileRepository(fileURL: profileURL)
+        let model = AppModel(profileRepository: repository)
+        try model.addProfile(
+            name: "甲一",
+            groupName: "甲",
+            homePage: BrowserProfile.defaultHomePage,
+            userAgent: BrowserProfile.defaultUserAgent,
+            color: .indigo,
+            socksProxyNumber: 1
+        )
+        try model.addProfile(
+            name: "乙一",
+            groupName: "乙",
+            homePage: BrowserProfile.defaultHomePage,
+            userAgent: BrowserProfile.defaultUserAgent,
+            color: .indigo,
+            socksProxyNumber: 1
+        )
+
+        #expect(throws: ProfileError.self) {
+            try model.addProfile(
+                name: "甲二",
+                groupName: "甲",
+                homePage: BrowserProfile.defaultHomePage,
+                userAgent: BrowserProfile.defaultUserAgent,
+                color: .indigo,
+                socksProxyNumber: 1
+            )
+        }
+        #expect(model.profiles.map(\.name) == ["甲一", "乙一"])
+    }
+
+    @Test
+    func movingToGroupWithAssignedProxyIsRejected() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let profileURL = directory.appending(path: "profiles.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let repository = ProfileRepository(fileURL: profileURL)
+        let model = AppModel(profileRepository: repository)
+        try model.addProfile(
+            name: "甲一", groupName: "甲", homePage: BrowserProfile.defaultHomePage,
+            userAgent: BrowserProfile.defaultUserAgent, color: .indigo, socksProxyNumber: 1
+        )
+        try model.addProfile(
+            name: "乙一", groupName: "乙", homePage: BrowserProfile.defaultHomePage,
+            userAgent: BrowserProfile.defaultUserAgent, color: .indigo, socksProxyNumber: 1
+        )
+
+        let originalSecond = try #require(model.profiles.last)
+        // Saving the existing assignment for the same environment is valid.
+        try model.updateProfile(originalSecond)
+
+        var movedSecond = originalSecond
+        movedSecond.groupName = "甲"
+        #expect(throws: ProfileError.self) {
+            try model.updateProfile(movedSecond)
+        }
+        let persistedSecond = try #require(model.profiles.last)
+        #expect(persistedSecond.groupName == "乙")
+    }
+
+    @Test
+    func duplicatingProfileClearsSocksProxySelection() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let profileURL = directory.appending(path: "profiles.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let repository = ProfileRepository(fileURL: profileURL)
+        let model = AppModel(profileRepository: repository)
+        try model.addProfile(
+            name: "环境", groupName: "甲", homePage: BrowserProfile.defaultHomePage,
+            userAgent: BrowserProfile.defaultUserAgent, color: .indigo, socksProxyNumber: 1
+        )
+
+        try model.duplicateProfile(try #require(model.profiles.first))
+        #expect(model.profiles.map(\.socksProxyNumber) == [1, nil])
+    }
+
+    @Test
+    func importedConflictingSocksProxySelectionIsCleared() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let profileURL = directory.appending(path: "profiles.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let repository = ProfileRepository(fileURL: profileURL)
+        let model = AppModel(profileRepository: repository)
+        try model.addProfile(
+            name: "已有", groupName: "甲", homePage: BrowserProfile.defaultHomePage,
+            userAgent: BrowserProfile.defaultUserAgent, color: .indigo, socksProxyNumber: 1
+        )
+
+        try model.addImportedProfiles([
+            BrowserProfile(name: "冲突", groupName: "甲", socksProxyNumber: 1),
+            BrowserProfile(name: "可用", groupName: "乙", socksProxyNumber: 1)
+        ])
+
+        #expect(model.profiles.map(\.socksProxyNumber) == [1, nil, 1])
+    }
+
+    @Test
+    func existingDuplicateSocksProxySelectionsAreRepairedInPersistedOrder() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let profileURL = directory.appending(path: "profiles.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let first = BrowserProfile(name: "先保存", groupName: "甲", socksProxyNumber: 1)
+        let second = BrowserProfile(name: "后保存", groupName: "甲", socksProxyNumber: 1)
+        let third = BrowserProfile(name: "另一组", groupName: "乙", socksProxyNumber: 1)
+        let repository = ProfileRepository(fileURL: profileURL)
+        try repository.save([first, second, third])
+
+        let model = AppModel(profileRepository: repository)
+        #expect(model.profiles.map(\.socksProxyNumber) == [1, nil, 1])
+        #expect(try repository.load().map(\.socksProxyNumber) == [1, nil, 1])
+    }
+
+    @Test
     func lockedProxiesSurviveSingleBatchAndClearDeletion() throws {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: UUID().uuidString, directoryHint: .isDirectory)

@@ -147,13 +147,19 @@ struct ProfileEditorView: View {
                     ) {
                         Text("不使用代理").tag(0)
                         ForEach(rankedProxyOptions) { option in
-                            Text("第 \(option.number) 号 · \(option.proxy.displayCode ?? option.proxy.displayAddress)")
+                            Text(proxyOptionTitle(for: option))
                                 .tag(option.number)
+                                .disabled(isProxyNumberOccupied(option.number))
                         }
                     }
                     .pickerStyle(.menu)
 
                     if let socksProxyNumber {
+                        if let occupant = proxyOccupant(for: socksProxyNumber) {
+                            Text("第 \(socksProxyNumber) 号代理已由“\(occupant.name)”使用。请取消代理或选择其他编号后保存。")
+                                .font(.footnote)
+                                .foregroundStyle(.red)
+                        }
                         if let proxy = model.socksProxy(forDisplayNumber: socksProxyNumber) {
                             if let code = proxy.displayCode {
                                 LabeledContent("代号", value: code)
@@ -165,7 +171,7 @@ struct ProfileEditorView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    Text("环境保存的是当前显示编号。代理验证或拉取后重新排序时，同一编号会指向新的代理内容。")
+                    Text("同一分组内每个显示编号只能分配给一个环境。代理验证或拉取后重新排序时，同一编号会指向新的代理内容。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -277,6 +283,24 @@ struct ProfileEditorView: View {
         model.rankedSocksProxies
     }
 
+    private func proxyOccupant(for number: Int) -> BrowserProfile? {
+        model.profileUsingSocksProxyNumber(
+            number,
+            inGroupNamed: normalizedGroupName,
+            excludingProfileID: originalProfile?.id
+        )
+    }
+
+    private func isProxyNumberOccupied(_ number: Int) -> Bool {
+        proxyOccupant(for: number) != nil
+    }
+
+    private func proxyOptionTitle(for option: SocksProxyRanking) -> String {
+        let label = "第 \(option.number) 号 · \(option.proxy.displayCode ?? option.proxy.displayAddress)"
+        guard let occupant = proxyOccupant(for: option.number) else { return label }
+        return "\(label) · 已由“\(occupant.name)”使用"
+    }
+
     private func randomizeUserAgent() {
         let groupName = currentDisplayGroupName
         var excludedValues = Set(
@@ -305,8 +329,12 @@ struct ProfileEditorView: View {
     }
 
     private var currentDisplayGroupName: String {
+        normalizedGroupName ?? "未分组"
+    }
+
+    private var normalizedGroupName: String? {
         let value = groupName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return value.isEmpty ? "未分组" : value
+        return value.isEmpty ? nil : value
     }
 }
 

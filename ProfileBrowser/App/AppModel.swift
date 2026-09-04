@@ -38,7 +38,9 @@ final class AppModel {
         self.socksProxyValidationServiceOverride = socksProxyValidationService
         reloadProfiles()
         if isProfileStoreAvailable {
-            migrateGroupMetadataIfNeeded()
+            if migrateGroupMetadataIfNeeded() {
+                repairDuplicateSocksAssignmentsIfNeeded()
+            }
         }
         reloadSocksProxyValidationSettings()
         reloadSocksProxies()
@@ -75,7 +77,9 @@ final class AppModel {
                 profiles = try profileRepository.load()
                 isProfileStoreAvailable = true
                 isLoadingProfiles = false
-                migrateGroupMetadataIfNeeded()
+                if migrateGroupMetadataIfNeeded() {
+                    repairDuplicateSocksAssignmentsIfNeeded()
+                }
                 return
             } catch {
                 lastError = error
@@ -153,6 +157,7 @@ final class AppModel {
             color: color,
             socksProxyNumber: normalizedProxyNumber(socksProxyNumber)
         )
+        try validateSocksProxyAssignment(for: profile)
         let oldProfiles = profiles
         profiles.append(profile)
         do {
@@ -218,7 +223,8 @@ final class AppModel {
             )
         }
 
-        let values = importedProfiles.map { importedProfile in
+        var values: [BrowserProfile] = []
+        for importedProfile in importedProfiles {
             var value = importedProfile
             value.groupName = normalizedOptional(value.groupName)
             let groupName = value.displayGroupName
@@ -233,7 +239,15 @@ final class AppModel {
                 value.groupEmoji = metadata.emoji
                 value.groupSortOrder = metadata.sortOrder
             }
-            return value
+            value.socksProxyNumber = normalizedProxyNumber(value.socksProxyNumber)
+
+            // A backup can contain several environments that used a number
+            // before this rule existed. Keep the environment but release the
+            // conflicting volatile number instead of rejecting the whole import.
+            if socksProxyAssignmentConflict(for: value, excludingProfileID: nil, among: profiles + values) != nil {
+                value.socksProxyNumber = nil
+            }
+            values.append(value)
         }
 
         let oldProfiles = profiles
@@ -263,7 +277,7 @@ final class AppModel {
             homePage: profile.homePage,
             color: profile.color,
             cachedBalance: profile.cachedBalance,
-            socksProxyNumber: profile.socksProxyNumber
+            socksProxyNumber: nil
         )
 
         profiles.append(duplicate)
@@ -400,6 +414,7 @@ final class AppModel {
             whenGroupNameUnchanged: value.groupName == previousProfile.groupName
         )
         value.socksProxyNumber = normalizedProxyNumber(value.socksProxyNumber)
+        try validateSocksProxyAssignment(for: value, excludingProfileID: value.id)
         value.updatedAt = .now
         profiles[index] = value
         do {
@@ -795,8 +810,9 @@ final class AppModel {
     /// by versions that only stored `groupName`.  The migration is deliberately
     /// performed once at launch and written back atomically through the existing
     /// profile repository, so old installations do not need a second data file.
-    private func migrateGroupMetadataIfNeeded() {
-        guard !profiles.isEmpty else { return }
+    @discardableResult
+    private func migrateGroupMetadataIfNeeded() -> Bool {
+        guard !profiles.isEmpty else { return true }
 
         let originalProfiles = profiles
         var idByName: [String: UUID] = [:]
@@ -873,13 +889,15 @@ final class AppModel {
             migrated[index].groupSortOrder = sortOrderByID[groupID]
         }
 
-        guard migrated != originalProfiles else { return }
+        guard migrated != originalProfiles else { return true }
         profiles = migrated
         do {
             try persist()
+            return true
         } catch {
             profiles = originalProfiles
             present(error)
+            return false
         }
     }
 
@@ -889,6 +907,122 @@ final class AppModel {
             return nil
         }
         return (group.id, group.code, group.emoji, group.sortOrder)
+    }
+
+    /// Finds an environment already using a volatile SOCKS display number in
+    /// the requested group. This is public for the editor's availability UI;
+    /// all actual enforcement remains in the save paths below.
+    func profileUsingSocksProxyNumber(
+        _ number: Int,
+        inGroupNamed groupName: String?,
+        excludingProfileID: UUID? = nil
+    ) -> BrowserProfile? {
+        guard number > 0 else { return nil }
+
+        let normalizedName = normalizedOptional(groupName)
+        let displayName = normalizedName ?? "未分组"
+        let targetGroupID = groupMetadata(named: normalizedName)?.id
+
+        return profiles.first { candidate in
+            guard candidate.id != excludingProfileID,
+                  normalizedProxyNumber(candidate.socksProxyNumber) == number
+            else {
+                return false
+            }
+
+            if let targetGroupID {
+                return candidate.groupID == targetGroupID
+                    || (candidate.groupID == nil && candidate.displayGroupName == displayName)
+            }
+            // A group that is being created for the first time has no stable
+            // ID yet. Fall back to its normalized display name so legacy
+            // members are still shown as occupied in the editor.
+            return candidate.displayGroupName == displayName
+        }
+    }
+
+    /// Profiles imported from older versions may have duplicated a number
+    /// inside a group. Preserve the first saved environment and release the
+    /// later bindings, following the user's persisted order.
+    private func repairDuplicateSocksAssignmentsIfNeeded() {
+        guard !profiles.isEmpty else { return }
+
+        let originalProfiles = profiles
+        var repairedProfiles = profiles
+        var assignedNumbers = Set<SocksProxyAssignmentKey>()
+
+        for index in repairedProfiles.indices {
+            let normalizedNumber = normalizedProxyNumber(repairedProfiles[index].socksProxyNumber)
+            repairedProfiles[index].socksProxyNumber = normalizedNumber
+            guard let normalizedNumber else { continue }
+
+            let key = SocksProxyAssignmentKey(
+                groupIdentity: socksProxyGroupIdentity(for: repairedProfiles[index]),
+                proxyNumber: normalizedNumber
+            )
+            guard assignedNumbers.insert(key).inserted else {
+                repairedProfiles[index].socksProxyNumber = nil
+                continue
+            }
+        }
+
+        guard repairedProfiles != originalProfiles else { return }
+        profiles = repairedProfiles
+        do {
+            try persist()
+        } catch {
+            profiles = originalProfiles
+            present(error)
+        }
+    }
+
+    private func validateSocksProxyAssignment(
+        for profile: BrowserProfile,
+        excludingProfileID: UUID? = nil
+    ) throws {
+        guard let number = normalizedProxyNumber(profile.socksProxyNumber),
+              let conflictingProfile = socksProxyAssignmentConflict(
+                for: profile,
+                excludingProfileID: excludingProfileID,
+                among: profiles
+              )
+        else {
+            return
+        }
+
+        throw ProfileError.socksProxyAlreadyAssigned(
+            groupName: profile.displayGroupName,
+            profileName: conflictingProfile.name,
+            number: number
+        )
+    }
+
+    private func socksProxyAssignmentConflict(
+        for profile: BrowserProfile,
+        excludingProfileID: UUID?,
+        among candidates: [BrowserProfile]
+    ) -> BrowserProfile? {
+        guard let number = normalizedProxyNumber(profile.socksProxyNumber) else {
+            return nil
+        }
+
+        return candidates.first { candidate in
+            candidate.id != excludingProfileID
+                && normalizedProxyNumber(candidate.socksProxyNumber) == number
+                && profilesBelongToSameGroup(candidate, profile)
+        }
+    }
+
+    private func profilesBelongToSameGroup(_ lhs: BrowserProfile, _ rhs: BrowserProfile) -> Bool {
+        if let lhsGroupID = lhs.groupID, let rhsGroupID = rhs.groupID {
+            return lhsGroupID == rhsGroupID
+        }
+        return lhs.displayGroupName == rhs.displayGroupName
+    }
+
+    private func socksProxyGroupIdentity(for profile: BrowserProfile) -> String {
+        profile.groupID.map { "id:\($0.uuidString)" }
+            ?? "name:\(profile.displayGroupName)"
     }
 
     /// Assigns a profile to an existing group when possible, otherwise creates
@@ -1141,6 +1275,11 @@ final class AppModel {
     }
 }
 
+private struct SocksProxyAssignmentKey: Hashable {
+    let groupIdentity: String
+    let proxyNumber: Int
+}
+
 private extension Array {
     subscript(safe index: Index) -> Element? {
         indices.contains(index) ? self[index] : nil
@@ -1158,6 +1297,7 @@ enum ProfileError: LocalizedError {
     case groupNotFound
     case groupNameEmpty
     case groupNameAlreadyExists
+    case socksProxyAlreadyAssigned(groupName: String, profileName: String, number: Int)
     case autofillCredentialsIncomplete
     case invalidAutofillOrigin
 
@@ -1173,6 +1313,8 @@ enum ProfileError: LocalizedError {
             return "分组名称不能为空。"
         case .groupNameAlreadyExists:
             return "已经存在同名分组，请换一个名称。"
+        case let .socksProxyAlreadyAssigned(groupName, profileName, number):
+            return "分组“\(groupName)”中的环境“\(profileName)”已使用第 \(number) 号 SOCKS 代理。"
         case .autofillCredentialsIncomplete:
             return "自动填充账号和密码需要同时填写，或都留空。"
         case .invalidAutofillOrigin:
