@@ -33,17 +33,15 @@ struct SocksProxyPresetEditorView: View {
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    Toggle("启用自动拉取", isOn: $isEnabled)
+                    Toggle("启用此链接", isOn: $isEnabled)
                 }
             }
             .navigationTitle(originalPreset == nil ? "添加预设链接" : "编辑预设链接")
             .navigationBarTitleDisplayMode(.inline)
+            .editorDismissProtection(isModified: hasChanges)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消", systemImage: "xmark") { dismiss() }
-                }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("完成", systemImage: "checkmark") { save() }
+                    Button("完成") { save() }
                         .disabled(!isValid)
                 }
             }
@@ -64,6 +62,12 @@ struct SocksProxyPresetEditorView: View {
               (scheme == "http" || scheme == "https"),
               url.host != nil else { return nil }
         return url
+    }
+
+    private var hasChanges: Bool {
+        name != (originalPreset?.name ?? "")
+            || urlText != (originalPreset?.url.absoluteString ?? "")
+            || isEnabled != (originalPreset?.isEnabled ?? true)
     }
 
     private var isValid: Bool { validatedURL != nil }
@@ -91,4 +95,3 @@ struct SocksProxyPresetEditorView: View {
         }
     }
 }
-

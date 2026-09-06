@@ -39,17 +39,23 @@ struct ProfileGroupEditorView: View {
                 }
 
                 Section("分组信息") {
-                    TextField("分组名称", text: $name)
-                        .textInputAutocapitalization(.words)
-                        .autocorrectionDisabled()
+                    FormField("分组名称") {
+                        TextField("分组名称", text: $name)
+                            .textInputAutocapitalization(.words)
+                            .autocorrectionDisabled()
+                    }
 
-                    TextField("代号（可选）", text: $code)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                    FormField("代号") {
+                        TextField("可选", text: $code)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
 
-                    TextField("Emoji（可选）", text: $emoji)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                    FormField("Emoji 图标") {
+                        TextField("可选", text: $emoji)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
 
                     if !emoji.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Button("清除 Emoji", systemImage: "xmark.circle") {
@@ -100,14 +106,10 @@ struct ProfileGroupEditorView: View {
             }
             .navigationTitle("编辑分组")
             .navigationBarTitleDisplayMode(.inline)
+            .editorDismissProtection(isModified: hasChanges)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消", systemImage: "xmark") {
-                        dismiss()
-                    }
-                }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("完成", systemImage: "checkmark") {
+                    Button("完成") {
                         save()
                     }
                     .disabled(!isValid)
@@ -125,6 +127,10 @@ struct ProfileGroupEditorView: View {
 
     private var normalizedName: String {
         name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var hasChanges: Bool {
+        name != group.name || code != (group.code ?? "") || emoji != (group.emoji ?? "")
     }
 
     private var normalizedCode: String? {
@@ -147,32 +153,27 @@ struct ProfileGroupEditorView: View {
 
     @ViewBuilder
     private var groupPreview: some View {
-        HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 12) {
             Text(previewEmoji)
                 .font(.title)
                 .frame(width: 48, height: 48)
                 .background(group.color.color.opacity(0.14), in: Circle())
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(normalizedName.isEmpty ? "分组名称" : normalizedName)
-                        .font(.headline)
-                        .foregroundStyle(normalizedName.isEmpty ? Color.secondary : Color.primary)
-                        .lineLimit(1)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(normalizedName.isEmpty ? "分组名称" : normalizedName)
+                    .font(.headline)
+                    .foregroundStyle(normalizedName.isEmpty ? Color.secondary : Color.primary)
+                    .lineLimit(1)
 
-                    if let normalizedCode {
-                        Text(normalizedCode)
-                            .font(.caption.monospaced().weight(.medium))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
+                Text(normalizedCode ?? " ")
+                    .font(.subheadline.monospaced().weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
                 Text("\(group.profiles.count) 个环境")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
 
-            Spacer(minLength: 0)
         }
         .padding(.vertical, 6)
         .accessibilityElement(children: .combine)

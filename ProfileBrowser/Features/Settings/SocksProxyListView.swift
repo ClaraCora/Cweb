@@ -10,18 +10,49 @@ struct SocksProxyListView: View {
     @State private var showsBatchDelete = false
     @State private var pendingClear = false
     @State private var pendingDelete: SocksProxy?
-    @State private var isValidating = false
-    @State private var testingProxyID: UUID?
+    @State private var activity: ProxyActivity?
     @State private var statusMessage: String?
+    @State private var statusIsWarning = false
+    @State private var completedCount = 0
+    @State private var totalCount = 0
+    @State private var searchText = ""
 
     var body: some View {
         @Bindable var model = model
 
         List {
+            if let activity {
+                Section {
+                    HStack(spacing: 12) {
+                        ProgressView()
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(activity.title)
+                            if case .batchValidation = activity {
+                                Text("\(completedCount) / \(totalCount)")
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .font(.subheadline)
+                    }
+                    .frame(minHeight: 44)
+                    .accessibilityElement(children: .combine)
+                }
+            } else if let statusMessage {
+                Section {
+                    Label(statusMessage, systemImage: statusIsWarning ? "exclamationmark.circle" : "checkmark.circle")
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                        .accessibilityIdentifier("proxy.result")
+                }
+            }
             proxySection
+                .disabled(isValidating)
             presetSection
+                .disabled(isValidating)
         }
         .listStyle(.insetGrouped)
+        .searchable(text: $searchText, prompt: "编号、代号或地址")
         .navigationTitle("代理")
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
@@ -38,6 +69,12 @@ struct SocksProxyListView: View {
                     Button("添加代理", systemImage: "plus") {
                         editorMode = .create
                     }
+                } label: {
+                    Label("添加", systemImage: "plus")
+                }
+                .disabled(isValidating)
+
+                Menu {
                     Button("管理预设链接", systemImage: "list.bullet.rectangle") {
                         showsPresets = true
                     }
@@ -53,16 +90,7 @@ struct SocksProxyListView: View {
                 } label: {
                     Label("更多", systemImage: "ellipsis.circle")
                 }
-            }
-        }
-        .overlay {
-            if isValidating {
-                ProgressView(
-                    testingProxyID == nil ? "正在批量验证" : "正在测试代理"
-                )
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 14)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .disabled(isValidating)
             }
         }
         .sheet(item: $editorMode) { mode in
@@ -84,6 +112,7 @@ struct SocksProxyListView: View {
         }
         .sheet(isPresented: $showsBatchDelete) {
             SocksProxyBatchDeleteView { deletedCount in
+                statusIsWarning = false
                 statusMessage = "已删除 \(deletedCount) 个代理。"
             }
         }
@@ -91,6 +120,7 @@ struct SocksProxyListView: View {
             Button("清空", role: .destructive) {
                 do {
                     let deletedCount = try model.clearSocksProxies()
+                    statusIsWarning = false
                     statusMessage = "已删除 \(deletedCount) 个未锁定代理。"
                 } catch {
                     model.present(error)
@@ -113,11 +143,6 @@ struct SocksProxyListView: View {
         } message: { proxy in
             Text("将删除 \(proxy.displayAddress)。")
         }
-        .alert("操作完成", isPresented: statusAlertBinding) {
-            Button("好", role: .cancel) {}
-        } message: {
-            Text(statusMessage ?? "")
-        }
         .alert(item: $model.presentedError) { error in
             Alert(
                 title: Text("操作失败"),
@@ -130,7 +155,7 @@ struct SocksProxyListView: View {
     @ViewBuilder
     private var proxySection: some View {
         Section {
-            if rankedProxies.isEmpty {
+            if model.socksProxies.isEmpty {
                 ContentUnavailableView {
                     Label("还没有代理", systemImage: "network")
                 } description: {
@@ -141,9 +166,11 @@ struct SocksProxyListView: View {
                     }
                     .buttonStyle(.borderedProminent)
                 }
+            } else if rankedProxies.isEmpty {
+                ContentUnavailableView.search(text: searchText)
             } else {
                 ForEach(rankedProxies) { ranking in
-                    SocksProxyRow(ranking: ranking) {
+                    SocksProxyRow(ranking: ranking, isTesting: activity?.proxyID == ranking.proxy.id) {
                         editorMode = .edit(ranking.proxy)
                     }
                     .swipeActions(edge: .leading, allowsFullSwipe: false) {
@@ -256,7 +283,10 @@ struct SocksProxyListView: View {
     }
 
     private var rankedProxies: [SocksProxyRanking] {
-        model.rankedSocksProxies
+        model.rankedSocksProxies.filter { ranking in
+            searchText.isEmpty || "\(ranking.number) \(ranking.proxy.displayCode ?? "") \(ranking.proxy.displayAddress)"
+                .localizedCaseInsensitiveContains(searchText)
+        }
     }
 
     private var unlockedProxyCount: Int {
@@ -274,11 +304,7 @@ struct SocksProxyListView: View {
 
     private var validationFooter: String {
         let settings = model.socksProxyValidationSettings
-        let target = settings.targetURLString
-        let probe = settings.verifiesTLS ? "SOCKS CONNECT 和 HTTPS/TLS" : "SOCKS CONNECT"
-        let retention = settings.retainOnlyAvailable ? "只保留可用代理" : "保留全部测试结果"
-        let count = settings.maxRetainedCount == 0 ? "不限数量" : "最多保留 \(settings.maxRetainedCount) 个"
-        return "预设链接只会在你点击“拉取”时访问网络，可保存多个来源。批量验证会测试 \(target) 的 \(probe)，\(retention)，\(count)；锁定代理始终保留。"
+        return "测速目标：\(settings.targetURLString)。锁定代理始终保留。"
     }
 
     private var deleteAlertBinding: Binding<Bool> {
@@ -288,29 +314,27 @@ struct SocksProxyListView: View {
         )
     }
 
-    private var statusAlertBinding: Binding<Bool> {
-        Binding(
-            get: { statusMessage != nil },
-            set: { if !$0 { statusMessage = nil } }
-        )
-    }
+    private var isValidating: Bool { activity != nil }
 
     private func validateProxies() {
         guard !isValidating else { return }
-        isValidating = true
-        testingProxyID = nil
+        activity = .batchValidation
+        statusMessage = nil
+        completedCount = 0
+        totalCount = model.socksProxies.count
         Task { @MainActor in
-            defer {
-                isValidating = false
-                testingProxyID = nil
-            }
+            defer { activity = nil }
             do {
-                try await model.validateSocksProxies()
+                try await model.validateSocksProxies { completed, total in
+                    completedCount = completed
+                    totalCount = total
+                }
                 let settings = model.socksProxyValidationSettings
                 let count = settings.maxRetainedCount == 0
                     ? "不限数量"
                     : "最多 \(settings.maxRetainedCount) 个"
                 let availability = settings.retainOnlyAvailable ? "仅保留可用代理" : "保留全部测试结果"
+                statusIsWarning = false
                 statusMessage = "批量测试完成：\(availability)，\(count)，\(settings.sortMode.title)。"
             } catch {
                 model.present(error)
@@ -320,16 +344,18 @@ struct SocksProxyListView: View {
 
     private func validateProxy(_ proxy: SocksProxy) {
         guard !isValidating else { return }
-        isValidating = true
-        testingProxyID = proxy.id
+        activity = .singleValidation(proxy.id, proxy.displayCode ?? proxy.displayAddress)
+        statusMessage = nil
         Task { @MainActor in
-            defer {
-                isValidating = false
-                testingProxyID = nil
-            }
+            defer { activity = nil }
             do {
                 try await model.validateSocksProxy(proxy)
-                statusMessage = "单独测试完成。"
+                if let result = model.socksProxies.first(where: { $0.id == proxy.id }) {
+                    statusIsWarning = result.status != .available
+                    statusMessage = result.status == .available
+                        ? "\(result.displayCode ?? result.displayAddress)：可用，\(result.latencyMilliseconds ?? 0) ms。"
+                        : "\(result.displayCode ?? result.displayAddress)：\(result.validationMessage ?? "无法连接")"
+                }
             } catch {
                 model.present(error)
             }
@@ -346,11 +372,13 @@ struct SocksProxyListView: View {
 
     private func importPreset(_ preset: SocksProxyPreset) {
         guard !isValidating else { return }
-        isValidating = true
+        activity = .importing(preset.displayName)
+        statusMessage = nil
         Task { @MainActor in
-            defer { isValidating = false }
+            defer { activity = nil }
             do {
                 try await model.importSocksProxies(from: preset.url)
+                statusIsWarning = false
                 statusMessage = "已拉取 \(preset.displayName)。"
             } catch {
                 model.present(error)
@@ -359,8 +387,28 @@ struct SocksProxyListView: View {
     }
 }
 
+private enum ProxyActivity {
+    case batchValidation
+    case singleValidation(UUID, String)
+    case importing(String)
+
+    var title: String {
+        switch self {
+        case .batchValidation: "正在批量验证"
+        case .singleValidation(_, let name): "正在测试 \(name)"
+        case .importing(let name): "正在拉取 \(name)"
+        }
+    }
+
+    var proxyID: UUID? {
+        if case .singleValidation(let id, _) = self { return id }
+        return nil
+    }
+}
+
 private struct SocksProxyRow: View {
     let ranking: SocksProxyRanking
+    let isTesting: Bool
     let onTap: () -> Void
 
     var body: some View {
@@ -369,8 +417,9 @@ private struct SocksProxyRow: View {
                 Text("\(ranking.number)")
                     .font(.headline.monospacedDigit().weight(.bold))
                     .foregroundStyle(.primary)
-                    .frame(width: 30, height: 30)
-                    .background(Color.accentColor.opacity(0.12), in: Circle())
+                    .padding(.horizontal, 8)
+                    .frame(minWidth: 36, minHeight: 36)
+                    .background(Color(.tertiarySystemGroupedBackground), in: Capsule())
 
                 VStack(alignment: .leading, spacing: 3) {
                     if let code = ranking.proxy.displayCode {
@@ -386,25 +435,23 @@ private struct SocksProxyRow: View {
                             .font(.body.monospaced())
                             .lineLimit(1)
                     }
-                    HStack(spacing: 8) {
-                        statusLabel
-                        if let latency = ranking.proxy.latencyMilliseconds {
-                            Text("\(latency) ms")
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            statusLabel
+                            latencyLabel
                         }
-                        if ranking.proxy.username != nil {
-                            Image(systemName: "person.badge.key")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .accessibilityLabel("需要认证")
+                        .fixedSize()
+                        VStack(alignment: .leading, spacing: 4) {
+                            statusLabel
+                            latencyLabel
                         }
                     }
+                    .font(.subheadline)
                 }
                 Spacer(minLength: 8)
                 if ranking.proxy.isLocked {
                     Image(systemName: "lock.fill")
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(.secondary)
                         .accessibilityLabel("已锁定")
                 }
                 Image(systemName: "chevron.right")
@@ -427,7 +474,22 @@ private struct SocksProxyRow: View {
     }
 
     @ViewBuilder
+    private var latencyLabel: some View {
+        if let latency = ranking.proxy.latencyMilliseconds, ranking.proxy.status == .available {
+            Text("\(latency) ms")
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
     private var statusLabel: some View {
+        if isTesting {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("正在测试")
+            }
+        } else {
         switch ranking.proxy.status {
         case .available:
             Label("可用", systemImage: "checkmark.circle.fill")
@@ -438,6 +500,7 @@ private struct SocksProxyRow: View {
         case .untested:
             Label("未验证", systemImage: "questionmark.circle")
                 .foregroundStyle(.secondary)
+        }
         }
     }
 
@@ -469,6 +532,14 @@ private struct SocksProxyBatchDeleteView: View {
         NavigationStack {
             List {
                 Section {
+                    Button(selectedIDs == selectableIDs ? "取消全选" : "全选未锁定代理") {
+                        selectedIDs = selectedIDs == selectableIDs ? [] : selectableIDs
+                    }
+                    .disabled(selectableIDs.isEmpty)
+                    .accessibilityIdentifier("proxy.selectAll")
+                    LabeledContent("已选择", value: "\(selectedIDs.count) 个")
+                }
+                Section {
                     ForEach(model.rankedSocksProxies) { ranking in
                         if ranking.proxy.isLocked {
                             SocksProxyBatchSelectionRow(
@@ -499,7 +570,7 @@ private struct SocksProxyBatchDeleteView: View {
                     Button("取消") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("删除 \(selectedIDs.count) 个", systemImage: "trash", role: .destructive) {
+                    Button("删除", role: .destructive) {
                         showsConfirmation = true
                     }
                     .disabled(selectedIDs.isEmpty)
@@ -529,6 +600,10 @@ private struct SocksProxyBatchDeleteView: View {
         } else {
             selectedIDs.insert(id)
         }
+    }
+
+    private var selectableIDs: Set<UUID> {
+        Set(model.socksProxies.filter { !$0.isLocked }.map(\.id))
     }
 
     private func deleteSelected() {

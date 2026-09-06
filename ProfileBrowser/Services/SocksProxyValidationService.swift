@@ -99,32 +99,34 @@ struct SocksProxyValidationService: @unchecked Sendable {
     /// needed after the check.
     func validate(
         _ proxies: [SocksProxy],
-        maxConcurrent: Int = 8
+        maxConcurrent: Int = 8,
+        onProgress: (@MainActor @Sendable (Int, Int) -> Void)? = nil
     ) async -> [SocksProxyValidationResult] {
         guard !proxies.isEmpty else { return [] }
 
         let workerCount = min(max(1, maxConcurrent), proxies.count)
-        var buckets = Array(repeating: [(Int, SocksProxy)](), count: workerCount)
-        for (index, proxy) in proxies.enumerated() {
-            buckets[index % workerCount].append((index, proxy))
-        }
-
-        return await withTaskGroup(of: [(Int, SocksProxyValidationResult)].self) { group in
-            for bucket in buckets {
+        return await withTaskGroup(of: (Int, SocksProxyValidationResult).self) { group in
+            for index in 0..<workerCount {
+                let proxy = proxies[index]
                 group.addTask {
-                    var values: [(Int, SocksProxyValidationResult)] = []
-                    values.reserveCapacity(bucket.count)
-                    for (index, proxy) in bucket {
-                        values.append((index, await validate(proxy)))
-                    }
-                    return values
+                    (index, await validate(proxy))
                 }
             }
 
+            var nextIndex = workerCount
             var collected: [(Int, SocksProxyValidationResult)] = []
             collected.reserveCapacity(proxies.count)
-            for await values in group {
-                collected.append(contentsOf: values)
+            for await value in group {
+                collected.append(value)
+                await onProgress?(collected.count, proxies.count)
+                if nextIndex < proxies.count {
+                    let index = nextIndex
+                    let proxy = proxies[index]
+                    nextIndex += 1
+                    group.addTask {
+                        (index, await validate(proxy))
+                    }
+                }
             }
             return collected
                 .sorted { $0.0 < $1.0 }

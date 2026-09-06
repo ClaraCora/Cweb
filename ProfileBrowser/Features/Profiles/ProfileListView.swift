@@ -34,7 +34,10 @@ struct ProfileListView: View {
             }
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    EditButton()
+                    Button(editMode == .active ? "完成" : "排序") {
+                        editMode = editMode == .active ? .inactive : .active
+                    }
+                    .accessibilityIdentifier("profiles.reorder")
                     Button("新建", systemImage: "plus") {
                         editorMode = .create
                     }
@@ -215,10 +218,12 @@ struct ProfileListView: View {
             ProfileRow(
                 profile: profile,
                 balance: model.balance(for: profile),
+                proxySummary: proxySummary(for: profile),
                 isBusy: model.busyProfileID == profile.id
             )
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("profile.\(profile.id.uuidString)")
         .disabled(model.busyProfileID == profile.id)
         .swipeActions(edge: .leading, allowsFullSwipe: false) {
             Button("清理", systemImage: "eraser") {
@@ -273,6 +278,12 @@ struct ProfileListView: View {
         )
     }
 
+    private func proxySummary(for profile: BrowserProfile) -> String {
+        guard let number = profile.socksProxyNumber else { return "设备网络" }
+        guard let proxy = model.socksProxy(for: profile) else { return "第 \(number) 号代理（缺失）" }
+        return "第 \(number) 号代理\(proxy.displayCode.map { " · \($0)" } ?? "")"
+    }
+
     private var groupDeletionAlertBinding: Binding<Bool> {
         Binding(
             get: { pendingGroupDeletion != nil },
@@ -312,6 +323,7 @@ struct ProfileListView: View {
 private struct ProfileRow: View {
     let profile: BrowserProfile
     let balance: String?
+    let proxySummary: String
     let isBusy: Bool
 
     var body: some View {
@@ -326,23 +338,25 @@ private struct ProfileRow: View {
             .frame(width: 44, height: 44)
             .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline, spacing: 7) {
-                    Text(profile.name)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                        .layoutPriority(1)
-                    if let balance {
-                        Text(balance)
-                            .font(.subheadline.monospacedDigit().weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+            VStack(alignment: .leading, spacing: 6) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        nameLabel.fixedSize()
+                        balanceLabel.fixedSize()
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        nameLabel
+                        balanceLabel
                     }
                 }
                 Text(profile.homePageHost)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                Text(proxySummary)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer(minLength: 8)
@@ -353,8 +367,25 @@ private struct ProfileRow: View {
                     .accessibilityLabel("正在处理")
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 8)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(profile.name)\(balance.map { "，余额 \($0)" } ?? "")，主页 \(profile.homePageHost)")
+        .accessibilityLabel("\(profile.name)\(balance.map { "，上次余额 \($0)" } ?? "")，主页 \(profile.homePageHost)，\(proxySummary)")
+    }
+
+    private var nameLabel: some View {
+        Text(profile.name)
+            .font(.headline)
+            .foregroundStyle(.primary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder
+    private var balanceLabel: some View {
+        if let balance {
+            Text("上次余额 \(balance)")
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }

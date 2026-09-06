@@ -91,12 +91,10 @@ struct SocksProxyEditorView: View {
             }
             .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
+            .editorDismissProtection(isModified: hasChanges)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消", systemImage: "xmark") { dismiss() }
-                }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("完成", systemImage: "checkmark") { save() }
+                    Button("完成") { save() }
                         .disabled(!isValid)
                 }
             }
@@ -112,6 +110,16 @@ struct SocksProxyEditorView: View {
 
     private var normalizedHost: String {
         SocksProxy.normalizeHost(host)
+    }
+
+    private var hasChanges: Bool {
+        code != (originalProxy?.displayCode ?? "")
+            || isLocked != (isCopy ? false : (originalProxy?.isLocked ?? false))
+            || scheme != (originalProxy?.scheme ?? .socks5)
+            || host != (originalProxy?.host ?? "")
+            || port != (originalProxy.map { String($0.port) } ?? "1080")
+            || username != (originalProxy?.username ?? "")
+            || password != (originalProxy?.password ?? "")
     }
 
     private var navigationTitle: String {

@@ -7,8 +7,7 @@ struct DiagnosticsView: View {
     let session: BrowserSession
 
     @State private var cookieCount: Int?
-    @State private var publicIPAddress: String?
-    @State private var isLookingUpIP = false
+    @State private var showsIPDetection = false
     @State private var presentedError: PresentedError?
 
     var body: some View {
@@ -38,13 +37,10 @@ struct DiagnosticsView: View {
                 }
 
                 Section("网络") {
-                    if let publicIPAddress {
-                        LabeledContent("公网 IP", value: publicIPAddress)
+                    LabeledContent("当前路径", value: networkPathDescription)
+                    Button("检测环境 IP", systemImage: "network") {
+                        showsIPDetection = true
                     }
-                    Button("查询当前公网 IP", systemImage: "network") {
-                        Task { await lookupIPAddress() }
-                    }
-                    .disabled(isLookingUpIP)
                 }
 
                 Section("User-Agent") {
@@ -69,6 +65,9 @@ struct DiagnosticsView: View {
             .task {
                 await refreshCookieCount()
             }
+            .sheet(isPresented: $showsIPDetection) {
+                IPDetectionView(profile: session.profile, socksProxy: session.socksProxy)
+            }
             .alert(item: $presentedError) { error in
                 Alert(
                     title: Text("诊断失败"),
@@ -88,7 +87,7 @@ struct DiagnosticsView: View {
         Persistent Store: \(session.dataStore.isPersistent ? "yes" : "no")
         Origin: \(session.currentOrigin?.displayString ?? "not loaded")
         Cookie Count: \(cookieCount.map(String.init) ?? "unknown")
-        Public IP: \(publicIPAddress ?? "not queried")
+        Network Path: \(networkPathDescription)
         User-Agent: \(session.profile.userAgent)
         """
     }
@@ -101,14 +100,13 @@ struct DiagnosticsView: View {
         cookieCount = await session.dataStore.httpCookieStore.allCookies().count
     }
 
-    private func lookupIPAddress() async {
-        isLookingUpIP = true
-        defer { isLookingUpIP = false }
-
-        do {
-            publicIPAddress = try await IPLookupService().currentIPAddress()
-        } catch {
-            presentedError = PresentedError(message: error.localizedDescription)
+    private var networkPathDescription: String {
+        if let number = session.profile.socksProxyNumber {
+            guard let proxy = session.socksProxy else {
+                return "第 \(number) 号代理（缺失）"
+            }
+            return "第 \(number) 号 · \(proxy.displayCode ?? proxy.displayAddress)"
         }
+        return "设备网络"
     }
 }

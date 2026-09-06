@@ -9,6 +9,7 @@ struct BrowserView: View {
     @State private var showsCredentials = false
     @State private var showsDiagnostics = false
     @State private var showsBrowserChrome = false
+    @State private var showsFillUnavailable = false
 
     init(profile: BrowserProfile, socksProxy: SocksProxy? = nil) {
         _session = State(initialValue: BrowserSession(profile: profile, socksProxy: socksProxy))
@@ -18,9 +19,31 @@ struct BrowserView: View {
         @Bindable var session = session
 
         VStack(spacing: 0) {
+            VStack(spacing: 0) {
+                HStack(spacing: 6) {
+                    Image(systemName: session.currentOrigin?.isSecure == true ? "lock" : "globe")
+                        .accessibilityHidden(true)
+                    Text(session.currentOrigin?.host ?? session.profile.homePageHost)
+                        .lineLimit(1)
+                        .textSelection(.enabled)
+                }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, minHeight: 28)
+                .padding(.horizontal, 16)
+
+                ProgressView(value: session.page.estimatedProgress)
+                    .tint(.accentColor)
+                    .opacity(session.page.isLoading ? 1 : 0)
+                    .frame(height: 2)
+                    .accessibilityHidden(!session.page.isLoading)
+            }
+            .background(.bar)
+
             WebView(session.page)
                 .webViewBackForwardNavigationGestures(.enabled)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityIdentifier("browser.webPage")
 
             if showsBrowserChrome {
                 BrowserBottomChrome(
@@ -28,19 +51,22 @@ struct BrowserView: View {
                     hideChrome: { showsBrowserChrome = false },
                     showDiagnostics: { showsDiagnostics = true }
                 )
-            }
-        }
-        .overlay(alignment: .bottomTrailing) {
-            if !showsBrowserChrome {
-                Button("显示浏览器工具栏", systemImage: "chevron.up") {
-                    showsBrowserChrome = true
+            } else {
+                HStack {
+                    Spacer()
+                    Button("显示浏览器工具栏", systemImage: "chevron.up") {
+                        showsBrowserChrome = true
+                    }
+                    .labelStyle(.iconOnly)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .accessibilityIdentifier("browser.showToolbar")
+                    .accessibilityHint("显示地址栏和浏览器控制")
                 }
-                .labelStyle(.iconOnly)
-                .frame(minWidth: 44, minHeight: 44)
-                .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.circle)
-                .padding(12)
-                .accessibilityHint("显示地址栏和浏览器控制")
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+                .background(.bar)
             }
         }
         .navigationTitle(session.profile.name)
@@ -48,12 +74,16 @@ struct BrowserView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    showsCredentials = true
+                    if session.currentOrigin?.isSecure == true {
+                        showsCredentials = true
+                    } else {
+                        showsFillUnavailable = true
+                    }
                 } label: {
                     Label("填充", systemImage: "key.fill")
                         .labelStyle(.titleAndIcon)
                 }
-                .disabled(session.currentOrigin?.isSecure != true)
+                .accessibilityIdentifier("browser.fill")
             }
         }
         .toolbarVisibility(.hidden, for: .tabBar)
@@ -78,13 +108,24 @@ struct BrowserView: View {
         .sheet(isPresented: $showsDiagnostics) {
             DiagnosticsView(session: session)
         }
-        .alert(item: $session.presentedError) { error in
-            Alert(
-                title: Text("无法打开页面"),
-                message: Text(error.message),
-                dismissButton: .default(Text("好"))
-            )
+        .alert("暂时无法填充", isPresented: $showsFillUnavailable) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text("请等待 HTTPS 页面载入后再填充账号密码。")
         }
+        .alert("无法打开页面", isPresented: errorBinding, presenting: session.presentedError) { _ in
+            Button("重试") { session.navigateFromAddressBar() }
+            Button("取消", role: .cancel) {}
+        } message: { error in
+            Text(error.message)
+        }
+    }
+
+    private var errorBinding: Binding<Bool> {
+        Binding(
+            get: { session.presentedError != nil },
+            set: { if !$0 { session.presentedError = nil } }
+        )
     }
 }
 
@@ -96,13 +137,6 @@ private struct BrowserBottomChrome: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ProgressView(value: session.page.estimatedProgress)
-                .progressViewStyle(.linear)
-                .tint(session.profile.color.color)
-                .opacity(session.page.isLoading ? 1 : 0)
-                .frame(height: 2)
-                .accessibilityHidden(!session.page.isLoading)
-
             BrowserAddressBar(session: session, hideChrome: hideChrome)
 
             BrowserToolbar(
@@ -164,6 +198,7 @@ private struct BrowserAddressBar: View {
             .labelStyle(.iconOnly)
             .frame(minWidth: 44, minHeight: 44)
             .accessibilityHint("收起地址栏和浏览器控制")
+            .accessibilityIdentifier("browser.hideToolbar")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)

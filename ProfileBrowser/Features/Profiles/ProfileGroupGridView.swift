@@ -3,6 +3,7 @@ import SwiftUI
 @MainActor
 struct ProfileGroupGridView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var editorMode: ProfileEditorMode?
     @State private var showsGroupOrder = false
@@ -31,7 +32,7 @@ struct ProfileGroupGridView: View {
                         }
                         .disabled(model.profileGroups.count < 2)
 
-                        Button("新建", systemImage: "plus") {
+                        Button("新建环境", systemImage: "plus") {
                             editorMode = .create
                         }
                         .disabled(!model.isProfileStoreAvailable)
@@ -131,10 +132,9 @@ struct ProfileGroupGridView: View {
         } else {
             ScrollView {
                 LazyVGrid(
-                    columns: [
-                        GridItem(.flexible(), spacing: 12),
-                        GridItem(.flexible(), spacing: 12)
-                    ],
+                    columns: dynamicTypeSize.isAccessibilitySize
+                        ? [GridItem(.flexible())]
+                        : [GridItem(.adaptive(minimum: 156), spacing: 12)],
                     spacing: 12
                 ) {
                     ForEach(model.profileGroups) { group in
@@ -145,6 +145,7 @@ struct ProfileGroupGridView: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .accessibilityIdentifier("group.\(group.id.uuidString)")
                         .disabled(model.busyGroupName == group.name)
                         .contextMenu {
                             Button("编辑分组", systemImage: "pencil") {
@@ -195,60 +196,55 @@ struct ProfileGroupGridView: View {
     }
 }
 
-private struct ProfileGroupCard: View {
+struct ProfileGroupCard: View {
     let group: ProfileGroup
     let isBusy: Bool
 
     var body: some View {
-        HStack(spacing: 10) {
-            Text(group.displayEmoji)
-                .font(.title2)
-                .frame(width: 34, height: 34)
-                .background(group.color.color.opacity(0.14), in: Circle())
-                .accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(group.displayEmoji)
+                    .font(.title2)
+                    .frame(minWidth: 36, minHeight: 36)
+                    .background(group.color.color.opacity(0.14), in: Circle())
+                    .accessibilityHidden(true)
+                Spacer(minLength: 8)
+                if isBusy {
+                    ProgressView()
+                        .accessibilityLabel("正在删除分组")
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                }
+            }
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(group.name)
                     .font(.headline)
                     .foregroundStyle(.primary)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.78)
                     .layoutPriority(1)
 
                 Text(group.displayCode ?? " ")
                     .font(.subheadline.monospaced().weight(.medium))
-                    .foregroundStyle(group.displayCode == nil ? .tertiary : .secondary)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
 
                 Text("\(group.profiles.count) 个环境")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
 
-            Spacer(minLength: 4)
-
-            if isBusy {
-                ProgressView()
-                    .controlSize(.small)
-                    .accessibilityLabel("正在删除分组")
-            } else {
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.tertiary)
-                    .accessibilityHidden(true)
-            }
         }
-        .padding(.horizontal, 14)
-        .frame(maxWidth: .infinity, minHeight: 104, alignment: .leading)
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: 148, alignment: .topLeading)
         .background(
-            group.color.color.opacity(0.14),
+            Color(.secondarySystemGroupedBackground),
             in: RoundedRectangle(cornerRadius: 8, style: .continuous)
         )
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(group.color.color.opacity(0.24), lineWidth: 0.5)
-        }
         .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(group.displayEmoji)，\(group.name)\(group.displayCode.map { "，代号 \($0)" } ?? "")，\(group.profiles.count) 个环境")

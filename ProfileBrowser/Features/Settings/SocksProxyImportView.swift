@@ -40,15 +40,13 @@ struct SocksProxyImportView: View {
             }
             .navigationTitle(initialURL == nil ? "导入代理" : "拉取预设")
             .navigationBarTitleDisplayMode(.inline)
+            .editorDismissProtection(
+                isModified: urlText != (initialURL?.absoluteString ?? ""),
+                isBusy: isImporting
+            )
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消", systemImage: "xmark") {
-                        dismiss()
-                    }
-                    .disabled(isImporting)
-                }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("导入", systemImage: "arrow.down.circle") {
+                    Button("导入") {
                         importFeed()
                     }
                     .disabled(!isValidURL || isImporting)
@@ -101,4 +99,3 @@ struct SocksProxyImportView: View {
         }
     }
 }
-

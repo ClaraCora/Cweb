@@ -11,9 +11,15 @@ struct SocksProxySettingsView: View {
     @State private var draft: SocksProxyValidationSettings
     @State private var presentedError: PresentedError?
     @State private var showsResetConfirmation = false
+    @State private var retainedCountText: String
+    @State private var timeoutText: String
+    @State private var concurrentText: String
 
     init(settings: SocksProxyValidationSettings = .defaults) {
         _draft = State(initialValue: settings.normalized)
+        _retainedCountText = State(initialValue: String(settings.normalized.maxRetainedCount))
+        _timeoutText = State(initialValue: String(settings.normalized.timeoutSeconds))
+        _concurrentText = State(initialValue: String(settings.normalized.maxConcurrent))
     }
 
     var body: some View {
@@ -21,14 +27,10 @@ struct SocksProxySettingsView: View {
             Section("结果处理") {
                 Toggle("只保留可用代理", isOn: $draft.retainOnlyAvailable)
 
-                Stepper(value: $draft.maxRetainedCount, in: 0...500) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("批量测试后最多保留")
-                        Text(retentionDescription)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                IntegerSettingField(title: "最多保留", text: $retainedCountText, range: 0...500, unit: "个")
+                Text("0 表示不限数量；锁定代理始终保留。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
 
                 Picker("编号顺序", selection: $draft.sortMode) {
                     ForEach(SocksProxySortMode.allCases) { mode in
@@ -45,24 +47,13 @@ struct SocksProxySettingsView: View {
                     systemImage: "exclamationmark.triangle"
                 )
                 .font(.footnote)
-                .foregroundStyle(.orange)
+                .foregroundStyle(.primary)
             }
             .textCase(nil)
 
             Section("测试性能") {
-                Stepper(value: $draft.timeoutSeconds, in: 1...60) {
-                    LabeledContent("单个代理超时") {
-                        Text("\(draft.timeoutSeconds) 秒")
-                            .monospacedDigit()
-                    }
-                }
-
-                Stepper(value: $draft.maxConcurrent, in: 1...32) {
-                    LabeledContent("最大并发数") {
-                        Text("\(draft.maxConcurrent)")
-                            .monospacedDigit()
-                    }
-                }
+                IntegerSettingField(title: "单个代理超时", text: $timeoutText, range: 1...60, unit: "秒")
+                IntegerSettingField(title: "最大并发数", text: $concurrentText, range: 1...32, unit: "个")
 
                 Text("并发数越高，批量测试完成得越快，但可能增加网络和设备负载。")
                     .font(.footnote)
@@ -71,11 +62,13 @@ struct SocksProxySettingsView: View {
             .textCase(nil)
 
             Section("测试目标") {
-                TextField("HTTPS 测速地址", text: $draft.targetURLString, axis: .vertical)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .keyboardType(.URL)
-                    .lineLimit(1...3)
+                FormField("HTTPS 测速地址") {
+                    TextField("https://www.gstatic.com/generate_204", text: $draft.targetURLString, axis: .vertical)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                        .lineLimit(1...3)
+                }
 
                 Toggle("验证 HTTPS / TLS", isOn: $draft.verifiesTLS)
 
@@ -84,9 +77,7 @@ struct SocksProxySettingsView: View {
                     .foregroundStyle(.secondary)
 
                 if !isValidTargetURL {
-                    Label("请输入完整的 HTTPS 地址，例如 https://www.gstatic.com/generate_204。", systemImage: "info.circle")
-                        .font(.footnote)
-                        .foregroundStyle(.red)
+                    InlineValidationMessage(message: "请输入完整的 HTTPS 地址。")
                 }
             }
             .textCase(nil)
@@ -95,29 +86,29 @@ struct SocksProxySettingsView: View {
                 Button("恢复默认设置", systemImage: "arrow.counterclockwise") {
                     showsResetConfirmation = true
                 }
-                .disabled(draft == SocksProxyValidationSettings.defaults)
+                .disabled(editedSettings == SocksProxyValidationSettings.defaults)
             } footer: {
                 Text("默认值：只保留可用代理、最多 30 个、按延迟排序，使用 https://example.com/ 并验证 TLS。数量限制只在下一次批量测试时生效。")
             }
         }
         .navigationTitle("SOCKS 验证设置")
         .navigationBarTitleDisplayMode(.inline)
+        .editorDismissProtection(isModified: hasChanges)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("取消") {
-                    dismiss()
-                }
-            }
             ToolbarItem(placement: .confirmationAction) {
                 Button("保存") {
                     save()
                 }
-                .disabled(!hasChanges || !isValidTargetURL)
+                .disabled(!hasChanges || !isValidTargetURL || editedSettings == nil)
             }
         }
         .alert("恢复默认设置？", isPresented: $showsResetConfirmation) {
             Button("恢复", role: .destructive) {
-                draft = .defaults
+                let defaults = SocksProxyValidationSettings.defaults
+                draft = defaults
+                retainedCountText = String(defaults.maxRetainedCount)
+                timeoutText = String(defaults.timeoutSeconds)
+                concurrentText = String(defaults.maxConcurrent)
             }
             Button("取消", role: .cancel) {}
         } message: {
@@ -133,15 +124,22 @@ struct SocksProxySettingsView: View {
     }
 
     private var hasChanges: Bool {
-        draft.normalized != model.socksProxyValidationSettings.normalized
+        editedSettings != model.socksProxyValidationSettings.normalized
     }
 
     private var isValidTargetURL: Bool {
         SocksProxyValidationSettings.targetURL(from: draft.targetURLString) != nil
     }
 
-    private var retentionDescription: String {
-        draft.maxRetainedCount == 0 ? "不限数量" : "最多 \(draft.maxRetainedCount) 个"
+    private var editedSettings: SocksProxyValidationSettings? {
+        guard let count = Int(retainedCountText), (0...500).contains(count),
+              let timeout = Int(timeoutText), (1...60).contains(timeout),
+              let concurrent = Int(concurrentText), (1...32).contains(concurrent) else { return nil }
+        var value = draft
+        value.maxRetainedCount = count
+        value.timeoutSeconds = timeout
+        value.maxConcurrent = concurrent
+        return value.normalized
     }
 
     private var tlsDescription: String {
@@ -151,8 +149,9 @@ struct SocksProxySettingsView: View {
     }
 
     private func save() {
+        guard let editedSettings, isValidTargetURL else { return }
         do {
-            try model.updateSocksProxyValidationSettings(draft.normalized)
+            try model.updateSocksProxyValidationSettings(editedSettings)
             dismiss()
         } catch {
             presentedError = PresentedError(message: error.localizedDescription)

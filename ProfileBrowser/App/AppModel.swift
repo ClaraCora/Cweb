@@ -526,7 +526,7 @@ final class AppModel {
         socksProxies = try socksProxyRepository.appendUnique(imported)
     }
 
-    func validateSocksProxies() async throws {
+    func validateSocksProxies(onProgress: (@MainActor @Sendable (Int, Int) -> Void)? = nil) async throws {
         guard !socksProxies.isEmpty else { return }
 
         let settings = socksProxyValidationSettings.normalized
@@ -534,7 +534,8 @@ final class AppModel {
         let service = socksProxyValidationService(for: settings)
         let results = await service.validate(
             originalOrder,
-            maxConcurrent: settings.maxConcurrent
+            maxConcurrent: settings.maxConcurrent,
+            onProgress: onProgress
         )
         let resultsByID = Dictionary(
             uniqueKeysWithValues: results.map { ($0.proxyID, $0) }

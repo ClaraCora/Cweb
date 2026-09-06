@@ -48,10 +48,8 @@ struct CredentialEditorView: View {
             }
             .navigationTitle(originalCredential == nil ? "添加凭据" : "编辑凭据")
             .navigationBarTitleDisplayMode(.inline)
+            .editorDismissProtection(isModified: hasChanges)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
-                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("完成") { save() }
                         .disabled(!isValid)
@@ -69,6 +67,12 @@ struct CredentialEditorView: View {
 
     private var isValid: Bool {
         !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !password.isEmpty
+    }
+
+    private var hasChanges: Bool {
+        label != (originalCredential?.label ?? "")
+            || username != (originalCredential?.username ?? "")
+            || password != (originalCredential?.password ?? "")
     }
 
     private func save() {

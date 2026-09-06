@@ -16,6 +16,14 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            Section("外观") {
+                Picker("配色模式", selection: appearanceMode) {
+                    ForEach(AppAppearanceMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+            }
+
             Section {
                 NavigationLink {
                     SocksProxySettingsView(settings: model.socksProxyValidationSettings)
@@ -32,18 +40,9 @@ struct SettingsView: View {
                             .foregroundStyle(.tint)
                     }
                 }
+                .foregroundStyle(.primary)
             } header: {
                 Text("代理策略")
-            } footer: {
-                Text("代理节点、导入和测试位于“代理”页。验证只会在你主动执行时联网。")
-            }
-
-            Section("外观") {
-                Picker("配色模式", selection: appearanceMode) {
-                    ForEach(AppAppearanceMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                }
             }
 
             Section("数据") {
@@ -55,6 +54,22 @@ struct SettingsView: View {
             }
 
             Section("关于") {
+                HStack(spacing: 16) {
+                    Image(systemName: "safari.fill")
+                        .font(.system(size: 32))
+                        .foregroundStyle(.tint)
+                        .frame(width: 56, height: 56)
+                        .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("环境浏览器")
+                            .font(.headline)
+                        Text("Cweb")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 8)
                 LabeledContent("版本") {
                     Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0")
                         .foregroundStyle(.secondary)
@@ -63,9 +78,6 @@ struct SettingsView: View {
                     Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1")
                         .foregroundStyle(.secondary)
                 }
-                Text("环境浏览器为本地使用的多环境 WebKit 浏览器。")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
