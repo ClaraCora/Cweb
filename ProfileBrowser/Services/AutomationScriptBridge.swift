@@ -113,7 +113,10 @@ enum AutomationScriptBuilder {
     }
 
     private static func encodeMatches(_ matches: [String]) -> String {
-        guard let data = try? JSONSerialization.data(withJSONObject: matches),
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: matches,
+            options: [.withoutEscapingSlashes]
+        ),
               let value = String(data: data, encoding: .utf8) else {
             return "[]"
         }
