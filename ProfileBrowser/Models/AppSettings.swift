@@ -20,6 +20,9 @@ enum AppAppearanceMode: String, CaseIterable, Identifiable, Hashable {
 
 enum AppSettings {
     static let appearanceModeKey = "app.appearanceMode"
+    static let globalScriptSettingsKey = "app.globalScriptSettings"
+    static let checkInRecordsKey = "app.checkInRecords"
+    static let lastAutomationResultKey = "app.lastAutomationResult"
 
     static let defaultAppearanceMode = AppAppearanceMode.system.rawValue
 }

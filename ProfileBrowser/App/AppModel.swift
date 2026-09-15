@@ -8,6 +8,8 @@ final class AppModel {
     private(set) var socksProxies: [SocksProxy] = []
     private(set) var proxyPresets: [SocksProxyPreset] = []
     private(set) var socksProxyValidationSettings: SocksProxyValidationSettings = .defaults
+    private(set) var globalScriptSettings: GlobalScriptSettings
+    private(set) var lastAutomationResult: AutomationRunRecord?
     private(set) var isLoadingProfiles = true
     private(set) var isProfileStoreAvailable = false
     var presentedError: PresentedError?
@@ -21,6 +23,8 @@ final class AppModel {
     private let socksProxyRepository: SocksProxyRepository
     private let socksProxyImportService: SocksProxyImportService
     private let socksProxyValidationServiceOverride: SocksProxyValidationService?
+    private let userDefaults: UserDefaults
+    private var checkInDaysByProfileID: [String: String]
 
     init(
         profileRepository: ProfileRepository = ProfileRepository(),
@@ -28,7 +32,8 @@ final class AppModel {
         websiteDataStores: WebsiteDataStoreManager = WebsiteDataStoreManager(),
         socksProxyRepository: SocksProxyRepository = SocksProxyRepository(),
         socksProxyImportService: SocksProxyImportService = SocksProxyImportService(),
-        socksProxyValidationService: SocksProxyValidationService? = nil
+        socksProxyValidationService: SocksProxyValidationService? = nil,
+        userDefaults: UserDefaults = .standard
     ) {
         self.profileRepository = profileRepository
         self.credentialVault = credentialVault
@@ -36,6 +41,10 @@ final class AppModel {
         self.socksProxyRepository = socksProxyRepository
         self.socksProxyImportService = socksProxyImportService
         self.socksProxyValidationServiceOverride = socksProxyValidationService
+        self.userDefaults = userDefaults
+        self.globalScriptSettings = Self.loadGlobalScriptSettings(from: userDefaults)
+        self.checkInDaysByProfileID = Self.loadCheckInRecords(from: userDefaults)
+        self.lastAutomationResult = Self.loadLastAutomationResult(from: userDefaults)
         reloadProfiles()
         if isProfileStoreAvailable {
             if migrateGroupMetadataIfNeeded() {
@@ -44,6 +53,59 @@ final class AppModel {
         }
         reloadSocksProxyValidationSettings()
         reloadSocksProxies()
+    }
+
+    // MARK: - Global automation script
+
+    func updateGlobalScriptSettings(enabled: Bool, source: String) throws {
+        let normalizedSource = source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? ""
+            : source
+        let updated = GlobalScriptSettings(
+            enabled: enabled,
+            source: normalizedSource,
+            updatedAt: .now
+        )
+        let data = try JSONEncoder().encode(updated)
+        userDefaults.set(data, forKey: AppSettings.globalScriptSettingsKey)
+        globalScriptSettings = updated
+    }
+
+    func resetGlobalScriptSettings() throws {
+        let defaults = GlobalScriptSettings.default
+        try updateGlobalScriptSettings(enabled: defaults.enabled, source: defaults.source)
+    }
+
+    func shouldRunAutomation(for profileID: UUID, now: Date = .now) -> Bool {
+        checkInDaysByProfileID[profileID.uuidString] != Self.localDayKey(for: now)
+    }
+
+    func automationCompletionKey(for profileID: UUID, now: Date = .now) -> String {
+        "cweb.checkIn.\(profileID.uuidString).\(Self.localDayKey(for: now))"
+    }
+
+    func recordAutomationSuccess(for profileID: UUID, now: Date = .now) {
+        var records = checkInDaysByProfileID
+        records[profileID.uuidString] = Self.localDayKey(for: now)
+        guard let data = try? JSONEncoder().encode(records) else { return }
+        userDefaults.set(data, forKey: AppSettings.checkInRecordsKey)
+        checkInDaysByProfileID = records
+    }
+
+    func handleAutomationEvent(_ event: AutomationEvent, for profileID: UUID) {
+        let result = AutomationRunRecord(
+            profileID: profileID,
+            kind: event.kind,
+            message: event.message,
+            date: .now
+        )
+        if let data = try? JSONEncoder().encode(result) {
+            userDefaults.set(data, forKey: AppSettings.lastAutomationResultKey)
+            lastAutomationResult = result
+        }
+        if event.kind == .success {
+            recordAutomationSuccess(for: profileID)
+        }
     }
 
     var sortedProfiles: [BrowserProfile] {
@@ -1166,6 +1228,34 @@ final class AppModel {
         let updated = updated.normalized
         return previous.targetURLString != updated.targetURLString
             || previous.verifiesTLS != updated.verifiesTLS
+    }
+
+    private static func loadGlobalScriptSettings(from userDefaults: UserDefaults) -> GlobalScriptSettings {
+        guard let data = userDefaults.data(forKey: AppSettings.globalScriptSettingsKey),
+              let value = try? JSONDecoder().decode(GlobalScriptSettings.self, from: data) else {
+            return .default
+        }
+        return value
+    }
+
+    private static func loadCheckInRecords(from userDefaults: UserDefaults) -> [String: String] {
+        guard let data = userDefaults.data(forKey: AppSettings.checkInRecordsKey),
+              let value = try? JSONDecoder().decode([String: String].self, from: data) else {
+            return [:]
+        }
+        return value
+    }
+
+    private static func loadLastAutomationResult(from userDefaults: UserDefaults) -> AutomationRunRecord? {
+        guard let data = userDefaults.data(forKey: AppSettings.lastAutomationResultKey) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(AutomationRunRecord.self, from: data)
+    }
+
+    private static func localDayKey(for date: Date) -> String {
+        let components = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", components.year ?? 0, components.month ?? 0, components.day ?? 0)
     }
 
     private func persist() throws {

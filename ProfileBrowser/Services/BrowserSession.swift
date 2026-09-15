@@ -13,11 +13,18 @@ final class BrowserSession {
 
     var addressText: String
     var presentedError: PresentedError?
+    private(set) var automationState: AutomationState = .inactive
+    private(set) var automationMessage: String?
 
     private var hasStarted = false
     private var navigationTask: Task<Void, Never>?
     private var navigationGeneration = 0
     private let proxyConfigurationError: String?
+    private let userContentController: WKUserContentController
+    private var automationMessageHandler: AutomationMessageHandler?
+    private var automationConfigured = false
+    private var automationPaused = false
+    private var automationEventHandler: (@MainActor (AutomationEvent) -> Void)?
 
     init(profile: BrowserProfile, socksProxy: SocksProxy? = nil) {
         self.profile = profile
@@ -54,7 +61,8 @@ final class BrowserSession {
 
         var configuration = WebPage.Configuration()
         configuration.websiteDataStore = dataStore
-        configuration.userContentController = WKUserContentController()
+        let userContentController = WKUserContentController()
+        configuration.userContentController = userContentController
         configuration.upgradeKnownHostsToHTTPS = true
         configuration.deviceSensorAuthorization = WebPage.DeviceSensorAuthorization(decision: .deny)
 
@@ -67,6 +75,7 @@ final class BrowserSession {
 #endif
         self.page = page
         self.proxyConfigurationError = proxyConfigurationError
+        self.userContentController = userContentController
     }
 
     private static func endpoint(for proxy: SocksProxy) -> NWEndpoint? {
@@ -84,6 +93,100 @@ final class BrowserSession {
     var canGoBack: Bool { !page.backForwardList.backList.isEmpty }
     var canGoForward: Bool { !page.backForwardList.forwardList.isEmpty }
     var currentOrigin: WebOrigin? { page.url.flatMap(WebOrigin.init(url:)) }
+
+    /// Adds the global userscript before the first navigation. A script is
+    /// never attached to a session that has not explicitly entered an
+    /// environment, preserving the app's no-network-before-entry rule.
+    func configureAutomation(
+        settings: GlobalScriptSettings,
+        shouldRunToday: Bool,
+        completionKey: String,
+        onEvent: (@MainActor (AutomationEvent) -> Void)? = nil
+    ) {
+        guard !automationConfigured else { return }
+        automationConfigured = true
+        automationEventHandler = onEvent
+
+        guard settings.enabled else {
+            automationState = .inactive
+            return
+        }
+
+        let parsed = AutomationScriptParser.parse(settings.source)
+        guard !parsed.source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            automationState = .error
+            automationMessage = "全局签到脚本为空，已跳过自动执行。"
+            return
+        }
+
+        guard shouldRunToday else {
+            automationState = .skipped
+            automationMessage = "今天已完成签到，已跳过自动执行。"
+            return
+        }
+
+        let handler = AutomationMessageHandler(session: self)
+        userContentController.add(handler, name: AutomationBridge.messageName)
+        automationMessageHandler = handler
+
+        let source = AutomationScriptBuilder.build(
+            code: parsed.source,
+            matches: parsed.matches,
+            completionKey: completionKey
+        )
+        let injectionTime: WKUserScriptInjectionTime = parsed.runsAtDocumentStart
+            ? .atDocumentStart
+            : .atDocumentEnd
+        userContentController.addUserScript(
+            WKUserScript(
+                source: source,
+                injectionTime: injectionTime,
+                forMainFrameOnly: true
+            )
+        )
+        automationState = .running
+    }
+
+    func resumeAutomation() async {
+        guard automationConfigured else { return }
+        automationPaused = false
+        automationState = .running
+        automationMessage = nil
+        _ = try? await page.callJavaScript(
+            "window.CwebCheckIn && window.CwebCheckIn.resume && window.CwebCheckIn.resume(); true",
+            arguments: [:],
+            in: nil,
+            contentWorld: .page
+        )
+    }
+
+    func receiveAutomationMessage(type: String, message: String) {
+        guard let kind = AutomationEventKind(rawValue: type) else { return }
+        let event = AutomationEvent(kind: kind, message: message)
+
+        switch kind {
+        case .success:
+            guard !automationPaused else { return }
+            automationState = .success
+            automationMessage = message.isEmpty ? "签到成功，今天不再重复执行。" : message
+        case .captcha:
+            automationPaused = true
+            automationState = .captcha
+            automationMessage = message.isEmpty ? "检测到验证码，请手动完成。" : message
+        case .noButton:
+            automationState = .noButton
+            automationMessage = message.isEmpty ? "未找到签到入口。" : message
+        case .error:
+            automationState = .error
+            automationMessage = message.isEmpty ? "签到脚本运行失败。" : message
+        case .resume:
+            automationPaused = false
+            automationState = .running
+            automationMessage = nil
+        }
+
+        automationEventHandler?(event)
+    }
 
     func start() {
         guard !hasStarted else { return }

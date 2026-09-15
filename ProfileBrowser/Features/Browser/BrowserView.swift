@@ -40,6 +40,16 @@ struct BrowserView: View {
             }
             .background(.bar)
 
+            if let automationMessage = session.automationMessage {
+                AutomationStatusBanner(
+                    state: session.automationState,
+                    message: automationMessage,
+                    resume: {
+                        Task { await session.resumeAutomation() }
+                    }
+                )
+            }
+
             WebView(session.page)
                 .webViewBackForwardNavigationGestures(.enabled)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -92,6 +102,13 @@ struct BrowserView: View {
         }
         .task {
             model.markOpened(session.profile)
+            session.configureAutomation(
+                settings: model.globalScriptSettings,
+                shouldRunToday: model.shouldRunAutomation(for: session.profile.id),
+                completionKey: model.automationCompletionKey(for: session.profile.id)
+            ) { event in
+                model.handleAutomationEvent(event, for: session.profile.id)
+            }
             session.start()
             await model.refreshBalance(for: session)
         }
@@ -126,6 +143,75 @@ struct BrowserView: View {
             get: { session.presentedError != nil },
             set: { if !$0 { session.presentedError = nil } }
         )
+    }
+}
+
+@MainActor
+private struct AutomationStatusBanner: View {
+    let state: AutomationState
+    let message: String
+    let resume: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: iconName)
+                .foregroundStyle(iconColor)
+                .accessibilityHidden(true)
+
+            Text(message)
+                .font(.footnote)
+                .foregroundStyle(.primary)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 4)
+
+            if state == .captcha {
+                Button("继续检测", action: resume)
+                    .font(.footnote.weight(.semibold))
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(backgroundColor)
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(message)
+    }
+
+    private var iconName: String {
+        switch state {
+        case .success: "checkmark.circle.fill"
+        case .captcha: "hand.raised.fill"
+        case .error: "exclamationmark.triangle.fill"
+        case .noButton: "questionmark.circle"
+        case .skipped: "clock.arrow.circlepath"
+        case .running: "arrow.triangle.2.circlepath"
+        case .inactive: "info.circle"
+        }
+    }
+
+    private var iconColor: Color {
+        switch state {
+        case .success: .green
+        case .captcha: .orange
+        case .error: .red
+        case .noButton, .skipped, .running, .inactive: .secondary
+        }
+    }
+
+    private var backgroundColor: Color {
+        switch state {
+        case .captcha: Color.orange.opacity(0.12)
+        case .error: Color.red.opacity(0.10)
+        case .success: Color.green.opacity(0.10)
+        default: Color(.secondarySystemBackground)
+        }
     }
 }
 
