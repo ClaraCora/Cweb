@@ -7,6 +7,7 @@ on:
     paths:
       - "ProfileBrowser/**"
       - "ProfileBrowserTests/**"
+      - "scripts/check-in.test.cjs"
       - "project.yml"
       - ".github/workflows/ios-unsigned.yml"
 
@@ -32,6 +33,9 @@ jobs:
           sw_vers
           xcodebuild -version
           swift --version
+
+      - name: Verify check-in script behavior
+        run: node --test scripts/check-in.test.cjs
 
       - name: Install XcodeGen
         run: |

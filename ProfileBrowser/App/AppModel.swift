@@ -1235,7 +1235,11 @@ final class AppModel {
               let value = try? JSONDecoder().decode(GlobalScriptSettings.self, from: data) else {
             return .default
         }
-        return value
+        let upgraded = value.upgradingBundledTemplate()
+        if upgraded != value, let data = try? JSONEncoder().encode(upgraded) {
+            userDefaults.set(data, forKey: AppSettings.globalScriptSettingsKey)
+        }
+        return upgraded
     }
 
     private static func loadCheckInRecords(from userDefaults: UserDefaults) -> [String: String] {
