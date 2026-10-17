@@ -4,19 +4,22 @@ import SwiftUI
 struct GroupCheckInView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let controller: GroupCheckInController
+    @State private var showsTaskDetails = false
+    @State private var showsBrowserChrome = false
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
                 if let session = controller.session {
-                    GroupCheckInControls(
-                        canStart: controller.canStart, canPause: controller.canPause, canStop: controller.canStop,
-                        start: controller.start, pause: controller.pause,
-                        stop: controller.stop
-                    )
-                    runProgress
-                    BrowserView(session: session, automationSettings: controller.settings, automationIsPaused: controller.isPaused) { [weak run = controller] id, event in
+                    taskBar
+                    BrowserView(
+                        session: session,
+                        automationSettings: controller.settings,
+                        automationIsPaused: controller.isPaused,
+                        browserChromePresentation: $showsBrowserChrome
+                    ) { [weak run = controller] id, event in
                         run?.receive(id, event)
                     }
                         .id(session.profile.id)
@@ -33,11 +36,6 @@ struct GroupCheckInView: View {
                         dismiss()
                     }
                 }
-                if controller.session != nil {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("跳过") { controller.skip() }
-                    }
-                }
             }
         }
         .interactiveDismissDisabled(controller.session != nil)
@@ -50,27 +48,134 @@ struct GroupCheckInView: View {
                 await controller.recheck()
             }
         }
+        .onChange(of: controller.session?.profile.id) { _, _ in
+            showsBrowserChrome = false
+        }
         .onDisappear { controller.pause() }
     }
 
-    private var runProgress: some View {
-        VStack(alignment: .leading, spacing: 6) {
+    private var taskBar: some View {
+        VStack(spacing: 0) {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 0) {
+                    taskSummary
+                    taskControls.frame(maxWidth: .infinity, alignment: .trailing)
+                }
+            } else {
+                HStack(spacing: 8) {
+                    taskSummary
+                    taskControls
+                }
+            }
+            if showsTaskDetails { taskDetails }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .background(.bar)
+    }
+
+    private var taskControls: some View {
+        GroupCheckInControls(
+            canStart: controller.canStart, canPause: controller.canPause, canStop: controller.canStop,
+            start: controller.start, pause: controller.pause, stop: controller.stop,
+            isCompact: true
+        )
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private var taskSummary: some View {
+        Button {
+            showsTaskDetails.toggle()
+        } label: {
+            HStack(spacing: 4) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(controller.queue.index + 1)/\(controller.queue.profileIDs.count) · \(statusTitle)")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                    Label(
+                        currentHost,
+                        systemImage: controller.session?.currentOrigin?.isSecure == true ? "lock" : "globe"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                }
+                Image(systemName: showsTaskDetails ? "chevron.up" : "chevron.down")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("本组第 \(controller.queue.index + 1) 个，共 \(controller.queue.profileIDs.count) 个，\(statusTitle)，\(currentHost)")
+        .accessibilityValue(controller.session?.automationMessage ?? "")
+        .accessibilityHint(showsTaskDetails ? "收起任务详情" : "展开任务详情和浏览器工具入口")
+        .accessibilityIdentifier("groupCheckIn.details")
+    }
+
+    private var taskDetails: some View {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("\(controller.groupName) · \(controller.queue.index + 1) / \(controller.queue.profileIDs.count)")
-                    .font(.subheadline.weight(.semibold))
+                Text(controller.groupName)
+                    .font(.subheadline.weight(.medium))
                 Spacer()
-                Text(controller.isPaused ? "已暂停" : "已完成 \(controller.queue.completedCount)")
-                    .font(.subheadline)
+                Text("已完成 \(controller.queue.completedCount) · 已跳过 \(controller.queue.skippedCount)")
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
             }
             ProgressView(value: Double(controller.queue.index), total: Double(max(1, controller.queue.profileIDs.count)))
+            if let message = controller.session?.automationMessage {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.primary)
+                    .lineLimit(3)
+            }
             Text(controller.isPaused ? "继续后恢复自动检测。" : "每 5 秒重新检测；验证码请手动完成，确认签到后自动进入下一个。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 0) { detailActions }
+            } else {
+                HStack {
+                    detailActions
+                }
+            }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.bar)
+        .padding(.top, 8)
+    }
+
+    @ViewBuilder
+    private var detailActions: some View {
+        Button("跳过当前环境", systemImage: "forward.end") { controller.skip() }
+            .frame(minHeight: 44)
+            .font(.subheadline)
+            .buttonStyle(.borderless)
+        if !dynamicTypeSize.isAccessibilitySize { Spacer() }
+        Button(showsBrowserChrome ? "收起浏览器工具" : "浏览器工具", systemImage: "safari") {
+            showsBrowserChrome.toggle()
+            showsTaskDetails = false
+        }
+        .frame(minHeight: 44)
+        .font(.subheadline)
+        .buttonStyle(.borderless)
+    }
+
+    private var currentHost: String {
+        controller.session?.currentOrigin?.host ?? controller.session?.profile.homePageHost ?? ""
+    }
+
+    private var statusTitle: String {
+        if controller.isPaused { return "已暂停" }
+        switch controller.session?.automationState ?? .inactive {
+        case .captcha: return "待验证"
+        case .noButton: return "等待入口"
+        case .error: return "检测失败"
+        case .success, .skipped: return "已完成"
+        case .inactive, .running: return "检测中"
+        }
     }
 
     private var results: some View {

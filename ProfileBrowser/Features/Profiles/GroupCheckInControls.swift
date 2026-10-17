@@ -8,8 +8,29 @@ struct GroupCheckInControls: View {
     let start: () -> Void
     let pause: () -> Void
     let stop: () -> Void
+    var isCompact = false
 
+    @ViewBuilder
     var body: some View {
+        if isCompact {
+            HStack(spacing: 4) {
+                Button(action: start) { Text("开始").frame(minWidth: 44, minHeight: 44) }
+                    .disabled(!canStart)
+                    .accessibilityHint("开始或继续本组顺序签到")
+                Button(action: pause) { Text("暂停").frame(minWidth: 44, minHeight: 44) }
+                    .disabled(!canPause)
+                Button(action: stop) { Text("停止").frame(minWidth: 44, minHeight: 44) }
+                    .tint(.red)
+                    .disabled(!canStop)
+            }
+            .font(.subheadline.weight(.medium))
+            .buttonStyle(.borderless)
+        } else {
+            standardControls
+        }
+    }
+
+    private var standardControls: some View {
         Group {
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(spacing: 8) { buttons }

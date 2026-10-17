@@ -7,6 +7,7 @@ struct BrowserView: View {
     private let automationSettings: GlobalScriptSettings?
     private let automationIsPaused: Bool
     private let onAutomationEvent: (@MainActor (UUID, AutomationEvent) -> Void)?
+    private let browserChromePresentation: Binding<Bool>?
 
     @State private var session: BrowserSession
     @State private var showsCredentials = false
@@ -19,17 +20,20 @@ struct BrowserView: View {
         automationSettings = nil
         automationIsPaused = false
         onAutomationEvent = nil
+        browserChromePresentation = nil
     }
 
     init(
         session: BrowserSession,
         automationSettings: GlobalScriptSettings,
         automationIsPaused: Bool = false,
+        browserChromePresentation: Binding<Bool>? = nil,
         onAutomationEvent: @escaping @MainActor (UUID, AutomationEvent) -> Void
     ) {
         _session = State(initialValue: session)
         self.automationSettings = automationSettings
         self.automationIsPaused = automationIsPaused
+        self.browserChromePresentation = browserChromePresentation
         self.onAutomationEvent = onAutomationEvent
     }
 
@@ -37,7 +41,8 @@ struct BrowserView: View {
         @Bindable var session = session
 
         VStack(spacing: 0) {
-            VStack(spacing: 0) {
+            // A group run already shows the host and automation status in its task bar.
+            if browserChromePresentation == nil {
                 HStack(spacing: 6) {
                     Image(systemName: session.currentOrigin?.isSecure == true ? "lock" : "globe")
                         .accessibilityHidden(true)
@@ -49,16 +54,17 @@ struct BrowserView: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, minHeight: 28)
                 .padding(.horizontal, 16)
-
-                ProgressView(value: session.page.estimatedProgress)
-                    .tint(.accentColor)
-                    .opacity(session.page.isLoading ? 1 : 0)
-                    .frame(height: 2)
-                    .accessibilityHidden(!session.page.isLoading)
+                .background(.bar)
             }
-            .background(.bar)
 
-            if let automationMessage = session.automationMessage {
+            ProgressView(value: session.page.estimatedProgress)
+                .tint(.accentColor)
+                .opacity(session.page.isLoading ? 1 : 0)
+                .frame(height: 2)
+                .accessibilityHidden(!session.page.isLoading)
+                .background(.bar)
+
+            if browserChromePresentation == nil, let automationMessage = session.automationMessage {
                 AutomationStatusBanner(
                     state: session.automationState,
                     message: automationMessage,
@@ -74,13 +80,13 @@ struct BrowserView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityIdentifier("browser.webPage")
 
-            if showsBrowserChrome {
+            if browserChromeBinding.wrappedValue {
                 BrowserBottomChrome(
                     session: session,
-                    hideChrome: { showsBrowserChrome = false },
+                    hideChrome: { browserChromeBinding.wrappedValue = false },
                     showDiagnostics: { showsDiagnostics = true }
                 )
-            } else {
+            } else if browserChromePresentation == nil {
                 HStack {
                     Spacer()
                     Button("显示浏览器工具栏", systemImage: "chevron.up") {
@@ -160,6 +166,10 @@ struct BrowserView: View {
         } message: { error in
             Text(error.message)
         }
+    }
+
+    private var browserChromeBinding: Binding<Bool> {
+        browserChromePresentation ?? $showsBrowserChrome
     }
 
     private var errorBinding: Binding<Bool> {
