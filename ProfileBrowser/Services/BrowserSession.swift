@@ -22,8 +22,11 @@ final class BrowserSession {
     private let proxyConfigurationError: String?
     private let userContentController: WKUserContentController
     private var automationMessageHandler: AutomationMessageHandler?
+    private var automationUserScript: WKUserScript?
     private var automationConfigured = false
     private var automationPaused = false
+    private var automationManuallyPaused = false
+    private var isClosed = false
     private var automationEventHandler: (@MainActor (AutomationEvent) -> Void)?
 
     init(profile: BrowserProfile, socksProxy: SocksProxy? = nil) {
@@ -137,18 +140,32 @@ final class BrowserSession {
         let injectionTime: WKUserScriptInjectionTime = parsed.runsAtDocumentStart
             ? .atDocumentStart
             : .atDocumentEnd
-        userContentController.addUserScript(
-            WKUserScript(
-                source: source,
-                injectionTime: injectionTime,
-                forMainFrameOnly: true
-            )
+        automationUserScript = WKUserScript(
+            source: source,
+            injectionTime: injectionTime,
+            forMainFrameOnly: true
         )
+        installAutomationScripts()
         automationState = .running
     }
 
+    private func installAutomationScripts() {
+        guard let automationUserScript else { return }
+        userContentController.removeAllUserScripts()
+        // Apply a manual pause before the userscript even on a redirect or a
+        // newly loaded origin. Pausing only the current document is not enough.
+        userContentController.addUserScript(WKUserScript(
+            source: "window.__cwebAutomationManuallyPaused = \(automationManuallyPaused ? "true" : "false");",
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        ))
+        userContentController.addUserScript(automationUserScript)
+    }
+
     func resumeAutomation() async {
-        guard automationConfigured else { return }
+        guard automationConfigured, !isClosed else { return }
+        automationManuallyPaused = false
+        installAutomationScripts()
         automationPaused = false
         automationState = .running
         automationMessage = nil
@@ -160,8 +177,53 @@ final class BrowserSession {
         )
     }
 
+    func pauseAutomation() {
+        automationManuallyPaused = true
+        automationPaused = true
+        guard automationConfigured, !isClosed else { return }
+        installAutomationScripts()
+        Task { @MainActor [weak self] in
+            guard let self, !isClosed, automationManuallyPaused else { return }
+            _ = try? await page.callJavaScript(
+                "window.CwebCheckIn?.pause?.(); true", arguments: [:], in: nil, contentWorld: .page
+            )
+        }
+    }
+
+    func recheckAutomation() async {
+        guard !isClosed, !automationManuallyPaused else { return }
+        if automationState == .captcha {
+            await resumeAutomation()
+        } else {
+            _ = try? await page.callJavaScript(
+                "if (window.CwebCheckIn?.isPaused()) { window.CwebCheckIn.resume(); } else { window.dispatchEvent(new Event('cwebAutomationRecheck')); } true",
+                arguments: [:], in: nil, contentWorld: .page
+            )
+        }
+    }
+
+    func close() {
+        isClosed = true
+        automationPaused = true
+        automationEventHandler = nil
+        automationMessageHandler = nil
+        automationUserScript = nil
+        userContentController.removeScriptMessageHandler(forName: AutomationBridge.messageName)
+        userContentController.removeAllUserScripts()
+        navigationGeneration += 1
+        navigationTask?.cancel()
+        navigationTask = nil
+        page.stopLoading()
+        let closingPage = page
+        Task { @MainActor in
+            _ = try? await closingPage.callJavaScript(
+                "window.CwebCheckIn?.pause?.(); true", arguments: [:], in: nil, contentWorld: .page
+            )
+        }
+    }
+
     func receiveAutomationMessage(type: String, message: String) {
-        guard let kind = AutomationEventKind(rawValue: type) else { return }
+        guard !isClosed, let kind = AutomationEventKind(rawValue: type) else { return }
         let event = AutomationEvent(kind: kind, message: message)
 
         switch kind {
@@ -180,6 +242,7 @@ final class BrowserSession {
             automationState = .error
             automationMessage = message.isEmpty ? "签到脚本运行失败。" : message
         case .resume:
+            guard !automationManuallyPaused else { return }
             automationPaused = false
             automationState = .running
             automationMessage = nil
@@ -189,7 +252,7 @@ final class BrowserSession {
     }
 
     func start() {
-        guard !hasStarted else { return }
+        guard !hasStarted, !isClosed else { return }
         if let proxyConfigurationError {
             presentedError = PresentedError(message: proxyConfigurationError)
             hasStarted = true
@@ -225,6 +288,7 @@ final class BrowserSession {
     }
 
     func navigate(to url: URL) {
+        guard !isClosed else { return }
         guard proxyConfigurationError == nil else {
             if let proxyConfigurationError {
                 presentedError = PresentedError(message: proxyConfigurationError)

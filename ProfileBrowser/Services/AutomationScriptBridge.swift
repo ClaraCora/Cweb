@@ -34,8 +34,6 @@ enum AutomationScriptBuilder {
                 }
             };
 
-            if (__cwebIsCompleted()) return;
-
             const __cwebMatchesPage = (pattern) => {
                 if (pattern === "<all_urls>") return true;
                 try {
@@ -54,7 +52,7 @@ enum AutomationScriptBuilder {
                 return;
             }
 
-            let __cwebPaused = __cwebIsPausedPersisted();
+            let __cwebPaused = Boolean(window.__cwebAutomationManuallyPaused) || __cwebIsPausedPersisted();
             const __cwebSent = new Set();
             const __cwebPost = (type, message = "") => {
                 if (type !== "resume" && __cwebSent.has(type)) {
@@ -69,6 +67,12 @@ enum AutomationScriptBuilder {
 
             window.CwebCheckIn = {
                 isPaused: () => __cwebPaused,
+                pause: () => {
+                    __cwebPaused = true;
+                    try {
+                        if (__cwebPauseKey) window.localStorage.setItem(__cwebPauseKey, "1");
+                    } catch (_) {}
+                },
                 success: (message) => {
                     if (!__cwebPaused) {
                         try {
@@ -98,10 +102,25 @@ enum AutomationScriptBuilder {
                         }
                     } catch (_) {}
                     __cwebSent.clear();
-                    window.dispatchEvent(new Event("cwebAutomationResume"));
                     __cwebPost("resume");
+                    if (__cwebIsCompleted()) {
+                        __cwebPost("success", "今天已完成签到");
+                    } else {
+                        window.dispatchEvent(new Event("cwebAutomationResume"));
+                    }
                 }
             };
+
+            // Keep the API available while manually paused so resuming can
+            // deliver a completion that native code deferred during the pause.
+            if (__cwebIsCompleted()) {
+                if (!window.__cwebAutomationManuallyPaused) {
+                    __cwebPost("success", "今天已完成签到");
+                }
+                return;
+            }
+
+            if (__cwebPaused) __cwebPost("captcha", "检测已暂停，可处理验证码后继续检测");
 
             try {
                 \(code)

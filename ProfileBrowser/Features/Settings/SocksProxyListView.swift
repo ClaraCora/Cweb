@@ -8,6 +8,8 @@ struct SocksProxyListView: View {
     @State private var showsImport = false
     @State private var showsPresets = false
     @State private var showsBatchDelete = false
+    @State private var showsExport = false
+    @State private var presetsExpanded = false
     @State private var pendingClear = false
     @State private var pendingDelete: SocksProxy?
     @State private var activity: ProxyActivity?
@@ -21,6 +23,19 @@ struct SocksProxyListView: View {
         @Bindable var model = model
 
         List {
+            Section {
+                LabeledContent("共 \(model.socksProxies.count) 个代理", value: "\(model.socksProxies.filter(\.isAvailable).count) 个可用")
+                    .font(.subheadline.monospacedDigit())
+                NavigationLink {
+                    SocksProxySettingsView(settings: model.socksProxyValidationSettings)
+                } label: {
+                    Label(model.socksProxyValidationSettings.verifiesTLS ? "TLS 握手测速" : "SOCKS 连接测速", systemImage: "slider.horizontal.3")
+                        .font(.subheadline)
+                }
+            } footer: {
+                Text(validationSummary)
+            }
+            .disabled(isValidating)
             if let activity {
                 Section {
                     HStack(spacing: 12) {
@@ -57,24 +72,17 @@ struct SocksProxyListView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
-                Button("验证", systemImage: "bolt.horizontal") {
+                Button("测速", systemImage: "bolt.horizontal") {
                     validateProxies()
                 }
                 .disabled(model.socksProxies.isEmpty || isValidating)
 
                 Menu {
-                    Button("从链接导入", systemImage: "link.badge.plus") {
-                        showsImport = true
-                    }
-                    Button("添加代理", systemImage: "plus") {
-                        editorMode = .create
-                    }
-                } label: {
-                    Label("添加", systemImage: "plus")
-                }
-                .disabled(isValidating)
-
-                Menu {
+                    Button("从链接导入", systemImage: "link.badge.plus") { showsImport = true }
+                    Button("添加代理", systemImage: "plus") { editorMode = .create }
+                    Button("批量导出", systemImage: "square.and.arrow.up") { showsExport = true }
+                        .disabled(model.socksProxies.isEmpty)
+                    Divider()
                     Button("管理预设链接", systemImage: "list.bullet.rectangle") {
                         showsPresets = true
                     }
@@ -109,6 +117,9 @@ struct SocksProxyListView: View {
         }
         .sheet(isPresented: $showsPresets) {
             SocksProxyPresetListView()
+        }
+        .sheet(isPresented: $showsExport) {
+            SocksProxyExportView(rankings: model.rankedSocksProxies)
         }
         .sheet(isPresented: $showsBatchDelete) {
             SocksProxyBatchDeleteView { deletedCount in
@@ -224,58 +235,44 @@ struct SocksProxyListView: View {
                 }
             }
         } header: {
-            HStack {
-                Text("代理列表")
-                Spacer()
-                Text(validationSummary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.trailing)
-            }
+            Text(searchText.isEmpty ? "代理列表" : "找到 \(rankedProxies.count) 个代理")
         }
     }
 
     @ViewBuilder
     private var presetSection: some View {
         Section {
-            if model.proxyPresets.isEmpty {
-                Button("添加预设链接", systemImage: "plus") {
-                    showsPresets = true
-                }
-            } else {
-                ForEach(model.proxyPresets) { preset in
-                    HStack(spacing: 12) {
-                        Image(systemName: preset.isEnabled ? "link" : "link.slash")
-                            .foregroundStyle(preset.isEnabled ? Color.accentColor : .secondary)
-                            .frame(width: 24)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(preset.displayName)
-                                .lineLimit(1)
-                            Text(preset.url.absoluteString)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
+            DisclosureGroup("预设链接（\(model.proxyPresets.count)）", isExpanded: $presetsExpanded) {
+                if model.proxyPresets.isEmpty {
+                    Button("添加预设链接", systemImage: "plus") {
+                        showsPresets = true
+                    }
+                } else {
+                    ForEach(model.proxyPresets) { preset in
+                        HStack(spacing: 12) {
+                            Image(systemName: preset.isEnabled ? "link" : "link.slash")
+                                .foregroundStyle(preset.isEnabled ? Color.accentColor : .secondary)
+                                .frame(width: 24)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(preset.displayName)
+                                    .lineLimit(1)
+                                Text(preset.url.absoluteString)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer(minLength: 8)
+                            Button("拉取", systemImage: "arrow.down.circle") {
+                                importPreset(preset)
+                            }
+                            .labelStyle(.iconOnly)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .disabled(!preset.isEnabled || isValidating)
+                            .accessibilityLabel("拉取 \(preset.displayName)")
                         }
-                        Spacer(minLength: 8)
-                        Button("拉取", systemImage: "arrow.down.circle") {
-                            importPreset(preset)
-                        }
-                        .labelStyle(.iconOnly)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .disabled(!preset.isEnabled || isValidating)
-                        .accessibilityLabel("拉取 \(preset.displayName)")
                     }
                 }
-            }
-        } header: {
-            HStack {
-                Text("预设链接")
-                Spacer()
-                Button("管理", systemImage: "slider.horizontal.3") {
-                    showsPresets = true
-                }
-                .font(.caption)
-                .textCase(nil)
+                Button("管理预设链接", systemImage: "slider.horizontal.3") { showsPresets = true }
             }
         } footer: {
             Text(validationFooter)
@@ -329,13 +326,8 @@ struct SocksProxyListView: View {
                     completedCount = completed
                     totalCount = total
                 }
-                let settings = model.socksProxyValidationSettings
-                let count = settings.maxRetainedCount == 0
-                    ? "不限数量"
-                    : "最多 \(settings.maxRetainedCount) 个"
-                let availability = settings.retainOnlyAvailable ? "仅保留可用代理" : "保留全部测试结果"
                 statusIsWarning = false
-                statusMessage = "批量测试完成：\(availability)，\(count)，\(settings.sortMode.title)。"
+                statusMessage = "测速完成，当前保留 \(model.socksProxies.count) 个代理。"
             } catch {
                 model.present(error)
             }
@@ -394,7 +386,7 @@ private enum ProxyActivity {
 
     var title: String {
         switch self {
-        case .batchValidation: "正在批量验证"
+        case .batchValidation: "正在批量测速"
         case .singleValidation(_, let name): "正在测试 \(name)"
         case .importing(let name): "正在拉取 \(name)"
         }

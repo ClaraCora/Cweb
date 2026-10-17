@@ -37,7 +37,8 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
             let hasCompleted = false;
 
             const textOf = (element) =>
-                (element?.innerText || element?.textContent || "").trim();
+                (typeof element?.innerText === "string"
+                    ? element.innerText : element?.textContent || "").trim();
 
             const isVisible = (element) => {
                 if (!element.getClientRects().length) return false;
@@ -59,10 +60,10 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
             });
 
             const pageShowsCompletion = () => [...document.querySelectorAll(
-                '[role="status"], [aria-live], .toast, .alert, button, a, [role="button"]'
+                '[role="status"], [aria-live], .toast, .alert, button, a, [role="button"], p, span, div, li, td, strong'
             )].some((element) => {
                 const text = textOf(element);
-                return isVisible(element) && completionWords.test(text)
+                return text.length <= 160 && isVisible(element) && completionWords.test(text)
                     && !/未签到|未完成|签到失败/i.test(text);
             });
 
@@ -120,14 +121,22 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
             window.addEventListener("cwebAutomationResume", () => {
                 if (hasCompleted) return;
                 hasClicked = false;
+                armNoButtonTimer();
                 schedule();
             });
 
-            noButtonTimer = setTimeout(() => {
-                if (!hasCompleted && !hasClicked && !api.isPaused()) {
-                    api.noButton("未找到签到入口");
-                }
-            }, 6000);
+            window.addEventListener("cwebAutomationRecheck", schedule);
+
+            const armNoButtonTimer = () => {
+                clearTimeout(noButtonTimer);
+                noButtonTimer = setTimeout(() => {
+                    if (!hasCompleted && !hasClicked && !api.isPaused()) {
+                        api.noButton("未找到签到入口");
+                    }
+                }, 6000);
+            };
+
+            armNoButtonTimer();
 
             detect();
         })();
@@ -142,7 +151,11 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let digest = SHA256.hash(data: Data(normalized.utf8))
             .map { String(format: "%02x", $0) }.joined()
-        guard digest == "0a086ed37b237890a33ca9c3a5cd601f866d4a1940742d14c3ba38d94709d41a" else {
+        let bundledFingerprints: Set<String> = [
+            "0a086ed37b237890a33ca9c3a5cd601f866d4a1940742d14c3ba38d94709d41a",
+            "6b022d4272cb410163ce49c802c932c45a9920c6e685839eed538872eb72c43c"
+        ]
+        guard bundledFingerprints.contains(digest) else {
             return self
         }
         var upgraded = self

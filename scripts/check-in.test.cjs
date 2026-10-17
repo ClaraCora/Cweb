@@ -134,6 +134,9 @@ function page(nodes = [], options = {}) {
         resume() {
             paused = false;
             listeners.get("cwebAutomationResume")?.();
+        },
+        recheck() {
+            listeners.get("cwebAutomationRecheck")?.();
         }
     };
 }
@@ -261,8 +264,173 @@ test("old saved template fingerprint matches the migration, current and edited c
     const tests = readFileSync(join(root, "ProfileBrowserTests/AutomationScriptTests.swift"), "utf8");
     const legacy = swiftString(tests, 'originalBundledSource = """');
     const hash = source => createHash("sha256").update(source.trim()).digest("hex");
-    const migrationHash = modelSource.match(/guard digest == "([a-f0-9]{64})"/)[1];
-    assert.equal(hash(legacy), migrationHash);
-    assert.notEqual(hash(script), migrationHash);
-    assert.notEqual(hash(legacy + "\n// Custom edit"), migrationHash);
+    const previous = swiftString(tests, 'previousBundledSource = """');
+    const migrationHashes = [...modelSource.matchAll(/"([a-f0-9]{64})"/g)].map(match => match[1]);
+    assert.ok(migrationHashes.includes(hash(legacy)));
+    assert.ok(migrationHashes.includes(hash(previous)));
+    assert.ok(!migrationHashes.includes(hash(script)));
+    assert.ok(!migrationHashes.includes(hash(previous + "\n// Custom edit")));
+});
+
+test("plain visible page text can confirm today's check-in", () => {
+    for (const text of ["已完成签到", "今天已完成签到", "今日签到：已完成"]) {
+        const p = page([element(text, { tag: "p" })]);
+        assert.deepEqual(p.types(), ["success"]);
+    }
+});
+
+test("hidden and negative plain text never confirms completion", () => {
+    const p = page([
+        element("今天已完成签到", { tag: "span", laidOut: false }),
+        element("已完成签到", { tag: "div", innerText: "" }),
+        element("签到失败，未完成签到", { tag: "p" }),
+        element("尚未签到", { tag: "div" })
+    ]);
+    p.advance(7000);
+    assert.deepEqual(p.types(), ["noButton"]);
+});
+
+test("periodic recheck waits for a result without submitting twice", () => {
+    const action = element("签到");
+    const p = page([action]);
+    for (let i = 0; i < 4; i++) {
+        p.advance(5000);
+        p.recheck();
+        p.advance(250);
+    }
+    assert.equal(action.clicks, 1);
+    assert.deepEqual(p.types(), []);
+    action.textContent = "今天已完成签到";
+    p.recheck();
+    p.advance(250);
+    assert.deepEqual(p.types(), ["success"]);
+});
+
+test("no-entry retries rearm reporting and find a later entry", () => {
+    const nodes = [];
+    const p = page(nodes);
+    p.advance(6000);
+    assert.deepEqual(p.types(), ["noButton"]);
+    p.resume();
+    p.advance(6000);
+    assert.deepEqual(p.types(), ["noButton", "noButton"]);
+    const action = element("立即签到");
+    nodes.push(action);
+    p.resume();
+    p.advance(250);
+    assert.equal(action.clicks, 1);
+    assert.ok(!p.types().includes("success"));
+});
+
+test("an entry rendered after the no-entry report is never submitted twice by rechecks", () => {
+    const nodes = [];
+    const p = page(nodes);
+    p.advance(6000);
+    assert.deepEqual(p.types(), ["noButton"]);
+    const action = element("立即签到");
+    p.mutate(() => nodes.push(action));
+    p.advance(250);
+    for (let i = 0; i < 3; i++) {
+        p.advance(5000);
+        p.recheck();
+        p.advance(250);
+    }
+    assert.equal(action.clicks, 1);
+    assert.ok(!p.types().includes("success"));
+});
+
+test("retrying a CAPTCHA never clicks until it has disappeared", () => {
+    const captcha = element("验证码", { tag: "div", attributes: { class: "captcha" } });
+    const action = element("立即签到");
+    const p = page([captcha, action]);
+    for (let i = 0; i < 3; i++) {
+        p.advance(5000);
+        p.resume();
+        p.advance(250);
+    }
+    assert.equal(action.clicks, 0);
+    assert.ok(p.types().every(type => type === "captcha"));
+    captcha.laidOut = false;
+    p.resume();
+    p.advance(250);
+    assert.equal(action.clicks, 1);
+    assert.ok(!p.types().includes("success"));
+});
+
+function bridgePage({ completed = false, paused = false, nativePaused = false, matches = ["*://*/*"], code = "" } = {}) {
+    const source = readFileSync(join(root, "ProfileBrowser/Services/AutomationScriptBridge.swift"), "utf8");
+    const raw = source.replaceAll('\\(matchJSON)', JSON.stringify(matches))
+        .replaceAll('\\(completionKeyJSON)', '"daily"')
+        .replaceAll('\\(AutomationBridge.messageName)', 'cwebAutomation')
+        .replaceAll('\\(code)', code);
+    const built = swiftString(raw, 'return """');
+    const storage = new Map();
+    if (completed) storage.set("daily", "1");
+    if (paused) storage.set("daily.paused", "1");
+    const events = [];
+    const dispatched = [];
+    const window = {
+        __cwebAutomationManuallyPaused: nativePaused,
+        location: { href: "https://example.com/checkin" },
+        localStorage: {
+            getItem: key => storage.get(key) ?? null,
+            setItem: (key, value) => storage.set(key, value),
+            removeItem: key => storage.delete(key)
+        },
+        webkit: { messageHandlers: { cwebAutomation: { postMessage: message => events.push(message) } } },
+        dispatchEvent: event => dispatched.push(event.type)
+    };
+    class Event { constructor(type) { this.type = type; } }
+    runInNewContext(built, { window, Event }, { timeout: 1000 });
+    return { window, events, dispatched, storage, types: () => events.map(event => event.type) };
+}
+
+test("restored daily website record reports success to native without running script", () => {
+    const p = bridgePage({ completed: true, code: "throw new Error('must not execute')" });
+    assert.deepEqual(p.types(), ["success"]);
+});
+
+test("daily completion obeys the script's site match", () => {
+    const p = bridgePage({ completed: true, matches: ["https://another.example/*"] });
+    assert.deepEqual(p.types(), []);
+});
+
+test("manual pause persists and blocks success; resume restores completion once", () => {
+    const p = bridgePage();
+    const api = p.window.CwebCheckIn;
+    api.pause();
+    assert.equal(p.storage.get("daily.paused"), "1");
+    api.success("must be blocked");
+    assert.deepEqual(p.types(), []);
+    api.resume();
+    assert.equal(p.storage.has("daily.paused"), false);
+    assert.deepEqual(p.dispatched, ["cwebAutomationResume"]);
+    api.success("done");
+    api.success("duplicate");
+    assert.deepEqual(p.types(), ["resume", "success"]);
+    api.pause();
+    api.resume();
+    assert.deepEqual(p.types(), ["resume", "success", "resume", "success"]);
+});
+
+test("persisted pause is visible to native and resumes for periodic retry", () => {
+    const p = bridgePage({ paused: true });
+    assert.deepEqual(p.types(), ["captcha"]);
+    assert.equal(p.window.CwebCheckIn.isPaused(), true);
+    p.window.CwebCheckIn.resume();
+    assert.equal(p.window.CwebCheckIn.isPaused(), false);
+    assert.deepEqual(p.types(), ["captcha", "resume"]);
+});
+
+test("native manual pause also applies on a new document with no website pause record", () => {
+    const p = bridgePage({ nativePaused: true, code: "window.CwebCheckIn.success('must be blocked');" });
+    assert.equal(p.window.CwebCheckIn.isPaused(), true);
+    assert.deepEqual(p.types(), ["captcha"]);
+});
+
+test("completion found during native pause is delivered when the user resumes", () => {
+    const p = bridgePage({ nativePaused: true, completed: true });
+    assert.deepEqual(p.types(), []);
+    p.window.CwebCheckIn.resume();
+    assert.deepEqual(p.types(), ["resume", "success"]);
 });

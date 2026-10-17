@@ -36,10 +36,10 @@ struct SocksProxyValidationConfiguration: Sendable, Hashable {
     /// The probe performs a SOCKS CONNECT request after the
     /// greeting/authentication handshake. This catches proxies that accept a
     /// handshake but cannot actually carry browser traffic. The full URL is
-    /// retained so the optional HTTPS check can request a lightweight path.
+    /// retained for compatibility; TLS probes use only its host and port.
     var targetURL: URL?
-    /// Also perform a real HTTPS request through the same SOCKS configuration.
-    /// This catches nodes that accept CONNECT on port 443 but fail during TLS.
+    /// Complete TLS through SOCKS, including system certificate validation,
+    /// without sending an HTTP request or downloading a response body.
     var verifiesTLS: Bool
 
     init(
@@ -249,6 +249,9 @@ struct NetworkSocksProxyProbe: SocksProxyProbe {
               !proxyHost.contains(where: { "/?#".contains($0) }) else {
             throw SocksProxyValidationError.connectionFailed
         }
+        if configuration.verifiesTLS {
+            return try await probeTLS(proxy, host: proxyHost, port: port, timeout: timeout)
+        }
         let connection = NWConnection(
             host: NWEndpoint.Host(proxyHost),
             port: port,
@@ -303,20 +306,6 @@ struct NetworkSocksProxyProbe: SocksProxyProbe {
                 on: connection,
                 timeout: timeout
             )
-            if configuration.verifiesTLS {
-                // The raw SOCKS connection has already proved the proxy can
-                // reach the target. Close it before running the same request
-                // through URLSession, which performs the platform TLS and
-                // certificate checks used by real HTTPS traffic.
-                connection.cancel()
-                try await Self.verifyHTTPS(
-                    proxy: proxy,
-                    proxyHost: proxyHost,
-                    proxyPort: port,
-                    targetURL: targetURL,
-                    timeout: timeout
-                )
-            }
         }
 
         let latency = max(1, Int(Date().timeIntervalSince(startedAt) * 1_000))
@@ -360,15 +349,23 @@ struct NetworkSocksProxyProbe: SocksProxyProbe {
         _ = try await receiveExact(addressLength + 2, from: connection, timeout: timeout)
     }
 
-    private static func verifyHTTPS(
-        proxy: SocksProxy,
-        proxyHost: String,
-        proxyPort: NWEndpoint.Port,
-        targetURL: URL,
+    private func probeTLS(
+        _ proxy: SocksProxy,
+        host: String,
+        port: NWEndpoint.Port,
         timeout: TimeInterval
-    ) async throws {
+    ) async throws -> SocksProxyProbeResult {
+        guard let target = configuration.targetURL,
+              target.scheme?.lowercased() == "https",
+              let targetHost = target.host,
+              !targetHost.isEmpty,
+              let targetPortValue = UInt16(exactly: target.port ?? 443),
+              targetPortValue > 0,
+              let targetPort = NWEndpoint.Port(rawValue: targetPortValue) else {
+            throw SocksProxyValidationError.unsupportedAddress
+        }
         var proxyConfiguration = ProxyConfiguration(
-            socksv5Proxy: .hostPort(host: NWEndpoint.Host(proxyHost), port: proxyPort)
+            socksv5Proxy: .hostPort(host: NWEndpoint.Host(host), port: port)
         )
         proxyConfiguration.allowFailover = false
         if let username = proxy.username,
@@ -376,79 +373,71 @@ struct NetworkSocksProxyProbe: SocksProxyProbe {
             proxyConfiguration.applyCredential(username: username, password: password)
         }
 
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = timeout
-        configuration.timeoutIntervalForResource = timeout
-        configuration.waitsForConnectivity = false
-        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        configuration.proxyConfigurations = [proxyConfiguration]
-
-        let session = URLSession(configuration: configuration)
-        defer { session.invalidateAndCancel() }
-
-        var request = URLRequest(url: targetURL)
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.timeoutInterval = timeout
-        do {
-            let (_, response) = try await session.data(for: request)
-            guard response is HTTPURLResponse else {
-                throw SocksProxyValidationError.tlsHandshakeFailed
-            }
-        } catch is CancellationError {
-            throw SocksProxyValidationError.connectionCancelled
-        } catch let error as SocksProxyValidationError {
-            throw error
-        } catch let error as URLError {
-            switch error.code {
-            case .timedOut:
-                throw SocksProxyValidationError.timeout
-            case .cancelled:
-                throw SocksProxyValidationError.connectionCancelled
-            case .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed:
-                throw SocksProxyValidationError.connectionFailed
-            default:
-                throw SocksProxyValidationError.tlsHandshakeFailed
-            }
-        } catch {
-            throw SocksProxyValidationError.tlsHandshakeFailed
-        }
+        // An isolated context avoids a cached TLS session changing the timing
+        // of later nodes. The destination hostname supplies SNI and the system
+        // performs its normal trust evaluation before reporting .ready.
+        let context = NWParameters.PrivacyContext(description: "Cweb proxy probe")
+        context.proxyConfigurations = [proxyConfiguration]
+        let parameters = NWParameters(tls: NWProtocolTLS.Options())
+        parameters.setPrivacyContext(context)
+        let connection = NWConnection(host: NWEndpoint.Host(SocksProxy.normalizeHost(targetHost)), port: targetPort, using: parameters)
+        defer { connection.cancel() }
+        let startedAt = Date()
+        try await Self.waitUntilReady(connection, timeout: timeout)
+        return SocksProxyProbeResult(
+            status: .available,
+            latencyMilliseconds: max(1, Int(Date().timeIntervalSince(startedAt) * 1_000))
+        )
     }
 
     private static func waitUntilReady(
         _ connection: NWConnection,
         timeout: TimeInterval
     ) async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            let gate = ContinuationGate()
+        try Task.checkCancellation()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                let gate = ContinuationGate()
 
-            @Sendable func finish(_ result: Result<Void, Error>) {
-                gate.resume {
-                    connection.stateUpdateHandler = nil
-                    if case .failure = result {
-                        connection.cancel()
+                @Sendable func finish(_ result: Result<Void, Error>) {
+                    gate.resume {
+                        connection.stateUpdateHandler = nil
+                        if case .failure = result {
+                            connection.cancel()
+                        }
+                        continuation.resume(with: result)
                     }
-                    continuation.resume(with: result)
                 }
-            }
 
-            connection.stateUpdateHandler = { state in
-                switch state {
-                case .ready:
-                    finish(.success(()))
-                case .failed:
-                    finish(.failure(SocksProxyValidationError.connectionFailed))
-                case .cancelled:
+                connection.stateUpdateHandler = { state in
+                    switch state {
+                    case .ready:
+                        finish(.success(()))
+                    case .failed(let error):
+                        if case .tls = error {
+                            finish(.failure(SocksProxyValidationError.tlsHandshakeFailed))
+                        } else {
+                            finish(.failure(SocksProxyValidationError.connectionFailed))
+                        }
+                    case .cancelled:
+                        finish(.failure(SocksProxyValidationError.connectionCancelled))
+                    default:
+                        break
+                    }
+                }
+                if Task.isCancelled {
                     finish(.failure(SocksProxyValidationError.connectionCancelled))
-                default:
-                    break
+                    return
+                }
+                connection.start(queue: DispatchQueue.global(qos: .utility))
+                DispatchQueue.global(qos: .utility).asyncAfter(
+                    deadline: .now() + timeout
+                ) {
+                    finish(.failure(SocksProxyValidationError.timeout))
                 }
             }
-            connection.start(queue: DispatchQueue.global(qos: .utility))
-            DispatchQueue.global(qos: .utility).asyncAfter(
-                deadline: .now() + timeout
-            ) {
-                finish(.failure(SocksProxyValidationError.timeout))
-            }
+        } onCancel: {
+            connection.cancel()
         }
     }
 

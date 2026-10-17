@@ -17,9 +17,9 @@ enum SocksProxyStatus: String, Codable, CaseIterable, Hashable, Sendable {
 
 struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
     /// Increment when the validation protocol changes. Older records are
-    /// re-tested before they can be used. Validation now includes a real HTTPS
-    /// request, so a proxy accepted by the older TCP-only check is stale.
-    static let currentValidationRevision = 4
+    /// re-tested before they can be used. Revision 5 measures one TLS tunnel
+    /// rather than a SOCKS connection followed by a separate HTTP download.
+    static let currentValidationRevision = 5
 
     let id: UUID
     var code: String?
@@ -159,8 +159,8 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
             throw SocksProxyParseError.invalidPort
         }
 
-        let username = Self.decodeComponent(components.user)
-        let password = Self.decodeComponent(components.password)
+        let username = Self.decodeComponent(components.percentEncodedUser)
+        let password = Self.decodeComponent(components.percentEncodedPassword)
         guard components.path.isEmpty || components.path == "/" else {
             throw SocksProxyParseError.invalidValue
         }

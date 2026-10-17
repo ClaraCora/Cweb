@@ -38,21 +38,23 @@ struct AutomationScriptTests {
     @Test
     func originalBundledTemplateUpgradesWithoutChangingEnabledState() throws {
         for enabled in [false, true] {
-            let saved = GlobalScriptSettings(
-                enabled: enabled,
-                source: Self.originalBundledSource,
-                updatedAt: Date(timeIntervalSince1970: 0)
-            )
-            let decoded = try JSONDecoder().decode(
-                GlobalScriptSettings.self,
-                from: JSONEncoder().encode(saved)
-            )
-            let upgraded = decoded.upgradingBundledTemplate()
+            for bundledSource in [Self.originalBundledSource, Self.previousBundledSource] {
+                let saved = GlobalScriptSettings(
+                    enabled: enabled,
+                    source: bundledSource,
+                    updatedAt: Date(timeIntervalSince1970: 0)
+                )
+                let decoded = try JSONDecoder().decode(
+                    GlobalScriptSettings.self,
+                    from: JSONEncoder().encode(saved)
+                )
+                let upgraded = decoded.upgradingBundledTemplate()
 
-            #expect(upgraded.source == GlobalScriptSettings.default.source)
-            #expect(upgraded.enabled == enabled)
-            #expect(upgraded.updatedAt > saved.updatedAt)
-            #expect(upgraded.upgradingBundledTemplate() == upgraded)
+                #expect(upgraded.source == GlobalScriptSettings.default.source)
+                #expect(upgraded.enabled == enabled)
+                #expect(upgraded.updatedAt > saved.updatedAt)
+                #expect(upgraded.upgradingBundledTemplate() == upgraded)
+            }
         }
     }
 
@@ -194,4 +196,130 @@ struct AutomationScriptTests {
         #expect(model.shouldRunAutomation(for: profileID, now: yesterday))
         #expect(model.shouldRunAutomation(for: UUID(), now: today))
     }
+    // Template shipped immediately before group check-in.
+    private static let previousBundledSource = """
+        // ==UserScript==
+        // @name Cweb 全局签到
+        // @match *://*/*
+        // @run-at document-end
+        // ==/UserScript==
+
+        (() => {
+            const api = window.CwebCheckIn;
+            if (!api) return;
+
+            const signWords = /签到|每日签到|check[\\s-]?in|daily\\s*sign/i;
+            // A generic "success" or "已完成" elsewhere is not a check-in result.
+            const completionWords = /已签到|签到成功|已完成签到|(?:今日|今天|本日)签到[：:\\s]*已完成|already\\s+(?:checked[\\s-]?in|signed[\\s-]?in)|checked[\\s-]?in\\s+today|check[\\s-]?in\\s+(?:successful|completed)|successfully\\s+checked[\\s-]?in/i;
+            const captchaSelectors = [
+                '[class*="captcha" i]',
+                '[id*="captcha" i]',
+                '[class*="verify" i]',
+                '[id*="verify" i]',
+                'iframe[src*="captcha" i]'
+            ];
+
+            let debounceTimer;
+            let noButtonTimer;
+            let successTimer;
+            let hasClicked = false;
+            let hasCompleted = false;
+
+            const textOf = (element) =>
+                (element?.innerText || element?.textContent || "").trim();
+
+            const isVisible = (element) => {
+                if (!element.getClientRects().length) return false;
+                const visibility = window.getComputedStyle(element).visibility;
+                return visibility !== "hidden" && visibility !== "collapse";
+            };
+
+            const findSignButton = () => [...document.querySelectorAll(
+                'button, a, [role="button"]'
+            )].find((element) => {
+                const text = textOf(element);
+                return isVisible(element) && text && signWords.test(text)
+                    && !/已签到|已完成|不可用|disabled/i.test(text)
+                    && !element.disabled
+                    && element.getAttribute("aria-disabled") !== "true"
+                    // SuperAPI also uses a button for its section heading.
+                    // Only consider action controls when submitting a check-in.
+                    && !element.querySelector("h1, h2, h3, h4, h5, h6");
+            });
+
+            const pageShowsCompletion = () => [...document.querySelectorAll(
+                '[role="status"], [aria-live], .toast, .alert, button, a, [role="button"]'
+            )].some((element) => {
+                const text = textOf(element);
+                return isVisible(element) && completionWords.test(text)
+                    && !/未签到|未完成|签到失败/i.test(text);
+            });
+
+            const finish = () => {
+                hasCompleted = true;
+                clearTimeout(noButtonTimer);
+                clearTimeout(debounceTimer);
+                clearTimeout(successTimer);
+                observer.disconnect();
+                api.success("页面显示已完成签到");
+            };
+
+            const detect = () => {
+                if (hasCompleted || api.isPaused()) return;
+
+                if (captchaSelectors.some((selector) => [...document.querySelectorAll(selector)]
+                    .some(isVisible))) {
+                    api.captchaDetected("检测到验证码，请手动完成");
+                    return;
+                }
+
+                if (pageShowsCompletion()) {
+                    finish();
+                    return;
+                }
+
+                const button = findSignButton();
+                if (!button) return;
+
+                clearTimeout(noButtonTimer);
+                if (hasClicked) return;
+                hasClicked = true;
+                button.click();
+
+                // Reuse the same checks so a newly displayed CAPTCHA always
+                // pauses automation before any success is reported.
+                successTimer = setTimeout(detect, 1200);
+            };
+
+            const schedule = () => {
+                if (hasCompleted) return;
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(detect, 250);
+            };
+
+            const root = document.documentElement || document;
+            const observer = new MutationObserver(schedule);
+            observer.observe(root, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                characterData: true
+            });
+
+            window.addEventListener("cwebAutomationResume", () => {
+                if (hasCompleted) return;
+                hasClicked = false;
+                schedule();
+            });
+
+            noButtonTimer = setTimeout(() => {
+                if (!hasCompleted && !hasClicked && !api.isPaused()) {
+                    api.noButton("未找到签到入口");
+                }
+            }, 6000);
+
+            detect();
+        })();
+        """
+
 }

@@ -4,6 +4,33 @@ import Testing
 
 struct SocksProxyTests {
     @Test
+    func batchExportRoundTripsReservedCredentialsAndIPv6InOrder() throws {
+        let proxies = [
+            SocksProxy(scheme: .socks5h, host: "2001:db8::1", port: 1080,
+                       username: "user:@/%40, 空格", password: "p@ss:/?#%40,\n密码"),
+            SocksProxy(scheme: .socks, host: "proxy.example", port: 1081),
+            SocksProxy(host: "127.0.0.1", port: 1082, username: "simple", password: "secret")
+        ]
+        let text = try SocksProxyExport.text(for: proxies)
+        let parsed = try SocksProxyParser.parseList(text, ignoringInvalid: false)
+        #expect(text.split(separator: "\n").count == proxies.count)
+        #expect(parsed.map(\.host) == proxies.map(\.host))
+        #expect(parsed.map(\.port) == proxies.map(\.port))
+        #expect(parsed.map(\.scheme) == proxies.map(\.scheme))
+        #expect(parsed.map(\.username) == proxies.map(\.username))
+        #expect(parsed.map(\.password) == proxies.map(\.password))
+        #expect(try SocksProxyExport.text(for: []) == "")
+        #expect(!proxies[0].displayAddress.contains("p@ss"))
+    }
+
+    @Test
+    func proxyCredentialsAreDecodedExactlyOnce() throws {
+        let proxy = try SocksProxy(urlString: "socks5://user%2540:pass%252F@proxy.example:1080")
+        #expect(proxy.username == "user%40")
+        #expect(proxy.password == "pass%2F")
+    }
+
+    @Test
     func legacyRecordWithoutLockFieldDefaultsToUnlocked() throws {
         let id = UUID()
         let data = Data(

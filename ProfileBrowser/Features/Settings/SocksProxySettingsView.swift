@@ -70,7 +70,7 @@ struct SocksProxySettingsView: View {
                         .lineLimit(1...3)
                 }
 
-                Toggle("验证 HTTPS / TLS", isOn: $draft.verifiesTLS)
+                Toggle("TLS 握手测速", isOn: $draft.verifiesTLS)
 
                 Text(tlsDescription)
                     .font(.footnote)
@@ -91,7 +91,7 @@ struct SocksProxySettingsView: View {
                 Text("默认值：只保留可用代理、最多 30 个、按延迟排序，使用 https://example.com/ 并验证 TLS。数量限制只在下一次批量测试时生效。")
             }
         }
-        .navigationTitle("SOCKS 验证设置")
+        .navigationTitle("测速与保留规则")
         .navigationBarTitleDisplayMode(.inline)
         .editorDismissProtection(isModified: hasChanges)
         .toolbar {
@@ -144,7 +144,7 @@ struct SocksProxySettingsView: View {
 
     private var tlsDescription: String {
         draft.verifiesTLS
-            ? "会通过代理完成真实 HTTPS/TLS 握手，能更接近浏览器实际访问。"
+            ? "通过代理完成 TLS 握手及证书校验即结束，不请求网页内容。测速只使用上方地址的主机和端口。"
             : "只验证 SOCKS CONNECT，不执行 TLS 握手；可能保留无法打开 HTTPS 页面的节点。"
     }
 

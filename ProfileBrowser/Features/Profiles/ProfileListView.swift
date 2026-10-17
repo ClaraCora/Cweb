@@ -16,6 +16,8 @@ struct ProfileListView: View {
     @State private var pendingEntry: BrowserProfile?
     @State private var ipDetectionProfile: BrowserProfile?
     @State private var activeProfile: BrowserProfile?
+    @State private var showsGroupCheckIn = false
+    @State private var checkInController: GroupCheckInController?
     @State private var editMode: EditMode = .inactive
 
     init(groupID: UUID, onDeleteGroup: ((UUID) -> Void)? = nil) {
@@ -102,6 +104,9 @@ struct ProfileListView: View {
                     socksProxy: model.socksProxy(for: profile)
                 )
             }
+            .fullScreenCover(isPresented: $showsGroupCheckIn) {
+                if let checkInController { GroupCheckInView(controller: checkInController) }
+            }
             .alert("删除整个分组？", isPresented: groupDeletionAlertBinding, presenting: pendingGroupDeletion) { group in
                 Button("删除", role: .destructive) {
                     pendingGroupDeletion = nil
@@ -149,7 +154,56 @@ struct ProfileListView: View {
                     dismissButton: .default(Text("好"))
                 )
             }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if !visibleProfiles.isEmpty { checkInControls }
+            }
             .environment(\.editMode, $editMode)
+    }
+
+    private var checkInControls: some View {
+        VStack(spacing: 0) {
+            GroupCheckInControls(
+                canStart: canStartCheckIn,
+                canPause: checkInController?.canPause == true,
+                canStop: checkInController?.canStop == true,
+                start: startCheckIn,
+                pause: { checkInController?.pause() },
+                stop: { checkInController?.stop() }
+            )
+            if let checkInController, checkInController.canStop {
+                Button("返回签到页面 · 已完成 \(checkInController.queue.completedCount) / \(visibleProfiles.count)") {
+                    showsGroupCheckIn = true
+                }
+                .font(.footnote)
+                .frame(minHeight: 44)
+            } else {
+                Text(isCheckInScriptEmpty ? "签到脚本为空，请先在设置中恢复模板或填写脚本。" : "本组按当前顺序签到，今天已完成的自动跳过。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 8)
+            }
+        }
+        .background(.bar)
+    }
+
+    private var canStartCheckIn: Bool {
+        editMode != .active && !visibleProfiles.isEmpty
+            && !isCheckInScriptEmpty
+            && (checkInController?.canStop != true || checkInController?.canStart == true)
+    }
+
+    private var isCheckInScriptEmpty: Bool {
+        model.globalScriptSettings.source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func startCheckIn() {
+        if checkInController?.canStop != true {
+            checkInController = GroupCheckInController(
+                groupName: currentGroup?.name ?? "分组", profiles: visibleProfiles, model: model
+            )
+        }
+        checkInController?.start()
+        showsGroupCheckIn = true
     }
 
     @ViewBuilder
@@ -165,18 +219,20 @@ struct ProfileListView: View {
             }
         } else {
             List {
-                ForEach(visibleProfiles) { profile in
-                    profileButton(for: profile)
-                }
-                .onMove { offsets, destination in
-                    do {
-                        try model.moveProfiles(
-                            visibleProfiles.map(\.id),
-                            fromOffsets: offsets,
-                            toOffset: destination
-                        )
-                    } catch {
-                        model.present(error)
+                Section {
+                    ForEach(visibleProfiles) { profile in
+                        profileButton(for: profile)
+                    }
+                    .onMove { offsets, destination in
+                        do {
+                            try model.moveProfiles(
+                                visibleProfiles.map(\.id),
+                                fromOffsets: offsets,
+                                toOffset: destination
+                            )
+                        } catch {
+                            model.present(error)
+                        }
                     }
                 }
             }

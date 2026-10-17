@@ -4,6 +4,9 @@ import WebKit
 @MainActor
 struct BrowserView: View {
     @Environment(AppModel.self) private var model
+    private let automationSettings: GlobalScriptSettings?
+    private let automationIsPaused: Bool
+    private let onAutomationEvent: (@MainActor (UUID, AutomationEvent) -> Void)?
 
     @State private var session: BrowserSession
     @State private var showsCredentials = false
@@ -13,6 +16,21 @@ struct BrowserView: View {
 
     init(profile: BrowserProfile, socksProxy: SocksProxy? = nil) {
         _session = State(initialValue: BrowserSession(profile: profile, socksProxy: socksProxy))
+        automationSettings = nil
+        automationIsPaused = false
+        onAutomationEvent = nil
+    }
+
+    init(
+        session: BrowserSession,
+        automationSettings: GlobalScriptSettings,
+        automationIsPaused: Bool = false,
+        onAutomationEvent: @escaping @MainActor (UUID, AutomationEvent) -> Void
+    ) {
+        _session = State(initialValue: session)
+        self.automationSettings = automationSettings
+        self.automationIsPaused = automationIsPaused
+        self.onAutomationEvent = onAutomationEvent
     }
 
     var body: some View {
@@ -48,6 +66,7 @@ struct BrowserView: View {
                         Task { await session.resumeAutomation() }
                     }
                 )
+                .disabled(automationIsPaused)
             }
 
             WebView(session.page)
@@ -101,13 +120,18 @@ struct BrowserView: View {
             session.syncAddressBar(with: newURL)
         }
         .task {
+            let currentSession = session
+            let appModel = model
+            let eventObserver = onAutomationEvent
             model.markOpened(session.profile)
             session.configureAutomation(
-                settings: model.globalScriptSettings,
+                settings: automationSettings ?? model.globalScriptSettings,
                 shouldRunToday: model.shouldRunAutomation(for: session.profile.id),
                 completionKey: model.automationCompletionKey(for: session.profile.id)
-            ) { event in
-                model.handleAutomationEvent(event, for: session.profile.id)
+            ) { [weak currentSession] event in
+                guard let currentSession else { return }
+                appModel.handleAutomationEvent(event, for: currentSession.profile.id)
+                eventObserver?(currentSession.profile.id, event)
             }
             session.start()
             await model.refreshBalance(for: session)
