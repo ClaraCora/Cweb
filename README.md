@@ -33,8 +33,10 @@ project.yml           XcodeGen 工程描述
 
 1. 将目录放入 GitHub 仓库并使用 `main` 分支。
 2. 打开 Actions，运行 `Build unsigned iOS IPA`，或向 `main` 推送相关文件。
-3. 构建成功后下载 `ProfileBrowser-unsigned-<commit>` artifact。
+3. 构建成功后，到仓库 [Releases](https://github.com/ClaraCora/Cweb/releases) 下载当次构建的 `ProfileBrowser-unsigned-<commit>.ipa`、`SHA256SUMS.txt` 和 `BUILD-INFO.txt`。Actions 运行摘要也会显示下载链接。
 4. 用 `SHA256SUMS.txt` 校验 IPA。
+
+每次成功构建会发布一个预发布版本，标签格式为 `ios-unsigned-<构建编号>-<重跑次数>`，绑定本次构建的提交。重跑会发布新的版本，构建产物保存在 GitHub Releases，不占用 Actions artifact 存储配额。
 
 未签名 IPA 无法直接安装到普通 iPhone；签名和安装由使用者在 CI 外自行处理。
 

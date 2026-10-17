@@ -12,7 +12,7 @@ on:
       - ".github/workflows/ios-unsigned.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ios-unsigned-${{ github.ref }}
@@ -105,10 +105,30 @@ jobs:
             } > BUILD-INFO.txt
           )
 
-      - name: Upload unsigned IPA
-        uses: actions/upload-artifact@v4
+      - name: Publish unsigned IPA to GitHub Releases
+        id: release
+        uses: softprops/action-gh-release@v2
         with:
-          name: ProfileBrowser-unsigned-${{ github.sha }}
-          path: artifacts/
-          if-no-files-found: error
-          retention-days: 14
+          tag_name: ios-unsigned-${{ github.run_number }}-${{ github.run_attempt }}
+          target_commitish: ${{ github.sha }}
+          name: Unsigned iOS build ${{ github.run_number }}.${{ github.run_attempt }}
+          prerelease: true
+          make_latest: "false"
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/*.ipa
+            artifacts/SHA256SUMS.txt
+            artifacts/BUILD-INFO.txt
+          body: |
+            自动构建的未签名 iOS IPA，安装前需自行签名。
+
+            - Commit: `${{ github.sha }}`
+            - 构建记录: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            下载 IPA 和 `SHA256SUMS.txt` 后，在同一目录运行 `shasum -a 256 -c SHA256SUMS.txt` 校验文件。
+
+      - name: Add release download link to summary
+        env:
+          RELEASE_URL: ${{ steps.release.outputs.url }}
+        run: |
+          printf '### Unsigned iOS IPA\n\n[Download release assets](%s)\n' "$RELEASE_URL" >> "$GITHUB_STEP_SUMMARY"
