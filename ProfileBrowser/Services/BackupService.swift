@@ -3,9 +3,9 @@ import Foundation
 
 @MainActor
 struct BackupService {
-    private static let formatVersion = 1
+    nonisolated private static let formatVersion = 1
     private static let iterations = 120_000
-    private static let saltLength = 16
+    nonisolated private static let saltLength = 16
 
     private let vault: CredentialVault
 
@@ -38,25 +38,12 @@ struct BackupService {
 
     func importProfiles(from data: Data, password: String) throws -> [BrowserProfile] {
         try validatePassword(password)
-        let envelope = try JSONDecoder.backup.decode(BackupEnvelope.self, from: data)
-        guard envelope.version == Self.formatVersion,
-              envelope.iterations >= 10_000,
-              envelope.iterations <= 500_000,
-              let salt = Data(base64Encoded: envelope.salt),
-              let combined = Data(base64Encoded: envelope.sealedData)
-        else { throw BackupError.invalidFormat }
-
-        let key = deriveKey(password: password, salt: salt, iterations: envelope.iterations)
-        let sealedBox: AES.GCM.SealedBox
-        do {
-            sealedBox = try AES.GCM.SealedBox(combined: combined)
-        } catch {
-            throw BackupError.invalidPassword
-        }
+        let envelope = try Self.decodeEnvelope(from: data)
+        let key = deriveKey(password: password, salt: envelope.salt, iterations: envelope.iterations)
 
         let plaintext: Data
         do {
-            plaintext = try AES.GCM.open(sealedBox, using: key)
+            plaintext = try AES.GCM.open(envelope.sealedBox, using: key)
         } catch {
             throw BackupError.invalidPassword
         }
@@ -118,6 +105,30 @@ struct BackupService {
         return importedProfiles
     }
 
+    nonisolated static func validateBackupData(_ data: Data) throws {
+        _ = try decodeEnvelope(from: data)
+    }
+
+    nonisolated private static func decodeEnvelope(
+        from data: Data
+    ) throws -> (iterations: Int, salt: Data, sealedBox: AES.GCM.SealedBox) {
+        do {
+            let envelope = try JSONDecoder.backup.decode(BackupEnvelope.self, from: data)
+            guard envelope.version == formatVersion,
+                  envelope.iterations >= 10_000,
+                  envelope.iterations <= 500_000,
+                  let salt = Data(base64Encoded: envelope.salt),
+                  salt.count == saltLength,
+                  let combined = Data(base64Encoded: envelope.sealedData)
+            else { throw BackupError.invalidFormat }
+
+            let sealedBox = try AES.GCM.SealedBox(combined: combined)
+            return (envelope.iterations, salt, sealedBox)
+        } catch {
+            throw BackupError.invalidFormat
+        }
+    }
+
     private func validatePassword(_ password: String) throws {
         guard password.count >= 8 else { throw BackupError.passwordTooShort }
     }
@@ -170,7 +181,7 @@ private extension JSONDecoder {
     }
 }
 
-enum BackupError: LocalizedError {
+enum BackupError: LocalizedError, Equatable {
     case passwordTooShort
     case encryptionFailed
     case invalidFormat

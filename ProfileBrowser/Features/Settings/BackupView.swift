@@ -12,7 +12,9 @@ struct BackupView: View {
     @State private var backupDocument: BackupDocument?
     @State private var showsExporter = false
     @State private var showsImporter = false
-    @State private var showsImportPassword = false
+    @State private var pendingImport: BackupImportFile?
+    @State private var isReadingBackup = false
+    @State private var importErrorMessage: String?
     @State private var presentedError: PresentedError?
     @State private var statusMessage: String?
 
@@ -29,14 +31,46 @@ struct BackupView: View {
                         !model.isProfileStoreAvailable
                             || exportPassword.count < 8
                             || exportPassword != confirmPassword
+                            || isReadingBackup
                     )
                 }
 
                 Section("导入") {
-                    Button("选择备份文件", systemImage: "doc.badge.arrow.up") {
+                    Button(pendingImport == nil ? "选择备份文件" : "重新选择备份文件", systemImage: "doc.badge.arrow.up") {
+                        clearPendingImport()
                         showsImporter = true
                     }
-                    .disabled(!model.isProfileStoreAvailable)
+                    .disabled(!model.isProfileStoreAvailable || isReadingBackup)
+
+                    if isReadingBackup {
+                        ProgressView("正在读取备份…")
+                    }
+
+                    if let pendingImport {
+                        LabeledContent("已选文件") {
+                            Text(pendingImport.filename)
+                                .multilineTextAlignment(.trailing)
+                                .textSelection(.enabled)
+                        }
+                        SecureField("备份密码（至少 8 个字符）", text: $importPassword)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .onChange(of: importPassword) { _, _ in
+                                importErrorMessage = nil
+                            }
+                        Button("解锁并导入", systemImage: "lock.open") {
+                            importBackup()
+                        }
+                        .disabled(!model.isProfileStoreAvailable || importPassword.count < 8)
+                        Button("取消导入", role: .cancel) {
+                            clearPendingImport()
+                        }
+                    }
+
+                    if let importErrorMessage {
+                        Label(importErrorMessage, systemImage: "exclamationmark.circle")
+                            .foregroundStyle(.red)
+                    }
                     Text("导入会新增环境，不会覆盖已有环境。网站 Cookie 和缓存不在备份中。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -46,14 +80,18 @@ struct BackupView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { dismiss() }
+                    Button("完成") {
+                        clearPendingImport()
+                        dismiss()
+                    }
+                    .disabled(isReadingBackup)
                 }
             }
             .fileExporter(
                 isPresented: $showsExporter,
                 document: backupDocument,
-                contentType: .data,
-                defaultFilename: "ProfileBrowser-backup"
+                contentType: .json,
+                defaultFilename: BackupDocument.defaultFilename
             ) { result in
                 if case .failure(let error) = result {
                     presentedError = PresentedError(message: error.localizedDescription)
@@ -61,37 +99,16 @@ struct BackupView: View {
             }
             .fileImporter(
                 isPresented: $showsImporter,
-                allowedContentTypes: [.data],
+                allowedContentTypes: BackupDocument.importableContentTypes,
                 allowsMultipleSelection: false
             ) { result in
                 switch result {
                 case .success(let urls):
                     guard let url = urls.first else { return }
-                    importPassword = ""
-                    pendingImportURL = url
-                    showsImportPassword = true
+                    selectBackup(from: url)
                 case .failure(let error):
-                    presentedError = PresentedError(message: error.localizedDescription)
+                    importErrorMessage = error.localizedDescription
                 }
-            }
-            .sheet(isPresented: $showsImportPassword) {
-                NavigationStack {
-                    Form {
-                        SecureField("备份密码", text: $importPassword)
-                    }
-                    .navigationTitle("解锁备份")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("取消") { showsImportPassword = false }
-                        }
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("导入") { importBackup() }
-                                .disabled(importPassword.isEmpty)
-                        }
-                    }
-                }
-                .presentationDetents([.height(220)])
             }
             .alert(item: $presentedError) { error in
                 Alert(title: Text("备份失败"), message: Text(error.message), dismissButton: .default(Text("好")))
@@ -102,9 +119,29 @@ struct BackupView: View {
                 Text(statusMessage ?? "")
             }
         }
+        .interactiveDismissDisabled(isReadingBackup)
     }
 
-    @State private var pendingImportURL: URL?
+    private func selectBackup(from url: URL) {
+        clearPendingImport()
+        isReadingBackup = true
+        Task {
+            defer { isReadingBackup = false }
+            do {
+                pendingImport = try await Task.detached(priority: .userInitiated) {
+                    try BackupImportFile(contentsOf: url)
+                }.value
+            } catch {
+                importErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func clearPendingImport() {
+        pendingImport = nil
+        importPassword = ""
+        importErrorMessage = nil
+    }
 
     private func exportBackup() {
         guard model.isProfileStoreAvailable else {
@@ -120,43 +157,22 @@ struct BackupView: View {
     }
 
     private func importBackup() {
-        guard let url = pendingImportURL else { return }
+        guard let pendingImport else { return }
         guard model.isProfileStoreAvailable else {
-            presentedError = PresentedError(message: ProfileError.profileStoreUnavailable.localizedDescription)
+            importErrorMessage = ProfileError.profileStoreUnavailable.localizedDescription
             return
         }
         do {
-            let accessed = url.startAccessingSecurityScopedResource()
-            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-            let profiles = try BackupService(vault: model.credentialVault).importProfiles(from: Data(contentsOf: url), password: importPassword)
+            let profiles = try BackupService(vault: model.credentialVault).importProfiles(from: pendingImport.data, password: importPassword)
             try model.addImportedProfiles(profiles)
-            showsImportPassword = false
+            clearPendingImport()
             statusMessage = "已新增 \(profiles.count) 个环境。"
         } catch {
-            presentedError = PresentedError(message: error.localizedDescription)
+            importErrorMessage = error.localizedDescription
         }
     }
 
     private var statusAlertBinding: Binding<Bool> {
         Binding(get: { statusMessage != nil }, set: { if !$0 { statusMessage = nil } })
-    }
-}
-
-struct BackupDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.data] }
-    static var writableContentTypes: [UTType] { [.data] }
-
-    let data: Data
-
-    init(data: Data) {
-        self.data = data
-    }
-
-    init(configuration: ReadConfiguration) throws {
-        data = configuration.file.regularFileContents ?? Data()
-    }
-
-    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        FileWrapper(regularFileWithContents: data)
     }
 }
