@@ -97,18 +97,14 @@ struct BackupView: View {
                     presentedError = PresentedError(message: error.localizedDescription)
                 }
             }
-            .fileImporter(
-                isPresented: $showsImporter,
-                allowedContentTypes: BackupDocument.importableContentTypes,
-                allowsMultipleSelection: false
-            ) { result in
-                switch result {
-                case .success(let urls):
-                    guard let url = urls.first else { return }
-                    selectBackup(from: url)
-                case .failure(let error):
-                    importErrorMessage = error.localizedDescription
+            .sheet(isPresented: $showsImporter) {
+                BackupFilePicker { url in
+                    showsImporter = false
+                    if let url {
+                        selectBackup(from: url)
+                    }
                 }
+                .ignoresSafeArea()
             }
             .alert(item: $presentedError) { error in
                 Alert(title: Text("备份失败"), message: Text(error.message), dismissButton: .default(Text("好")))

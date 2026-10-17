@@ -6,8 +6,8 @@ struct BackupDocument: FileDocument {
     static var readableContentTypes: [UTType] { [.json, .data] }
     static var writableContentTypes: [UTType] { [.json] }
 
-    // Old exports have no extension, so let the picker offer generic file items.
-    static var importableContentTypes: [UTType] { [.item] }
+    // Include JSON explicitly, with generic types for old exports that have no extension.
+    static var importableContentTypes: [UTType] { [.json, .data, .item] }
 
     let data: Data
 
