@@ -154,6 +154,9 @@ struct BrowserView: View {
                 guard let currentSession else { return }
                 appModel.handleAutomationEvent(event, for: currentSession.profile.id)
                 eventObserver?(currentSession.profile.id, event)
+                if event.kind == .success, eventObserver == nil {
+                    Task { await appModel.refreshBalance(for: currentSession, afterCheckIn: true) }
+                }
             }
             session.start()
             await model.refreshBalance(for: session)

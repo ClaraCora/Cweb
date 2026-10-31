@@ -34,6 +34,9 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
     var lastCheckedAt: Date?
     var validationMessage: String?
     var validationRevision: Int
+    /// Group measurements do not participate in ranking: changing a volatile
+    /// display number would silently change the proxy used by an environment.
+    var lastLatencyCheck: SocksProxyValidationResult?
     /// A redacted source value retained for editing and display. Passwords
     /// are intentionally omitted from this value.
     var sourceURLString: String?
@@ -52,7 +55,8 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
         lastCheckedAt: Date? = nil,
         validationMessage: String? = nil,
         validationRevision: Int = SocksProxy.currentValidationRevision,
-        sourceURLString: String? = nil
+        sourceURLString: String? = nil,
+        lastLatencyCheck: SocksProxyValidationResult? = nil
     ) {
         self.id = id
         self.code = Self.normalizeCode(code)
@@ -68,6 +72,7 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
         self.validationMessage = validationMessage
         self.validationRevision = validationRevision
         self.sourceURLString = sourceURLString
+        self.lastLatencyCheck = lastLatencyCheck
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -84,6 +89,7 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
         case validationMessage
         case validationRevision
         case sourceURLString
+        case lastLatencyCheck
     }
 
     init(from decoder: Decoder) throws {
@@ -106,6 +112,7 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
         // AppModel whenever the validation protocol changes.
         validationRevision = try container.decodeIfPresent(Int.self, forKey: .validationRevision) ?? 0
         sourceURLString = try container.decodeIfPresent(String.self, forKey: .sourceURLString)
+        lastLatencyCheck = try container.decodeIfPresent(SocksProxyValidationResult.self, forKey: .lastLatencyCheck)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -123,6 +130,7 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
         try container.encodeIfPresent(validationMessage, forKey: .validationMessage)
         try container.encode(validationRevision, forKey: .validationRevision)
         try container.encodeIfPresent(sourceURLString, forKey: .sourceURLString)
+        try container.encodeIfPresent(lastLatencyCheck, forKey: .lastLatencyCheck)
     }
 
     /// Parses one `socks://`, `socks5://`, or `socks5h://` value. For
@@ -218,6 +226,7 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
         copy.lastCheckedAt = result.checkedAt
         copy.validationMessage = result.message
         copy.validationRevision = Self.currentValidationRevision
+        copy.lastLatencyCheck = nil
         return copy
     }
 
@@ -228,6 +237,7 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
         copy.lastCheckedAt = nil
         copy.validationMessage = nil
         copy.validationRevision = Self.currentValidationRevision
+        copy.lastLatencyCheck = nil
         return copy
     }
 

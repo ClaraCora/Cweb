@@ -26,7 +26,8 @@ final class BrowserSession {
     private var automationConfigured = false
     private var automationPaused = false
     private var automationManuallyPaused = false
-    private var isClosed = false
+    private(set) var isClosed = false
+    private(set) var lastReadBalance: String?
     private var automationEventHandler: (@MainActor (AutomationEvent) -> Void)?
 
     init(profile: BrowserProfile, socksProxy: SocksProxy? = nil) {
@@ -462,9 +463,11 @@ final class BrowserSession {
             in: nil,
             contentWorld: .page
         )
-        guard let balance = value as? String else { return nil }
+        guard !isClosed, let balance = value as? String else { return nil }
         let trimmed = balance.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+        guard !trimmed.isEmpty else { return nil }
+        lastReadBalance = trimmed
+        return trimmed
     }
 
     static func resolveAddress(_ input: String) -> URL? {

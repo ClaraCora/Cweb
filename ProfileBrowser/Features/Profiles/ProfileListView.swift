@@ -20,6 +20,11 @@ struct ProfileListView: View {
     @State private var showsGroupCheckIn = false
     @State private var checkInController: GroupCheckInController?
     @State private var editMode: EditMode = .inactive
+    @State private var isTestingProxies = false
+    @State private var testingProxyIDs: Set<UUID> = []
+    @State private var proxyTestCompleted = 0
+    @State private var proxyTestTotal = 0
+    @State private var proxyTestSummary: String?
 
     init(groupID: UUID, onDeleteGroup: ((UUID) -> Void)? = nil) {
         self.groupID = groupID
@@ -32,6 +37,9 @@ struct ProfileListView: View {
         content
             .navigationTitle(currentGroup?.name ?? "分组")
             .navigationBarTitleDisplayMode(.inline)
+            .task(id: isTestingProxies) {
+                if isTestingProxies { await measureGroupProxies() }
+            }
             .navigationDestination(item: $activeProfile) { profile in
                 BrowserView(profile: profile, socksProxy: model.socksProxy(for: profile))
             }
@@ -233,7 +241,7 @@ struct ProfileListView: View {
     }
 
     private var canStartCheckIn: Bool {
-        editMode != .active && !visibleProfiles.isEmpty
+        editMode != .active && !visibleProfiles.isEmpty && !isTestingProxies
             && !isCheckInScriptEmpty
             && (checkInController?.canStop != true || checkInController?.canStart == true)
     }
@@ -280,9 +288,67 @@ struct ProfileListView: View {
                             model.present(error)
                         }
                     }
+                } header: {
+                    groupProxyHeader
+                } footer: {
+                    if let proxyTestSummary { Text(proxyTestSummary) }
                 }
             }
             .listStyle(.insetGrouped)
+        }
+    }
+
+    private var groupProxyHeader: some View {
+        HStack(spacing: 8) {
+            Text("\(visibleProfiles.count) 个环境")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            Button {
+                isTestingProxies = true
+            } label: {
+                HStack(spacing: 6) {
+                    if isTestingProxies { ProgressView().controlSize(.small) }
+                    Text(isTestingProxies ? "测速 \(proxyTestCompleted)/\(proxyTestTotal)" : "批量测速")
+                        .font(.subheadline)
+                        .monospacedDigit()
+                }
+                .frame(minHeight: 44)
+            }
+            .buttonStyle(.borderless)
+            .disabled(isTestingProxies || editMode == .active || checkInController?.canStop == true
+                || model.groupProxyTargets(for: visibleProfiles).isEmpty)
+            .accessibilityHint("仅测本组使用的代理，共用代理只测一次，直连环境不参与")
+            .accessibilityIdentifier("profiles.testProxies")
+        }
+        .textCase(nil)
+    }
+
+    private func measureGroupProxies() async {
+        let profiles = visibleProfiles
+        let targets = model.groupProxyTargets(for: profiles)
+        testingProxyIDs = Set(targets.map(\.id))
+        proxyTestCompleted = 0
+        proxyTestTotal = targets.count
+        proxyTestSummary = nil
+        defer {
+            isTestingProxies = false
+            testingProxyIDs = []
+        }
+        do {
+            let results = try await model.validateGroupProxyLatencies(for: profiles) { completed, total in
+                proxyTestCompleted = completed
+                proxyTestTotal = total
+            }
+            let available = results.filter { $0.status == .available }.count
+            proxyTestSummary = results.isEmpty
+                ? "代理或测速规则已变化，请重新测速。"
+                : "已测 \(results.count) 个代理 · 可用 \(available) · 不可用 \(results.count - available)"
+        } catch is CancellationError {
+            proxyTestSummary = nil
+        } catch {
+            proxyTestSummary = "测速结果未保存，请重试。"
+            model.present(error)
         }
     }
 
@@ -321,6 +387,7 @@ struct ProfileListView: View {
                 profile: profile,
                 balance: model.balance(for: profile),
                 proxySummary: proxySummary(for: profile),
+                proxyLatency: proxyLatency(for: profile),
                 isBusy: model.busyProfileID == profile.id
             )
         }
@@ -386,6 +453,20 @@ struct ProfileListView: View {
         return "第 \(number) 号代理\(proxy.displayCode.map { " · \($0)" } ?? "")"
     }
 
+    private func proxyLatency(for profile: BrowserProfile) -> ProfileProxyLatency {
+        guard profile.socksProxyNumber != nil else { return .direct }
+        guard let proxy = model.socksProxy(for: profile) else { return .missing }
+        if testingProxyIDs.contains(proxy.id) { return .testing }
+        let status = proxy.lastLatencyCheck?.status ?? proxy.status
+        let latency = proxy.lastLatencyCheck?.latencyMilliseconds ?? proxy.latencyMilliseconds
+        switch status {
+        case .untested: return .untested
+        case .unavailable: return .unavailable
+        case .available:
+            return latency.map { .available($0) } ?? .untested
+        }
+    }
+
     private var groupDeletionAlertBinding: Binding<Bool> {
         Binding(
             get: { pendingGroupDeletion != nil },
@@ -423,9 +504,11 @@ struct ProfileListView: View {
 
 @MainActor
 private struct ProfileRow: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let profile: BrowserProfile
     let balance: String?
     let proxySummary: String
+    let proxyLatency: ProfileProxyLatency
     let isBusy: Bool
 
     var body: some View {
@@ -440,28 +523,23 @@ private struct ProfileRow: View {
             .frame(width: 44, height: 44)
             .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        nameLabel.fixedSize()
+                        nameAndLatency.fixedSize()
+                        Spacer(minLength: 8)
                         balanceLabel.fixedSize()
                     }
                     VStack(alignment: .leading, spacing: 4) {
-                        nameLabel
+                        nameAndLatency
                         balanceLabel
                     }
                 }
-                Text(profile.homePageHost)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Text(proxySummary)
+                Text("\(profile.homePageHost) · \(proxySummary)")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-
-            Spacer(minLength: 8)
 
             if isBusy {
                 ProgressView()
@@ -469,9 +547,40 @@ private struct ProfileRow: View {
                     .accessibilityLabel("正在处理")
             }
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 6)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(profile.name)\(balance.map { "，上次余额 \($0)" } ?? "")，主页 \(profile.homePageHost)，\(proxySummary)")
+        .accessibilityLabel("\(profile.name)，\(proxyLatency.accessibilityDescription)\(balance.map { "，余额 \($0)" } ?? "")，主页 \(profile.homePageHost)，\(proxySummary)")
+    }
+
+    @ViewBuilder
+    private var nameAndLatency: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 4) {
+                nameLabel
+                latencyLabel
+            }
+        } else {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    nameLabel.fixedSize()
+                    latencyLabel.fixedSize()
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    nameLabel
+                    latencyLabel
+                }
+            }
+        }
+    }
+
+    private var latencyLabel: some View {
+        Label {
+            Text(proxyLatency.title).foregroundStyle(.secondary)
+        } icon: {
+            Image(systemName: proxyLatency.symbol).foregroundStyle(proxyLatency.color)
+        }
+        .font(.caption.monospacedDigit())
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private var nameLabel: some View {
@@ -484,10 +593,50 @@ private struct ProfileRow: View {
     @ViewBuilder
     private var balanceLabel: some View {
         if let balance {
-            Text("上次余额 \(balance)")
+            Text(balance)
                 .font(.subheadline.monospacedDigit())
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel("余额 \(balance)")
+        }
+    }
+}
+
+private enum ProfileProxyLatency {
+    case direct, missing, untested, testing, unavailable
+    case available(Int)
+
+    var title: String {
+        switch self {
+        case .direct: "直连"
+        case .missing: "代理缺失"
+        case .untested: "未测速"
+        case .testing: "测速中"
+        case .unavailable: "不可用"
+        case .available(let milliseconds): "\(milliseconds) ms"
+        }
+    }
+
+    var accessibilityDescription: String {
+        if case .available(let milliseconds) = self { return "代理延迟 \(milliseconds) 毫秒" }
+        return title
+    }
+
+    var symbol: String {
+        switch self {
+        case .direct: "wifi"
+        case .missing, .unavailable: "exclamationmark.circle"
+        case .untested, .testing: "clock"
+        case .available: "network"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .missing, .unavailable: .red
+        case .available(let milliseconds) where milliseconds >= 500: .orange
+        case .available: .green
+        case .direct, .untested, .testing: .secondary
         }
     }
 }

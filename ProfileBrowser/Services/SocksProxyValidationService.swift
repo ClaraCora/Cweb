@@ -23,7 +23,7 @@ protocol SocksProxyProbe: Sendable {
     func probe(_ proxy: SocksProxy, timeout: TimeInterval) async throws -> SocksProxyProbeResult
 }
 
-struct SocksProxyValidationResult: Sendable, Hashable {
+struct SocksProxyValidationResult: Codable, Sendable, Hashable {
     let proxyID: UUID
     let status: SocksProxyStatus
     let latencyMilliseconds: Int?

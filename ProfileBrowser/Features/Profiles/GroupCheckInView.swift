@@ -158,6 +158,7 @@ struct GroupCheckInView: View {
     @ViewBuilder
     private var detailActions: some View {
         Button("跳过当前环境", systemImage: "forward.end") { controller.skip() }
+            .disabled(!controller.canSkip)
             .frame(minHeight: 44)
             .font(.subheadline)
             .buttonStyle(.borderless)
@@ -177,6 +178,7 @@ struct GroupCheckInView: View {
 
     private var statusTitle: String {
         if controller.isPaused { return "已暂停" }
+        if controller.isRefreshingBalance { return "更新余额" }
         switch controller.session?.automationState ?? .inactive {
         case .captcha: return "待验证"
         case .noButton: return "等待入口"
@@ -188,6 +190,7 @@ struct GroupCheckInView: View {
 
     private var statusColor: Color {
         guard !controller.isPaused else { return .secondary }
+        if controller.isRefreshingBalance { return .secondary }
         switch controller.session?.automationState ?? .inactive {
         case .captcha, .noButton: return .orange
         case .error: return .red

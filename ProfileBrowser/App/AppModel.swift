@@ -25,6 +25,7 @@ final class AppModel {
     private let socksProxyValidationServiceOverride: SocksProxyValidationService?
     private let userDefaults: UserDefaults
     private var checkInDaysByProfileID: [String: String]
+    private var balanceRefreshes: [UUID: (token: UUID, afterCheckIn: Bool)] = [:]
 
     init(
         profileRepository: ProfileRepository = ProfileRepository(),
@@ -381,15 +382,31 @@ final class AppModel {
         try persist()
     }
 
-    func refreshBalance(for session: BrowserSession) async {
-        for _ in 0..<24 {
-            guard !Task.isCancelled else { return }
-            if let value = try? await session.readAccountBalance(), !value.isEmpty {
-                saveCachedBalance(value, for: session.profile.id)
-                return
+    func refreshBalance(for session: BrowserSession, afterCheckIn: Bool = false) async {
+        let profileID = session.profile.id
+        // Reopening a paused run must not replace its pending success read
+        // with the normal read that BrowserView performs on entry.
+        guard afterCheckIn || balanceRefreshes[profileID]?.afterCheckIn != true else { return }
+        let token = UUID()
+        balanceRefreshes[profileID] = (token, afterCheckIn)
+        defer {
+            if balanceRefreshes[profileID]?.token == token {
+                balanceRefreshes.removeValue(forKey: profileID)
             }
-            try? await Task.sleep(nanoseconds: 500_000_000)
         }
+        let previousBalance = session.lastReadBalance
+        let value = try? await AccountBalanceReader.read(
+            afterCheckIn: afterCheckIn,
+            previousBalance: previousBalance
+        ) {
+            guard !session.isClosed, self.balanceRefreshes[profileID]?.token == token else {
+                throw CancellationError()
+            }
+            return try await session.readAccountBalance()
+        }
+        guard !Task.isCancelled, !session.isClosed,
+              balanceRefreshes[profileID]?.token == token, let value else { return }
+        saveCachedBalance(value, for: profileID)
     }
 
     /// Updates the metadata shared by a group and keeps every member attached
@@ -514,6 +531,14 @@ final class AppModel {
         return rankedSocksProxies.first(where: { $0.number == number })?.proxy
     }
 
+    func groupProxyTargets(for profiles: [BrowserProfile]) -> [SocksProxy] {
+        var seen = Set<UUID>()
+        return profiles.compactMap { profile in
+            guard let proxy = socksProxy(for: profile), seen.insert(proxy.id).inserted else { return nil }
+            return proxy
+        }
+    }
+
     func addSocksProxy(_ proxy: SocksProxy) throws {
         socksProxies = try socksProxyRepository.appendUnique([proxy])
     }
@@ -533,10 +558,7 @@ final class AppModel {
             || existing.scheme != proxy.scheme
             || existing.password != proxy.password
         if contentChanged {
-            value.latencyMilliseconds = nil
-            value.status = .untested
-            value.lastCheckedAt = nil
-            value.validationMessage = nil
+            value = value.invalidatingValidation()
         }
         socksProxies = try socksProxyRepository.upsert(value)
     }
@@ -586,6 +608,36 @@ final class AppModel {
         let imported = try await socksProxyImportService.fetch(from: url)
         guard !imported.isEmpty else { return }
         socksProxies = try socksProxyRepository.appendUnique(imported)
+    }
+
+    /// Measures only this group's distinct proxies, without deleting records
+    /// or changing the ranking that environment proxy numbers resolve against.
+    func validateGroupProxyLatencies(
+        for profiles: [BrowserProfile],
+        onProgress: (@MainActor @Sendable (Int, Int) -> Void)? = nil
+    ) async throws -> [SocksProxyValidationResult] {
+        let targets = groupProxyTargets(for: profiles)
+        guard !targets.isEmpty else { return [] }
+        let settings = socksProxyValidationSettings.normalized
+        let results = await socksProxyValidationService(for: settings).validate(
+            targets, maxConcurrent: settings.maxConcurrent, onProgress: onProgress
+        )
+        try Task.checkCancellation()
+        guard socksProxyValidationSettings.normalized == settings else { return [] }
+        let originals = Dictionary(uniqueKeysWithValues: targets.map { ($0.id, $0) })
+        let resultsByID = Dictionary(uniqueKeysWithValues: results.map { ($0.proxyID, $0) })
+        var applied: [SocksProxyValidationResult] = []
+        let updated = socksProxies.map { proxy in
+            guard proxy == originals[proxy.id], let result = resultsByID[proxy.id] else { return proxy }
+            var copy = proxy
+            copy.lastLatencyCheck = result
+            applied.append(result)
+            return copy
+        }
+        guard !applied.isEmpty else { return [] }
+        try socksProxyRepository.save(updated)
+        socksProxies = updated
+        return applied
     }
 
     func validateSocksProxies(onProgress: (@MainActor @Sendable (Int, Int) -> Void)? = nil) async throws {
