@@ -456,9 +456,11 @@ struct ProfileListView: View {
     private func proxyLatency(for profile: BrowserProfile) -> ProfileProxyLatency {
         guard profile.socksProxyNumber != nil else { return .direct }
         guard let proxy = model.socksProxy(for: profile) else { return .missing }
-        if testingProxyIDs.contains(proxy.id) { return .testing }
         let status = proxy.lastLatencyCheck?.status ?? proxy.status
         let latency = proxy.lastLatencyCheck?.latencyMilliseconds ?? proxy.latencyMilliseconds
+        if testingProxyIDs.contains(proxy.id) {
+            return .testing(status == .available ? latency : nil)
+        }
         switch status {
         case .untested: return .untested
         case .unavailable: return .unavailable
@@ -512,34 +514,31 @@ private struct ProfileRow: View {
     let isBusy: Bool
 
     var body: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(profile.color.color.opacity(0.16))
-                Image(systemName: "person.crop.square.fill")
-                    .foregroundStyle(profile.color.color)
-                    .imageScale(.large)
+        HStack(spacing: 10) {
+            if !dynamicTypeSize.isAccessibilitySize {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(profile.color.color.opacity(0.16))
+                    Image(systemName: "person.crop.square.fill")
+                        .foregroundStyle(profile.color.color)
+                        .font(.title3)
+                }
+                .frame(width: 30, height: 34)
+                .accessibilityHidden(true)
             }
-            .frame(width: 44, height: 44)
-            .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 4) {
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        nameAndLatency.fixedSize()
-                        Spacer(minLength: 8)
-                        balanceLabel.fixedSize()
-                    }
-                    VStack(alignment: .leading, spacing: 4) {
-                        nameAndLatency
-                        balanceLabel
-                    }
-                }
+                nameAndLatency
                 Text("\(profile.homePageHost) · \(proxySummary)")
-                    .font(.footnote)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if dynamicTypeSize.isAccessibilitySize { balanceLabel }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if !dynamicTypeSize.isAccessibilitySize { balanceLabel }
 
             if isBusy {
                 ProgressView()
@@ -547,63 +546,54 @@ private struct ProfileRow: View {
                     .accessibilityLabel("正在处理")
             }
         }
-        .padding(.vertical, 6)
+        .frame(minHeight: 44)
+        .padding(.vertical, 8)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(profile.name)，\(proxyLatency.accessibilityDescription)\(balance.map { "，余额 \($0)" } ?? "")，主页 \(profile.homePageHost)，\(proxySummary)")
     }
 
-    @ViewBuilder
     private var nameAndLatency: some View {
-        if dynamicTypeSize.isAccessibilitySize {
-            VStack(alignment: .leading, spacing: 4) {
-                nameLabel
-                latencyLabel
-            }
-        } else {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    nameLabel.fixedSize()
-                    latencyLabel.fixedSize()
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    nameLabel
-                    latencyLabel
-                }
-            }
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            nameLabel
+            latencyLabel
         }
     }
 
     private var latencyLabel: some View {
-        Label {
-            Text(proxyLatency.title).foregroundStyle(.secondary)
-        } icon: {
-            Image(systemName: proxyLatency.symbol).foregroundStyle(proxyLatency.color)
-        }
-        .font(.caption.monospacedDigit())
-        .fixedSize(horizontal: false, vertical: true)
+        // Use Text so automatic Label styles cannot hide the milliseconds.
+        // Reserve the result's full width; only the environment name truncates.
+        Text(proxyLatency.title)
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .layoutPriority(1)
     }
 
     private var nameLabel: some View {
         Text(profile.name)
-            .font(.headline)
+            .font(.subheadline.weight(.medium))
             .foregroundStyle(.primary)
-            .fixedSize(horizontal: false, vertical: true)
+            .lineLimit(1)
+            .truncationMode(.tail)
     }
 
     @ViewBuilder
     private var balanceLabel: some View {
         if let balance {
             Text(balance)
-                .font(.subheadline.monospacedDigit())
-                .foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
                 .accessibilityLabel("余额 \(balance)")
         }
     }
 }
 
 private enum ProfileProxyLatency {
-    case direct, missing, untested, testing, unavailable
+    case direct, missing, untested, unavailable
+    case testing(Int?)
     case available(Int)
 
     var title: String {
@@ -611,32 +601,18 @@ private enum ProfileProxyLatency {
         case .direct: "直连"
         case .missing: "代理缺失"
         case .untested: "未测速"
-        case .testing: "测速中"
+        case .testing(let milliseconds): milliseconds.map { "\($0) ms" } ?? "测速中"
         case .unavailable: "不可用"
         case .available(let milliseconds): "\(milliseconds) ms"
         }
     }
 
     var accessibilityDescription: String {
-        if case .available(let milliseconds) = self { return "代理延迟 \(milliseconds) 毫秒" }
-        return title
-    }
-
-    var symbol: String {
         switch self {
-        case .direct: "wifi"
-        case .missing, .unavailable: "exclamationmark.circle"
-        case .untested, .testing: "clock"
-        case .available: "network"
-        }
-    }
-
-    var color: Color {
-        switch self {
-        case .missing, .unavailable: .red
-        case .available(let milliseconds) where milliseconds >= 500: .orange
-        case .available: .green
-        case .direct, .untested, .testing: .secondary
+        case .available(let milliseconds): return "代理延迟 \(milliseconds) 毫秒"
+        case .testing(let milliseconds):
+            return milliseconds.map { "代理延迟 \($0) 毫秒，正在重新测速" } ?? "正在测速"
+        case .direct, .missing, .untested, .unavailable: return title
         }
     }
 }
