@@ -31,10 +31,19 @@ struct GroupCheckInView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(controller.session == nil ? "完成" : "返回分组") {
+                    Button {
                         controller.pause()
                         dismiss()
+                    } label: {
+                        if controller.session == nil {
+                            Text("完成")
+                        } else {
+                            Label("分组", systemImage: "chevron.left")
+                                .labelStyle(.titleAndIcon)
+                        }
                     }
+                    .accessibilityLabel(controller.session == nil ? "完成" : "返回分组")
+                    .accessibilityHint(controller.session == nil ? "关闭签到结果" : "暂停当前任务并返回分组")
                 }
             }
         }
@@ -50,6 +59,7 @@ struct GroupCheckInView: View {
         }
         .onChange(of: controller.session?.profile.id) { _, _ in
             showsBrowserChrome = false
+            showsTaskDetails = false
         }
         .onDisappear { controller.pause() }
     }
@@ -72,34 +82,32 @@ struct GroupCheckInView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
         .background(.bar)
+        .overlay(alignment: .bottom) { Divider() }
     }
 
     private var taskControls: some View {
         GroupCheckInControls(
             canStart: controller.canStart, canPause: controller.canPause, canStop: controller.canStop,
-            start: controller.start, pause: controller.pause, stop: controller.stop,
-            isCompact: true
+            start: controller.start, pause: controller.pause, stop: controller.stop
         )
-        .fixedSize(horizontal: true, vertical: false)
+        .fixedSize(horizontal: !dynamicTypeSize.isAccessibilitySize, vertical: false)
     }
 
     private var taskSummary: some View {
         Button {
             showsTaskDetails.toggle()
         } label: {
-            HStack(spacing: 4) {
+            HStack(spacing: 6) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("\(controller.queue.index + 1)/\(controller.queue.profileIDs.count) · \(statusTitle)")
+                    Text("\(controller.queue.index + 1)/\(controller.queue.profileIDs.count)")
                         .font(.subheadline.weight(.medium))
+                        .monospacedDigit()
                         .foregroundStyle(.primary)
-                    Label(
-                        currentHost,
-                        systemImage: controller.session?.currentOrigin?.isSecure == true ? "lock" : "globe"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    Text(statusTitle)
+                        .font(.caption)
+                        .foregroundStyle(statusColor)
                 }
+                .lineLimit(1)
                 Image(systemName: showsTaskDetails ? "chevron.up" : "chevron.down")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -175,6 +183,16 @@ struct GroupCheckInView: View {
         case .error: return "检测失败"
         case .success, .skipped: return "已完成"
         case .inactive, .running: return "检测中"
+        }
+    }
+
+    private var statusColor: Color {
+        guard !controller.isPaused else { return .secondary }
+        switch controller.session?.automationState ?? .inactive {
+        case .captcha, .noButton: return .orange
+        case .error: return .red
+        case .success, .skipped: return .green
+        case .inactive, .running: return .secondary
         }
     }
 

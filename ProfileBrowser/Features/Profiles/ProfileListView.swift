@@ -4,6 +4,7 @@ import SwiftUI
 struct ProfileListView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let groupID: UUID
     let onDeleteGroup: ((UUID) -> Void)?
@@ -161,29 +162,74 @@ struct ProfileListView: View {
     }
 
     private var checkInControls: some View {
-        VStack(spacing: 0) {
-            GroupCheckInControls(
-                canStart: canStartCheckIn,
-                canPause: checkInController?.canPause == true,
-                canStop: checkInController?.canStop == true,
-                start: startCheckIn,
-                pause: { checkInController?.pause() },
-                stop: { checkInController?.stop() }
-            )
-            if let checkInController, checkInController.canStop {
-                Button("返回签到页面 · 已完成 \(checkInController.queue.completedCount) / \(visibleProfiles.count)") {
-                    showsGroupCheckIn = true
+        VStack(alignment: .leading, spacing: 0) {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 0) {
+                    checkInSummary
+                    checkInButtons
                 }
-                .font(.footnote)
-                .frame(minHeight: 44)
             } else {
-                Text(isCheckInScriptEmpty ? "签到脚本为空，请先在设置中恢复模板或填写脚本。" : "本组按当前顺序签到，今天已完成的自动跳过。")
+                HStack(spacing: 8) {
+                    checkInSummary
+                    checkInButtons
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+            }
+            if isCheckInScriptEmpty {
+                Text("签到脚本为空，请先在设置中恢复模板或填写脚本。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .padding(.bottom, 8)
+                    .padding(.vertical, 4)
             }
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
         .background(.bar)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private var checkInButtons: some View {
+        GroupCheckInControls(
+            canStart: canStartCheckIn,
+            canPause: checkInController?.canPause == true,
+            canStop: checkInController?.canStop == true,
+            start: startCheckIn,
+            pause: { checkInController?.pause() },
+            stop: { checkInController?.stop() }
+        )
+    }
+
+    @ViewBuilder
+    private var checkInSummary: some View {
+        if let checkInController, checkInController.canStop {
+            Button {
+                showsGroupCheckIn = true
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(checkInController.queue.index + 1)/\(checkInController.queue.profileIDs.count) · \(checkInController.isPaused ? "已暂停" : "签到中")")
+                        .font(.subheadline.weight(.medium))
+                        .monospacedDigit()
+                    Text("返回签到页面")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("返回签到页面，第 \(checkInController.queue.index + 1) 个，共 \(checkInController.queue.profileIDs.count) 个，已完成 \(checkInController.queue.completedCount) 个")
+        } else {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("分组签到")
+                    .font(.subheadline.weight(.medium))
+                Text("\(visibleProfiles.count) 个环境 · 按序执行")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .accessibilityHint("今天已完成签到的环境会自动跳过")
+        }
     }
 
     private var canStartCheckIn: Bool {

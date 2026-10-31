@@ -41,7 +41,7 @@ struct BrowserView: View {
         @Bindable var session = session
 
         VStack(spacing: 0) {
-            // A group run already shows the host and automation status in its task bar.
+            // A group run shows the host in its navigation title and status in its task bar.
             if browserChromePresentation == nil {
                 HStack(spacing: 6) {
                     Image(systemName: session.currentOrigin?.isSecure == true ? "lock" : "globe")
@@ -107,6 +107,22 @@ struct BrowserView: View {
         .navigationTitle(session.profile.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            if browserChromePresentation != nil {
+                ToolbarItem(placement: .principal) {
+                    VStack(spacing: 2) {
+                        Text(session.profile.name)
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                        Text(session.currentOrigin?.host ?? session.profile.homePageHost)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("groupCheckIn.environment")
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     if session.currentOrigin?.isSecure == true {
