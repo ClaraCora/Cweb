@@ -147,6 +147,29 @@ struct GroupCheckInTests {
         #expect(!controller.isRefreshingBalance)
     }
 
+    @Test
+    @MainActor
+    func completedSessionIgnoresReloadAndLateScriptMessages() async {
+        let session = BrowserSession(profile: BrowserProfile(name: "环境"))
+        var successes = 0
+        session.configureAutomation(
+            settings: GlobalScriptSettings(enabled: true, source: "", updatedAt: .now),
+            shouldRunToday: true, completionKey: UUID().uuidString
+        ) { event in
+            if event.kind == .success { successes += 1 }
+        }
+        session.receiveAutomationMessage(type: "success", message: "签到成功")
+        await session.resumeAutomation()
+        await session.recheckAutomation()
+        session.receiveAutomationMessage(type: "success", message: "刷新后重复成功")
+        session.receiveAutomationMessage(type: "resume", message: "旧脚本恢复")
+        session.receiveAutomationMessage(type: "error", message: "旧页面延迟错误")
+        #expect(successes == 1)
+        #expect(session.automationState == .success)
+        #expect(session.automationMessage == "签到成功")
+        session.close()
+    }
+
     @MainActor
     private func waitForBalanceRefresh(_ controller: GroupCheckInController) async {
         let deadline = ContinuousClock.now.advanced(by: .seconds(1))

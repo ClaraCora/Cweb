@@ -19,6 +19,7 @@ final class BrowserSession {
     private var hasStarted = false
     private var navigationTask: Task<Void, Never>?
     private var navigationGeneration = 0
+    private var committedNavigationGeneration = 0
     private let proxyConfigurationError: String?
     private let userContentController: WKUserContentController
     private var automationMessageHandler: AutomationMessageHandler?
@@ -26,8 +27,8 @@ final class BrowserSession {
     private var automationConfigured = false
     private var automationPaused = false
     private var automationManuallyPaused = false
+    private var automationHasCompleted = false
     private(set) var isClosed = false
-    private(set) var lastReadBalance: String?
     private var automationEventHandler: (@MainActor (AutomationEvent) -> Void)?
 
     init(profile: BrowserProfile, socksProxy: SocksProxy? = nil) {
@@ -151,7 +152,7 @@ final class BrowserSession {
     }
 
     private func installAutomationScripts() {
-        guard let automationUserScript else { return }
+        guard !automationHasCompleted, let automationUserScript else { return }
         userContentController.removeAllUserScripts()
         // Apply a manual pause before the userscript even on a redirect or a
         // newly loaded origin. Pausing only the current document is not enough.
@@ -164,7 +165,7 @@ final class BrowserSession {
     }
 
     func resumeAutomation() async {
-        guard automationConfigured, !isClosed else { return }
+        guard automationConfigured, !isClosed, !automationHasCompleted else { return }
         automationManuallyPaused = false
         installAutomationScripts()
         automationPaused = false
@@ -192,7 +193,7 @@ final class BrowserSession {
     }
 
     func recheckAutomation() async {
-        guard !isClosed, !automationManuallyPaused else { return }
+        guard !isClosed, !automationManuallyPaused, !automationHasCompleted else { return }
         if automationState == .captcha {
             await resumeAutomation()
         } else {
@@ -224,12 +225,13 @@ final class BrowserSession {
     }
 
     func receiveAutomationMessage(type: String, message: String) {
-        guard !isClosed, let kind = AutomationEventKind(rawValue: type) else { return }
+        guard !isClosed, !automationHasCompleted, let kind = AutomationEventKind(rawValue: type) else { return }
         let event = AutomationEvent(kind: kind, message: message)
 
         switch kind {
         case .success:
             guard !automationPaused else { return }
+            finishAutomationForBalanceRefresh()
             automationState = .success
             automationMessage = message.isEmpty ? "签到成功，今天不再重复执行。" : message
         case .captcha:
@@ -330,6 +332,45 @@ final class BrowserSession {
         }
     }
 
+    /// Reload once after a confirmed result. Remove this session's userscript
+    /// before reloading so the new document cannot submit check-in again or
+    /// report a second success that starts another balance refresh.
+    func reloadForBalanceRefresh() async throws {
+        try Task.checkCancellation()
+        guard !isClosed, page.url != nil, proxyConfigurationError == nil else {
+            throw CancellationError()
+        }
+        finishAutomationForBalanceRefresh()
+        startNavigation { page.reload(fromOrigin: true) }
+        let generation = navigationGeneration
+        do {
+            // Wait for the new document, not all its images/third-party
+            // resources. The balance reader also waits for DOM readiness.
+            while committedNavigationGeneration != generation {
+                try Task.checkCancellation()
+                guard !isClosed, navigationGeneration == generation, navigationTask != nil else {
+                    throw CancellationError()
+                }
+                try await Task.sleep(for: .milliseconds(25))
+            }
+            try Task.checkCancellation()
+        } catch {
+            if navigationGeneration == generation, !isClosed {
+                navigationGeneration += 1
+                navigationTask?.cancel()
+                navigationTask = nil
+                page.stopLoading()
+            }
+            throw error
+        }
+    }
+
+    private func finishAutomationForBalanceRefresh() {
+        automationHasCompleted = true
+        automationUserScript = nil
+        userContentController.removeAllUserScripts()
+    }
+
     /// Starts a WebPage navigation and observes the sequence it returns.
     /// Discarding this sequence hides the underlying proxy, DNS, TLS, and
     /// connection errors, leaving the user with a blank page. Keeping one task
@@ -349,7 +390,10 @@ final class BrowserSession {
 
         navigationTask = Task { @MainActor [weak self] in
             do {
-                for try await _ in sequence { }
+                for try await event in sequence {
+                    guard !Task.isCancelled, let self, self.navigationGeneration == generation else { return }
+                    if case .committed = event { self.committedNavigationGeneration = generation }
+                }
             } catch {
                 guard !Task.isCancelled,
                       let self,
@@ -444,6 +488,7 @@ final class BrowserSession {
 
     func readAccountBalance() async throws -> String? {
         let functionBody = """
+        if (document.readyState === 'loading') return null;
         const element = [...document.querySelectorAll('div')].find((node) => {
             const classes = node.classList;
             return classes.contains('text-foreground')
@@ -466,7 +511,6 @@ final class BrowserSession {
         guard !isClosed, let balance = value as? String else { return nil }
         let trimmed = balance.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        lastReadBalance = trimmed
         return trimmed
     }
 

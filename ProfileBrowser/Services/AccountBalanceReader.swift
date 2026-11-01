@@ -1,18 +1,49 @@
 import Foundation
 
-/// Waits for the website's asynchronous balance update after check-in. Entry
-/// reads can return immediately; success reads must allow the DOM to settle.
+/// Reloads after confirmed check-in instead of waiting for an old document's
+/// balance to change. The whole operation is bounded, including WebKit calls.
 @MainActor
 enum AccountBalanceReader {
     static func read(
         afterCheckIn: Bool,
-        previousBalance: String?,
-        readValue: @MainActor () async throws -> String?,
-        wait: @MainActor () async throws -> Void = { try await Task.sleep(for: .milliseconds(500)) }
+        reloadPage: @escaping @MainActor () async throws -> Void,
+        readValue: @escaping @MainActor () async throws -> String?,
+        wait: @escaping @MainActor () async throws -> Void = { try await Task.sleep(for: .milliseconds(250)) },
+        timeout: Duration? = nil
     ) async throws -> String? {
-        let attempts = afterCheckIn ? 13 : 24
+        try Task.checkCancellation()
+        let completion = BalanceReadCompletion()
+        let operation = Task { @MainActor in
+            do {
+                try Task.checkCancellation()
+                if afterCheckIn { try await reloadPage() }
+                try Task.checkCancellation()
+                let value = try await readDocument(afterCheckIn: afterCheckIn, readValue: readValue, wait: wait)
+                completion.result = .success(value)
+            } catch {
+                completion.result = .failure(error)
+            }
+        }
+        defer { operation.cancel() }
+
+        let deadline = ContinuousClock.now.advanced(by: timeout ?? .seconds(afterCheckIn ? 5 : 12))
+        while true {
+            try Task.checkCancellation()
+            if let result = completion.result { return try result.get() }
+            if ContinuousClock.now >= deadline { return nil }
+            // Do not await the child task on timeout: a stalled WebKit call
+            // may ignore cancellation. Its late result must never block the queue.
+            try await Task.sleep(for: .milliseconds(25))
+        }
+    }
+
+    private static func readDocument(
+        afterCheckIn: Bool,
+        readValue: @MainActor () async throws -> String?,
+        wait: @MainActor () async throws -> Void
+    ) async throws -> String? {
+        let attempts = afterCheckIn ? 20 : 48
         var latestValue: String?
-        var baseline = previousBalance
         var consecutiveMatches = 0
         for attempt in 0..<attempts {
             try Task.checkCancellation()
@@ -27,14 +58,11 @@ enum AccountBalanceReader {
             try Task.checkCancellation()
             if let value, !value.isEmpty {
                 if !afterCheckIn { return value }
-                if baseline == nil { baseline = value }
                 consecutiveMatches = value == latestValue ? consecutiveMatches + 1 : 1
                 latestValue = value
-                // At least 1.5 seconds for the page's update; a changed value
-                // must survive two reads. Unchanged balances get the full grace.
-                if attempt >= 3, value != baseline, consecutiveMatches >= 2 {
-                    return value
-                }
+                // This is a fresh document. A stable balance is valid even if
+                // today's check-in did not change it; no extra grace is needed.
+                if consecutiveMatches >= 2 { return value }
             } else {
                 consecutiveMatches = 0
             }
@@ -42,4 +70,9 @@ enum AccountBalanceReader {
         }
         return latestValue
     }
+}
+
+@MainActor
+private final class BalanceReadCompletion {
+    var result: Result<String?, Error>?
 }

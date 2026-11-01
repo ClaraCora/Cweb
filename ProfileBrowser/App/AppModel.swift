@@ -386,7 +386,7 @@ final class AppModel {
         let profileID = session.profile.id
         // Reopening a paused run must not replace its pending success read
         // with the normal read that BrowserView performs on entry.
-        guard afterCheckIn || balanceRefreshes[profileID]?.afterCheckIn != true else { return }
+        guard balanceRefreshes[profileID]?.afterCheckIn != true else { return }
         let token = UUID()
         balanceRefreshes[profileID] = (token, afterCheckIn)
         defer {
@@ -394,16 +394,21 @@ final class AppModel {
                 balanceRefreshes.removeValue(forKey: profileID)
             }
         }
-        let previousBalance = session.lastReadBalance
         let value = try? await AccountBalanceReader.read(
             afterCheckIn: afterCheckIn,
-            previousBalance: previousBalance
-        ) {
-            guard !session.isClosed, self.balanceRefreshes[profileID]?.token == token else {
-                throw CancellationError()
+            reloadPage: {
+                guard !session.isClosed, self.balanceRefreshes[profileID]?.token == token else {
+                    throw CancellationError()
+                }
+                try await session.reloadForBalanceRefresh()
+            },
+            readValue: {
+                guard !session.isClosed, self.balanceRefreshes[profileID]?.token == token else {
+                    throw CancellationError()
+                }
+                return try await session.readAccountBalance()
             }
-            return try await session.readAccountBalance()
-        }
+        )
         guard !Task.isCancelled, !session.isClosed,
               balanceRefreshes[profileID]?.token == token, let value else { return }
         saveCachedBalance(value, for: profileID)
