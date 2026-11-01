@@ -564,7 +564,7 @@ private struct ProfileRow: View {
         // Reserve the result's full width; only the environment name truncates.
         Text(proxyLatency.title)
             .font(.caption.monospacedDigit())
-            .foregroundStyle(.secondary)
+            .foregroundStyle(proxyLatency.foregroundColor)
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
             .layoutPriority(1)
@@ -613,6 +613,19 @@ private enum ProfileProxyLatency {
         case .testing(let milliseconds):
             return milliseconds.map { "代理延迟 \($0) 毫秒，正在重新测速" } ?? "正在测速"
         case .direct, .missing, .untested, .unavailable: return title
+        }
+    }
+
+    var foregroundColor: Color {
+        switch self {
+        case .available(let milliseconds), .testing(.some(let milliseconds)):
+            switch milliseconds {
+            case ...500: Color("ProxyLatencyFast")
+            case ...2_000: Color("ProxyLatencyModerate")
+            default: Color("ProxyLatencySlow")
+            }
+        case .direct, .missing, .untested, .unavailable, .testing(.none):
+            .secondary
         }
     }
 }

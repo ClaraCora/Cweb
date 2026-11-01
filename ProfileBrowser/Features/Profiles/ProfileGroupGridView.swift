@@ -3,7 +3,6 @@ import SwiftUI
 @MainActor
 struct ProfileGroupGridView: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var editorMode: ProfileEditorMode?
     @State private var showsGroupOrder = false
@@ -27,9 +26,10 @@ struct ProfileGroupGridView: View {
                 }
                 .toolbar {
                     ToolbarItemGroup(placement: .topBarTrailing) {
-                        Button("分组排序", systemImage: "arrow.up.arrow.down") {
+                        Button("排序") {
                             showsGroupOrder = true
                         }
+                        .accessibilityLabel("分组排序")
                         .disabled(model.profileGroups.count < 2)
 
                         Button("新建环境", systemImage: "plus") {
@@ -130,21 +130,15 @@ struct ProfileGroupGridView: View {
                 .buttonStyle(.borderedProminent)
             }
         } else {
-            ScrollView {
-                LazyVGrid(
-                    columns: dynamicTypeSize.isAccessibilitySize
-                        ? [GridItem(.flexible())]
-                        : [GridItem(.adaptive(minimum: 156), spacing: 12)],
-                    spacing: 12
-                ) {
+            List {
+                Section {
                     ForEach(model.profileGroups) { group in
                         NavigationLink(value: group.id) {
-                            ProfileGroupCard(
+                            ProfileGroupRow(
                                 group: group,
                                 isBusy: model.busyGroupName == group.name
                             )
                         }
-                        .buttonStyle(.plain)
                         .accessibilityIdentifier("group.\(group.id.uuidString)")
                         .disabled(model.busyGroupName == group.name)
                         .contextMenu {
@@ -160,11 +154,26 @@ struct ProfileGroupGridView: View {
                             }
                         }
                     }
+                } header: {
+                    ViewThatFits(in: .horizontal) {
+                        HStack {
+                            Text("\(model.profileGroups.count) 个分组")
+                                .fixedSize()
+                            Spacer(minLength: 8)
+                            Text("\(model.profiles.count) 个环境")
+                                .fixedSize()
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("\(model.profileGroups.count) 个分组")
+                            Text("\(model.profiles.count) 个环境")
+                        }
+                    }
+                    .font(.subheadline)
+                    .textCase(nil)
+                    .accessibilityElement(children: .combine)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 20)
             }
-            .background(Color(.systemGroupedBackground))
+            .listStyle(.insetGrouped)
         }
     }
 
@@ -196,59 +205,64 @@ struct ProfileGroupGridView: View {
     }
 }
 
-struct ProfileGroupCard: View {
+private struct ProfileGroupRow: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let group: ProfileGroup
     let isBusy: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text(group.displayEmoji)
-                    .font(.title2)
-                    .frame(minWidth: 36, minHeight: 36)
-                    .background(group.color.color.opacity(0.14), in: Circle())
-                    .accessibilityHidden(true)
-                Spacer(minLength: 8)
-                if isBusy {
-                    ProgressView()
-                        .accessibilityLabel("正在删除分组")
-                } else {
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .accessibilityHidden(true)
-                }
-            }
+        HStack(spacing: 12) {
+            Text(group.displayEmoji)
+                .font(.title2)
+                .frame(minWidth: 32)
+                .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(group.name)
                     .font(.headline)
                     .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .layoutPriority(1)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                    .truncationMode(.tail)
 
-                Text(group.displayCode ?? " ")
-                    .font(.subheadline.monospaced().weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                if let code = group.displayCode {
+                    Text(code)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                } else {
+                    Text(codePlaceholder)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
-                Text("\(group.profiles.count) 个环境")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                if dynamicTypeSize.isAccessibilitySize { environmentCount }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
+            if !dynamicTypeSize.isAccessibilitySize { environmentCount }
+
+            if isBusy {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel("正在删除分组")
+            }
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, minHeight: 148, alignment: .topLeading)
-        .background(
-            Color(.secondarySystemGroupedBackground),
-            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-        )
-        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .frame(minHeight: 44)
+        .padding(.vertical, 8)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(group.displayEmoji)，\(group.name)\(group.displayCode.map { "，代号 \($0)" } ?? "")，\(group.profiles.count) 个环境")
+        .accessibilityLabel("\(group.displayEmoji)，\(group.name)\(group.displayCode.map { "，代号 \($0)" } ?? "，\(codePlaceholder)")，\(group.profiles.count) 个环境\(isBusy ? "，正在删除分组" : "")")
         .accessibilityHint("进入分组")
+    }
+
+    private var codePlaceholder: String {
+        group.name == "未分组" ? "默认分组" : "未设置代号"
+    }
+
+    private var environmentCount: some View {
+        Text("\(group.profiles.count) 个环境")
+            .font(.subheadline.monospacedDigit())
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: true, vertical: false)
     }
 }
 
