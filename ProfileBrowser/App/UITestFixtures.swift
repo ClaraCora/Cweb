@@ -43,6 +43,9 @@ extension AppModel {
         if !ProcessInfo.processInfo.arguments.contains("-ui-test-resume") { defaults.removePersistentDomain(forName: suite) }
         let model = AppModel(profileRepository: repository, credentialVault: CredentialVault(inMemory: true), socksProxyRepository: proxyRepository, userDefaults: defaults)
         for profile in model.profiles { model.confirmEntry(for: profile) }
+        if ProcessInfo.processInfo.arguments.contains("-ui-test-completed") {
+            for profile in model.profiles.prefix(2) { model.recordAutomationSuccess(for: profile.id) }
+        }
         return model
     }
 #endif

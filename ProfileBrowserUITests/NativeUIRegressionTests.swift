@@ -5,7 +5,7 @@ final class NativeUIRegressionTests: XCTestCase {
     private let groupID = "group.10000000-0000-0000-0000-000000000001"
     private let profileID = "profile.20000000-0000-0000-0000-000000000001"
 
-    private func launch(dark: Bool = false, large: Bool = false, resume: Bool = false) -> XCUIApplication {
+    private func launch(dark: Bool = false, large: Bool = false, resume: Bool = false, completed: Bool = false) -> XCUIApplication {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
         // Exercise the real app appearance preference; AppleInterfaceStyle is
@@ -13,6 +13,7 @@ final class NativeUIRegressionTests: XCTestCase {
         app.launchArguments = ["-ui-testing", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN", "-app.appearanceMode", dark ? "dark" : "light"]
         if large { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
         if resume { app.launchArguments.append("-ui-test-resume") }
+        if completed { app.launchArguments.append("-ui-test-completed") }
         app.launch()
         XCTAssertTrue(app.buttons[groupID].waitForExistence(timeout: 10))
         return app
@@ -98,6 +99,23 @@ final class NativeUIRegressionTests: XCTestCase {
         let fill = app.buttons["browser.fill"]
         XCTAssertGreaterThan(fill.frame.midX, app.frame.midX)
         capture("browser-tools-collapsed")
+    }
+
+    func testCompletedRowsKeepStatusTextAndCompactHeight() {
+        let app = launch(completed: true)
+        app.buttons[groupID].tap()
+        let row = app.buttons[profileID]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        let context = app.staticTexts["profile.context.20000000-0000-0000-0000-000000000001"]
+        XCTAssertTrue(context.waitForExistence(timeout: 5))
+        XCTAssertTrue(context.label.contains("今日已完成"))
+        XCTAssertTrue(context.label.contains("历史缓存"))
+        // The status fits in at most a few text lines at the default size;
+        // it must not stretch to fill a large part of the list row.
+        XCTAssertLessThan(context.frame.height, 50)
+        XCTAssertLessThan(row.frame.height, 125)
+        XCTAssertGreaterThanOrEqual(row.frame.height, 44)
+        capture("environments-completed-cached")
     }
 
     func testLandscapeSurfacesStayUsable() {

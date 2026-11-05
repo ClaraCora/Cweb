@@ -2,6 +2,12 @@ name: Build unsigned iOS IPA
 
 on:
   workflow_dispatch:
+    inputs:
+      run_native_tests:
+        description: "运行 iPhone/iPad 模拟器测试并导出截图（耗时较长）"
+        type: boolean
+        required: false
+        default: false
   push:
     branches: [main]
     paths:
@@ -24,6 +30,8 @@ jobs:
   build:
     runs-on: macos-26 # Retry after transient Actions startup outage
     timeout-minutes: 60
+    env:
+      RUN_NATIVE_TESTS: ${{ github.event_name == 'workflow_dispatch' && inputs.run_native_tests }}
 
     steps:
       - name: Check out source
@@ -52,6 +60,7 @@ jobs:
           test -d ProfileBrowser.xcodeproj
 
       - name: Run simulator tests
+        if: env.RUN_NATIVE_TESTS == 'true'
         run: |
           set -euo pipefail
           SIMULATOR_ID="$(xcrun simctl list devices available -j | jq -r '[.devices | to_entries[] | select(.key | contains("iOS-26"))] | sort_by(.key | split("iOS-")[1] | split("-") | map(tonumber)) | reverse | [.[].value[] | select(.name | startswith("iPhone"))][0].udid')"
@@ -74,6 +83,7 @@ jobs:
           xcrun simctl shutdown "$SIMULATOR_ID"
 
       - name: Run iPad UI tests
+        if: env.RUN_NATIVE_TESTS == 'true'
         run: |
           set -euo pipefail
           IPAD_ID="$(xcrun simctl list devices available -j | jq -r '[.devices | to_entries[] | select(.key | contains("iOS-26"))] | sort_by(.key | split("iOS-")[1] | split("-") | map(tonumber)) | reverse | [.[].value[] | select(.name | startswith("iPad"))][0].udid')"
@@ -96,7 +106,7 @@ jobs:
           xcrun simctl shutdown "$IPAD_ID"
 
       - name: Collect native failure diagnostics
-        if: failure()
+        if: failure() && env.RUN_NATIVE_TESTS == 'true'
         run: |
           set -euo pipefail
           python3 scripts/summarize-native-crashes.py
@@ -110,7 +120,7 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent build/native-failure artifacts/NativeFailureDiagnostics.zip
 
       - name: Save native failure diagnostics to Releases
-        if: failure() && hashFiles('artifacts/NativeFailureDiagnostics.zip') != ''
+        if: failure() && env.RUN_NATIVE_TESTS == 'true' && hashFiles('artifacts/NativeFailureDiagnostics.zip') != ''
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ios-diagnostics-${{ github.run_number }}-${{ github.run_attempt }}
@@ -123,6 +133,7 @@ jobs:
           body: Native test failure evidence for https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
       - name: Export native test evidence
+        if: env.RUN_NATIVE_TESTS == 'true'
         run: |
           set -euo pipefail
           mkdir -p artifacts
@@ -202,13 +213,14 @@ jobs:
             artifacts/*.ipa
             artifacts/SHA256SUMS.txt
             artifacts/BUILD-INFO.txt
-            artifacts/SimulatorTests.xcresult.zip
-            artifacts/NativeScreenshots.zip
+            ${{ env.RUN_NATIVE_TESTS == 'true' && 'artifacts/SimulatorTests.xcresult.zip' || '' }}
+            ${{ env.RUN_NATIVE_TESTS == 'true' && 'artifacts/NativeScreenshots.zip' || '' }}
           body: |
             自动构建的未签名 iOS IPA，安装前需自行签名。
 
             - Commit: `${{ github.sha }}`
             - 构建记录: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            - 模拟器测试: ${{ env.RUN_NATIVE_TESTS == 'true' && '已启用，测试结果与截图随包提供' || '未运行，默认仅编译设备版 IPA' }}
 
             下载 IPA 和 `SHA256SUMS.txt` 后，在同一目录运行 `shasum -a 256 -c SHA256SUMS.txt` 校验文件。
 

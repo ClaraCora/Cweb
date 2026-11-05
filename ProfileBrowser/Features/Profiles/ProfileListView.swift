@@ -642,6 +642,7 @@ private struct ProfileRow: View {
                     .accessibilityLabel("正在处理")
             }
         }
+        .fixedSize(horizontal: false, vertical: true)
         .frame(minHeight: 44)
         .padding(.vertical, AppUI.Spacing.tight)
         .contentShape(Rectangle())
@@ -653,25 +654,29 @@ private struct ProfileRow: View {
     @ViewBuilder
     private var contextLine: some View {
         if todayCompleted || balanceStatus != nil {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: AppUI.Spacing.related) { contextLabels }
-                VStack(alignment: .leading, spacing: AppUI.Spacing.tight) { contextLabels }
-            }
-            .font(.caption)
-            .foregroundStyle(AppUI.secondaryText)
+            // A single wrapping Text has an intrinsic height. Adaptive Label
+            // styles inside a list Button can hide the title, while fitting
+            // alternative stacks can consume the row's proposed height.
+            Text("\(completionText)\(balanceContextText)")
+                .font(.caption)
+                .foregroundStyle(AppUI.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("profile.context.\(profile.id.uuidString)")
         }
     }
 
-    @ViewBuilder
-    private var contextLabels: some View {
+    private var completionText: Text {
         if todayCompleted {
-            Label("今日已完成", systemImage: "checkmark.circle")
+            Text("\(Image(systemName: "checkmark.circle")) 今日已完成")
                 .foregroundStyle(AppUI.success)
-                .fixedSize(horizontal: true, vertical: false)
+        } else {
+            Text("")
         }
-        if let balanceStatus {
-            Text(balanceStatus).fixedSize(horizontal: false, vertical: true)
-        }
+    }
+
+    private var balanceContextText: String {
+        guard let balanceStatus else { return "" }
+        return (todayCompleted ? " · " : "") + balanceStatus
     }
 
     private var nameAndLatency: some View {

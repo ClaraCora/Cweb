@@ -36,7 +36,7 @@ project.yml           XcodeGen 工程描述
 
 1. 将目录放入 GitHub 仓库并使用 `main` 分支。
 2. 打开 Actions，运行 `Build unsigned iOS IPA`，或向 `main` 推送相关文件。
-3. 构建成功后，到仓库 [Releases](https://github.com/ClaraCora/Cweb/releases) 下载当次构建的 `ProfileBrowser-unsigned-<commit>.ipa`、`SHA256SUMS.txt` 和 `BUILD-INFO.txt`。Actions 运行摘要也会显示下载链接，原生 UI 截图和测试结果一并保存到 Release。可在设置→关于查看并复制版本、构建号和提交。
+3. 构建成功后，到仓库 [Releases](https://github.com/ClaraCora/Cweb/releases) 下载当次构建的 `ProfileBrowser-unsigned-<commit>.ipa`、`SHA256SUMS.txt` 和 `BUILD-INFO.txt`。Actions 运行摘要也会显示下载链接。默认仅编译设备版 IPA；需要原生测试时，手动运行工作流并勾选 `run_native_tests`，其截图和测试结果才随包保存到 Release。可在设置→关于查看并复制版本、构建号和提交。
 4. 用 `SHA256SUMS.txt` 校验 IPA。
 
 每次成功构建会发布一个预发布版本，标签格式为 `ios-unsigned-<构建编号>-<重跑次数>`，绑定本次构建的提交。重跑会发布新的版本，构建产物保存在 GitHub Releases，不占用 Actions artifact 存储配额。
@@ -45,7 +45,7 @@ project.yml           XcodeGen 工程描述
 
 ## 本地限制
 
-Windows 没有 Apple SDK，无法完整编译 SwiftUI/WebKit 代码或运行 iOS Simulator。项目的真实编译与测试关卡是 GitHub Actions 的 macOS 26 runner。
+Windows 没有 Apple SDK，无法完整编译 SwiftUI/WebKit 代码或运行 iOS Simulator。GitHub Actions 的 macOS 26 runner 默认只做设备版编译与打包，iPhone/iPad 模拟器测试改为手动开启。
 
 完整架构、边界与验收标准见 [方案.md](方案.md)。
 
@@ -96,4 +96,4 @@ TLS 测速使用系统 SOCKS5 隧道，保留认证、目标主机证书校验�
 
 密码输入默认遮挡，主动显示后在退入后台时重新隐藏；凭据列表在后台重新锁定，应用切换预览会遮挡内容。
 
-本地脚本回归：`node --test scripts/check-in.test.cjs`。macOS：`xcodegen generate` 后运行 `xcodebuild test -project ProfileBrowser.xcodeproj -scheme ProfileBrowser -destination 'platform=iOS Simulator,name=<iOS 26 设备名称>'`。CI 要求 iOS 26 iPhone 和 iPad 模拟器可用，缺失即失败；原生截图覆盖分组、环境、代理、设置、深浅色、大字体、任务控制与填充位置。Windows 静态语法检查不能替代原生构建或实机验收。逐项实现和验证边界见 [REPAIR_TRACKER.md](REPAIR_TRACKER.md)。
+本地脚本回归：`node --test scripts/check-in.test.cjs`。macOS：`xcodegen generate` 后运行 `xcodebuild test -project ProfileBrowser.xcodeproj -scheme ProfileBrowser -destination 'platform=iOS Simulator,name=<iOS 26 设备名称>'`。CI 默认跳过模拟器测试；只有手动勾选 `run_native_tests` 才运行 iOS 26 iPhone 和 iPad 测试，此时模拟器缺失即失败。原生截图覆盖分组、环境、代理、设置、深浅色、大字体、完成状态与缓存余额、任务控制及填充位置。Windows 静态语法检查不能替代原生构建或实机验收。逐项实现和验证边界见 [REPAIR_TRACKER.md](REPAIR_TRACKER.md)。
