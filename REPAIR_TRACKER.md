@@ -62,3 +62,4 @@
 - 增加隔离的已完成测试数据开关与专门 UI 回归，检查完成文字、缓存提示及默认字体下的状态/整行高度；该原生用例按用户要求本次不执行。
 - 按用户最新要求，推送与默认手动构建均跳过 iPhone/iPad 模拟器测试及截图导出，只编译设备版 IPA 并发布到 Releases。保留 `workflow_dispatch.run_native_tests` 手动开关，默认关闭；关闭时发布不再要求原生测试 ZIP。
 - 本地检查：33 项 JavaScript 回归通过，3 个改动 Swift 文件通过语法解析，工作流 YAML 与默认测试关闭条件检查通过，`git diff --check` 通过。Windows 不能运行 SwiftUI；本次不宣称已做原生截图验收。
+- [构建 #77](https://github.com/ClaraCora/Cweb/actions/runs/41996668438) 成功，提交 `55f1a38`，总耗时约 1 分 38 秒；确认 iPhone/iPad 模拟器测试、原生诊断和截图导出均跳过，设备 Release 编译、打包及 Releases 发布通过。[构建 77.1 下载](https://github.com/ClaraCora/Cweb/releases/tag/ios-unsigned-77-1) 已下载校验 ZIP、SHA256 与包内构建/提交信息，均一致；SHA256：`dc56fc4a2b4af2fb59f757eefc0e1f18470f7d9279eadbc972f644064fc05682`。本轮未执行模拟器或实机视觉验证，显示效果待实机确认。
