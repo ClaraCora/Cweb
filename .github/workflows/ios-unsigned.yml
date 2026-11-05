@@ -101,6 +101,7 @@ jobs:
           for RESULT in build/SimulatorTests.xcresult build/iPadUITests.xcresult; do
             if [ -d "$RESULT" ]; then
               xcrun xcresulttool export diagnostics --path "$RESULT" --output-path "build/native-failure/$(basename "$RESULT")" || true
+              xcrun xcresulttool export attachments --path "$RESULT" --output-path "build/native-failure/attachments-$(basename "$RESULT")" || true
             fi
           done
           mkdir -p artifacts

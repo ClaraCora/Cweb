@@ -184,6 +184,7 @@ struct AutomationScriptTests {
 
         let model = AppModel(
             profileRepository: profileRepository,
+            credentialVault: CredentialVault(inMemory: true),
             userDefaults: defaults
         )
         let profileID = UUID()

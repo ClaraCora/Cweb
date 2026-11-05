@@ -23,7 +23,7 @@ struct AppModelTests {
             }
             return try Data(contentsOf: url)
         })
-        let model = AppModel(profileRepository: repository)
+        let model = AppModel(profileRepository: repository, credentialVault: CredentialVault(inMemory: true))
 
         #expect(model.isLoadingProfiles)
         #expect(!model.isProfileStoreAvailable)
@@ -50,7 +50,7 @@ struct AppModelTests {
         let repository = ProfileRepository(fileURL: fileURL, readData: { _ in
             throw CocoaError(.fileReadNoPermission)
         })
-        let model = AppModel(profileRepository: repository)
+        let model = AppModel(profileRepository: repository, credentialVault: CredentialVault(inMemory: true))
 
         #expect(throws: ProfileError.profileStoreUnavailable) {
             try model.addProfile(
@@ -78,7 +78,7 @@ struct AppModelTests {
         ]
         let repository = ProfileRepository(fileURL: fileURL)
         try repository.save(profiles)
-        let model = AppModel(profileRepository: repository)
+        let model = AppModel(profileRepository: repository, credentialVault: CredentialVault(inMemory: true))
 
         model.markOpened(model.profiles[1])
 
@@ -100,7 +100,7 @@ struct AppModelTests {
         ]
         let repository = ProfileRepository(fileURL: fileURL)
         try repository.save(profiles)
-        let model = AppModel(profileRepository: repository)
+        let model = AppModel(profileRepository: repository, credentialVault: CredentialVault(inMemory: true))
 
         try model.moveProfiles(
             profiles.map(\.id),
@@ -128,14 +128,14 @@ struct AppModelTests {
         ]
         let repository = ProfileRepository(fileURL: fileURL)
         try repository.save(profiles)
-        let model = AppModel(profileRepository: repository)
+        let model = AppModel(profileRepository: repository, credentialVault: CredentialVault(inMemory: true))
 
         #expect(model.profileGroups.map(\.name) == ["工作", "未分组", "测试"])
         #expect(model.profileGroups[0].profiles.map(\.id) == [profiles[0].id, profiles[2].id])
         #expect(model.profileGroups[1].profiles.map(\.id) == [profiles[1].id])
 
         let migratedGroupIDs = model.profileGroups.map(\.id)
-        let reloaded = AppModel(profileRepository: repository)
+        let reloaded = AppModel(profileRepository: repository, credentialVault: CredentialVault(inMemory: true))
         #expect(reloaded.profileGroups.map(\.id) == migratedGroupIDs)
         #expect(reloaded.profileGroups.map(\.sortOrder) == [0, 1, 2])
     }
@@ -156,7 +156,7 @@ struct AppModelTests {
         ]
         let repository = ProfileRepository(fileURL: fileURL)
         try repository.save(profiles)
-        let model = AppModel(profileRepository: repository)
+        let model = AppModel(profileRepository: repository, credentialVault: CredentialVault(inMemory: true))
         let originalProfileIDs = model.profiles.map(\.id)
 
         try model.moveGroups(
@@ -167,7 +167,7 @@ struct AppModelTests {
         #expect(model.profileGroups.map(\.name) == ["乙", "丙", "甲"])
         #expect(model.profiles.map(\.id) == originalProfileIDs)
 
-        let reloaded = AppModel(profileRepository: repository)
+        let reloaded = AppModel(profileRepository: repository, credentialVault: CredentialVault(inMemory: true))
         #expect(reloaded.profileGroups.map(\.name) == ["乙", "丙", "甲"])
         #expect(reloaded.profiles.map(\.id) == originalProfileIDs)
         #expect(reloaded.profileGroups.map(\.sortOrder) == [0, 1, 2])
@@ -188,7 +188,7 @@ struct AppModelTests {
         ]
         let repository = ProfileRepository(fileURL: fileURL)
         try repository.save([existing])
-        let model = AppModel(profileRepository: repository)
+        let model = AppModel(profileRepository: repository, credentialVault: CredentialVault(inMemory: true))
 
         try model.addImportedProfiles(imported)
 
@@ -196,7 +196,7 @@ struct AppModelTests {
         #expect(model.profiles.map(\.id) == [existing.id] + imported.map(\.id))
         #expect(model.profileGroups.last?.profiles.map(\.name) == ["甲一", "甲二"])
 
-        let reloaded = AppModel(profileRepository: repository)
+        let reloaded = AppModel(profileRepository: repository, credentialVault: CredentialVault(inMemory: true))
         #expect(reloaded.profileGroups.map(\.name) == ["已有组", "乙", "甲"])
         #expect(reloaded.profiles.map(\.id) == [existing.id] + imported.map(\.id))
     }
@@ -213,7 +213,7 @@ struct AppModelTests {
         let repository = ProfileRepository(fileURL: fileURL)
         try repository.save([derived, custom])
 
-        let model = AppModel(profileRepository: repository)
+        let model = AppModel(profileRepository: repository, credentialVault: CredentialVault(inMemory: true))
         let group = try #require(model.profileGroups.first)
         try model.updateGroup(id: group.id, name: "新站点", code: "NEW", emoji: "🧪")
 
@@ -224,7 +224,7 @@ struct AppModelTests {
         #expect(model.profiles[1].name == "主账号")
         #expect(model.profiles.allSatisfy { $0.groupName == "新站点" })
 
-        let reloaded = AppModel(profileRepository: repository)
+        let reloaded = AppModel(profileRepository: repository, credentialVault: CredentialVault(inMemory: true))
         #expect(reloaded.profileGroups.first?.id == group.id)
         #expect(reloaded.profileGroups.first?.displayEmoji == "🧪")
         #expect(reloaded.profiles[0].name == "新站点 1")
@@ -241,7 +241,7 @@ struct AppModelTests {
         let second = BrowserProfile(name: "二", groupName: "乙")
         let repository = ProfileRepository(fileURL: fileURL)
         try repository.save([first, second])
-        let model = AppModel(profileRepository: repository)
+        let model = AppModel(profileRepository: repository, credentialVault: CredentialVault(inMemory: true))
         let source = try #require(model.profileGroups.first)
 
         #expect(throws: ProfileError.groupNameAlreadyExists) {
@@ -346,6 +346,7 @@ struct AppModelTests {
 
         let firstModel = AppModel(
             profileRepository: profileRepository,
+            credentialVault: CredentialVault(inMemory: true),
             socksProxyRepository: proxyRepository
         )
         #expect(firstModel.socksProxy(for: profile)?.id == fast.id)
@@ -361,6 +362,7 @@ struct AppModelTests {
 
         let refreshedModel = AppModel(
             profileRepository: profileRepository,
+            credentialVault: CredentialVault(inMemory: true),
             socksProxyRepository: proxyRepository
         )
         #expect(refreshedModel.socksProxy(for: profile)?.id == refreshedSlow.id)
@@ -374,7 +376,7 @@ struct AppModelTests {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         let repository = ProfileRepository(fileURL: profileURL)
-        let model = AppModel(profileRepository: repository)
+        let model = AppModel(profileRepository: repository, credentialVault: CredentialVault(inMemory: true))
         try model.addProfile(
             name: "甲一",
             groupName: "甲",
@@ -413,7 +415,7 @@ struct AppModelTests {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         let repository = ProfileRepository(fileURL: profileURL)
-        let model = AppModel(profileRepository: repository)
+        let model = AppModel(profileRepository: repository, credentialVault: CredentialVault(inMemory: true))
         try model.addProfile(
             name: "甲一", groupName: "甲", homePage: BrowserProfile.defaultHomePage,
             userAgent: BrowserProfile.defaultUserAgent, color: .indigo, socksProxyNumber: 1
@@ -467,7 +469,7 @@ struct AppModelTests {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         let repository = ProfileRepository(fileURL: profileURL)
-        let model = AppModel(profileRepository: repository)
+        let model = AppModel(profileRepository: repository, credentialVault: CredentialVault(inMemory: true))
         try model.addProfile(
             name: "已有", groupName: "甲", homePage: BrowserProfile.defaultHomePage,
             userAgent: BrowserProfile.defaultUserAgent, color: .indigo, socksProxyNumber: 1
@@ -500,7 +502,7 @@ struct AppModelTests {
         let repository = ProfileRepository(fileURL: profileURL)
         try repository.save([first, second, third])
 
-        let model = AppModel(profileRepository: repository)
+        let model = AppModel(profileRepository: repository, credentialVault: CredentialVault(inMemory: true))
         #expect(model.profiles.map(\.socksProxyNumber) == [1, nil, 1])
         #expect(model.profiles[1].unresolvedProxyNumber == 1)
         #expect(try repository.load().map(\.socksProxyNumber) == [1, nil, 1])
@@ -526,6 +528,7 @@ struct AppModelTests {
         try proxyRepository.save([locked, batchDelete, clearDelete])
         let model = AppModel(
             profileRepository: profileRepository,
+            credentialVault: CredentialVault(inMemory: true),
             socksProxyRepository: proxyRepository
         )
 
@@ -578,6 +581,7 @@ struct AppModelTests {
         ])
         let model = AppModel(
             profileRepository: profileRepository,
+            credentialVault: CredentialVault(inMemory: true),
             socksProxyRepository: proxyRepository,
             socksProxyValidationService: SocksProxyValidationService(timeout: 1, probe: probe)
         )
@@ -626,6 +630,7 @@ struct AppModelTests {
         ])
         let model = AppModel(
             profileRepository: profileRepository,
+            credentialVault: CredentialVault(inMemory: true),
             socksProxyRepository: proxyRepository,
             socksProxyValidationService: SocksProxyValidationService(timeout: 1, probe: probe)
         )
@@ -677,6 +682,7 @@ struct AppModelTests {
         try proxyRepository.save([first, second])
         let model = AppModel(
             profileRepository: profileRepository,
+            credentialVault: CredentialVault(inMemory: true),
             socksProxyRepository: proxyRepository
         )
 

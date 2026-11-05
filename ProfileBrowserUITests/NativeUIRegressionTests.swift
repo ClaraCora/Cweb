@@ -22,6 +22,15 @@ final class NativeUIRegressionTests: XCTestCase {
         target.tap()
     }
 
+    private func taskButton(_ action: String, in app: XCUIApplication) -> XCUIElement {
+        let buttons = app.buttons.matching(identifier: "groupCheckIn." + action)
+        XCTAssertTrue(buttons.firstMatch.waitForExistence(timeout: 5))
+        // Full-screen covers can leave the presenting page in XCTest's tree.
+        let visible = buttons.allElementsBoundByIndex.first { $0.isHittable }
+        XCTAssertNotNil(visible, "No visible task button: " + action)
+        return visible ?? buttons.firstMatch
+    }
+
     private func capture(_ name: String) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name
@@ -41,7 +50,13 @@ final class NativeUIRegressionTests: XCTestCase {
             XCTAssertTrue(app.buttons["proxy.validateAll"].waitForExistence(timeout: 5))
             capture("proxies-" + variant.2)
             selectTab("设置", in: app)
-            XCTAssertTrue(app.buttons["加密备份"].waitForExistence(timeout: 5))
+            let backup = app.buttons["加密备份"]
+            for _ in 0..<5 {
+                if backup.exists && backup.isHittable { break }
+                app.swipeUp()
+            }
+            XCTAssertTrue(backup.waitForExistence(timeout: 5))
+            XCTAssertTrue(backup.isHittable)
             capture("settings-" + variant.2)
             app.terminate()
         }
@@ -50,8 +65,10 @@ final class NativeUIRegressionTests: XCTestCase {
     func testPasswordDefaultsToSecureAndHidesAgainAfterBackground() {
         let app = launch()
         app.buttons[groupID].tap()
-        app.buttons[profileID].swipeLeft()
-        app.buttons["编辑"].firstMatch.tap()
+        app.buttons[profileID].press(forDuration: 1)
+        let edit = app.buttons["编辑环境"].firstMatch
+        XCTAssertTrue(edit.waitForExistence(timeout: 5))
+        edit.tap()
         XCTAssertTrue(app.navigationBars["编辑环境"].waitForExistence(timeout: 5))
         for _ in 0..<4 where !app.buttons["显示密码"].isHittable { app.swipeUp() }
         XCTAssertTrue(app.secureTextFields.firstMatch.exists)
@@ -67,7 +84,7 @@ final class NativeUIRegressionTests: XCTestCase {
     func testTaskControlsPreserveFillAndWebSpaceAndResumeAfterRelaunch() {
         var app = launch()
         app.buttons[groupID].tap()
-        app.buttons["groupCheckIn.start"].tap()
+        taskButton("start", in: app).tap()
         let fill = app.buttons["browser.fill"]
         XCTAssertTrue(fill.waitForExistence(timeout: 10))
         let web = app.webViews.firstMatch
@@ -75,15 +92,15 @@ final class NativeUIRegressionTests: XCTestCase {
         XCTAssertGreaterThan(fill.frame.midX, app.frame.midX)
         XCTAssertLessThan(fill.frame.midY, app.frame.height * 0.25)
         XCTAssertGreaterThan(web.frame.height, app.frame.height * 0.55)
-        app.buttons["groupCheckIn.pause"].tap()
-        XCTAssertTrue(app.buttons["groupCheckIn.start"].isEnabled)
+        taskButton("pause", in: app).tap()
+        XCTAssertTrue(taskButton("start", in: app).isEnabled)
         capture("task-paused-fill-position")
         app.terminate()
         app = launch(resume: true)
         app.buttons[groupID].tap()
-        app.buttons["groupCheckIn.start"].tap()
+        taskButton("start", in: app).tap()
         XCTAssertTrue(app.buttons["browser.fill"].waitForExistence(timeout: 10))
-        app.buttons["groupCheckIn.stop"].tap()
+        taskButton("stop", in: app).tap()
         XCTAssertTrue(app.staticTexts["本组签到已停止"].waitForExistence(timeout: 5))
         capture("task-stopped")
     }

@@ -50,6 +50,7 @@ struct GroupCheckInTests {
         try repository.save([])
         let model = AppModel(
             profileRepository: repository,
+            credentialVault: CredentialVault(inMemory: true),
             socksProxyRepository: SocksProxyRepository(
                 fileURL: directory.appending(path: "proxies.json"),
                 credentialStore: SocksProxyCredentialStore(inMemory: true)
@@ -224,6 +225,7 @@ private struct GroupRunFixture {
         try repository.save(profiles)
         model = AppModel(
             profileRepository: repository,
+            credentialVault: CredentialVault(inMemory: true),
             socksProxyRepository: SocksProxyRepository(
                 fileURL: directory.appending(path: "proxies.json"),
                 credentialStore: SocksProxyCredentialStore(inMemory: true)

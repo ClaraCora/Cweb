@@ -45,6 +45,7 @@ struct GroupProxyLatencyTests {
         #expect(reloaded.map { $0.lastLatencyCheck?.status } == [.available, .unavailable, nil])
         let restarted = AppModel(
             profileRepository: fixture.profileRepository,
+            credentialVault: CredentialVault(inMemory: true),
             socksProxyRepository: fixture.proxyRepository,
             userDefaults: fixture.defaults
         )
@@ -189,6 +190,7 @@ private struct GroupProxyFixture {
         try proxyRepository.save(proxies)
         model = AppModel(
             profileRepository: profileRepository,
+            credentialVault: CredentialVault(inMemory: true),
             socksProxyRepository: proxyRepository,
             socksProxyValidationService: SocksProxyValidationService(timeout: 1, probe: probe),
             userDefaults: defaults
