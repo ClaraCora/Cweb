@@ -14,6 +14,10 @@ struct WebsiteDataStoreManager {
     }
 
     func removeOrphans(referenced: @MainActor () -> Set<UUID>) async -> [UUID: String] {
+        // Enumerating identifiers can dispatch back to WebKit's main run loop
+        // before it exists on a cold launch. The default store initializes
+        // WebKit synchronously; it is never used for environment browsing.
+        _ = WKWebsiteDataStore.default()
         let all = Set(await WKWebsiteDataStore.allDataStoreIdentifiers)
         var failures: [UUID: String] = [:]
         for id in all {
