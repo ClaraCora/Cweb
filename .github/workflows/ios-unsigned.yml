@@ -23,7 +23,7 @@ concurrency:
 jobs:
   build:
     runs-on: macos-26 # Retry after transient Actions startup outage
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
       - name: Check out source
@@ -71,6 +71,7 @@ jobs:
             echo "::error::No available iPhone Simulator. Native tests are required."
             exit 1
           fi
+          xcrun simctl shutdown "$SIMULATOR_ID"
 
       - name: Run iPad UI tests
         run: |
@@ -92,6 +93,7 @@ jobs:
             -resultBundlePath build/iPadUITests.xcresult \
             CURRENT_PROJECT_VERSION="${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}" \
             CWEB_GIT_COMMIT="${GITHUB_SHA:0:7}"
+          xcrun simctl shutdown "$IPAD_ID"
 
       - name: Collect native failure diagnostics
         if: failure()
