@@ -174,6 +174,7 @@ struct ProfileGroupGridView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .readableListMargins()
         }
     }
 
@@ -211,15 +212,15 @@ private struct ProfileGroupRow: View {
     let isBusy: Bool
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: AppUI.Spacing.row) {
             Text(group.displayEmoji)
                 .font(.title2)
                 .frame(minWidth: 32)
                 .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: AppUI.Spacing.tight) {
                 Text(group.name)
-                    .font(.headline)
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
                     .truncationMode(.tail)
@@ -227,12 +228,12 @@ private struct ProfileGroupRow: View {
                 if let code = group.displayCode {
                     Text(code)
                         .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppUI.secondaryText)
                         .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
                 } else {
                     Text(codePlaceholder)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppUI.secondaryText)
                 }
 
                 if dynamicTypeSize.isAccessibilitySize { environmentCount }
@@ -248,7 +249,7 @@ private struct ProfileGroupRow: View {
             }
         }
         .frame(minHeight: 44)
-        .padding(.vertical, 8)
+        .padding(.vertical, AppUI.Spacing.tight)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(group.displayEmoji)，\(group.name)\(group.displayCode.map { "，代号 \($0)" } ?? "，\(codePlaceholder)")，\(group.profiles.count) 个环境\(isBusy ? "，正在删除分组" : "")")
         .accessibilityHint("进入分组")
@@ -261,7 +262,7 @@ private struct ProfileGroupRow: View {
     private var environmentCount: some View {
         Text("\(group.profiles.count) 个环境")
             .font(.subheadline.monospacedDigit())
-            .foregroundStyle(.secondary)
+            .foregroundStyle(AppUI.secondaryText)
             .fixedSize(horizontal: true, vertical: false)
     }
 }

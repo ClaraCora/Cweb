@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct SocksProxyImportView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var source = 0
     @State private var urlText = ""
     @State private var text = ""
@@ -19,12 +20,13 @@ struct SocksProxyImportView: View {
         NavigationStack {
             Form {
                 Section {
-                    Picker("来源", selection: $source) {
-                        Text("链接").tag(0); Text("TXT 文件").tag(1); Text("粘贴文本").tag(2)
-                    }.pickerStyle(.segmented)
+                    sourcePicker
                     if source == 0 {
-                        TextField("https://example.com/proxies.txt", text: $urlText)
-                            .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                        FormField("订阅链接") {
+                            TextField("https://example.com/proxies.txt", text: $urlText)
+                                .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                                .accessibilityLabel("订阅链接")
+                        }
                     } else if source == 1 {
                         Button(filename ?? "选择 TXT 文件") { showsFilePicker = true }
                     } else {
@@ -33,7 +35,7 @@ struct SocksProxyImportView: View {
                             .accessibilityLabel("代理文本，每行一个 SOCKS 地址")
                     }
                     Text("每行一个 SOCKS 地址，最多 2 MB。导出文件可直接重新导入。相同地址会更新凭据。")
-                        .font(.footnote).foregroundStyle(.secondary)
+                        .font(.footnote).foregroundStyle(AppUI.secondaryText)
                 }.disabled(busy)
                 if busy {
                     ProgressView("正在导入…")
@@ -47,8 +49,12 @@ struct SocksProxyImportView: View {
                         }
                     }
                 }
-                if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
+                if let errorMessage {
+                    Section { AppStatusMessage(message: errorMessage, tone: .error) }
+                }
             }
+            .scrollDismissesKeyboard(.interactively)
+            .readableListMargins()
             .navigationTitle("导入代理").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() }.disabled(busy) }
@@ -73,6 +79,23 @@ struct SocksProxyImportView: View {
         }
         .interactiveDismissDisabled(busy)
         .onDisappear { task?.cancel(); text = "" }
+    }
+
+    @ViewBuilder
+    private var sourcePicker: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            sourceOptions.pickerStyle(.menu)
+        } else {
+            sourceOptions.pickerStyle(.segmented)
+        }
+    }
+
+    private var sourceOptions: some View {
+        Picker("来源", selection: $source) {
+            Text("链接").tag(0)
+            Text("TXT 文件").tag(1)
+            Text("粘贴文本").tag(2)
+        }
     }
 
     private func importValues() {

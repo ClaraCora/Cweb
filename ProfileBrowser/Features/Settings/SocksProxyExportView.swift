@@ -25,14 +25,17 @@ struct SocksProxyExportView: View {
                             Text("\(ranking.number) · \(ranking.proxy.displayCode ?? ranking.proxy.displayAddress)")
                             if let measurement = ranking.proxy.latestMeasurement {
                                 Text(measurement.status == .available ? "\(measurement.latencyMilliseconds.map(String.init) ?? "—") ms" : "最近检测不可用")
-                                    .font(.caption).foregroundStyle(.secondary)
+                                    .font(.caption)
+                                    .foregroundStyle(measurement.status == .available
+                                        ? measurement.latencyMilliseconds.map(AppUI.latencyColor) ?? .secondary
+                                        : AppUI.danger)
                                 Text(measurement.checkedAt, format: .dateTime.month().day().hour().minute())
-                                    .font(.caption2).foregroundStyle(.secondary)
+                                    .font(.caption2).foregroundStyle(AppUI.secondaryText)
                             }
                             if ranking.proxy.displayCode != nil {
                                 Text(ranking.proxy.displayAddress)
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(AppUI.secondaryText)
                             }
                         }
                         .padding(.vertical, 4)
@@ -44,6 +47,7 @@ struct SocksProxyExportView: View {
                     Text("导出为 TXT，每行一个 SOCKS 链接。文件包含所选代理的账号和密码，请妥善保存。")
                 }
             }
+            .readableListMargins()
             .environment(\.editMode, .constant(.active))
             .onChange(of: rankings.map(\.id)) { _, ids in selectedIDs.formIntersection(Set(ids)) }
             .navigationTitle("批量导出")

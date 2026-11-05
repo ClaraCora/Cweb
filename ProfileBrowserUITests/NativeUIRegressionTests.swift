@@ -6,6 +6,7 @@ final class NativeUIRegressionTests: XCTestCase {
     private let profileID = "profile.20000000-0000-0000-0000-000000000001"
 
     private func launch(dark: Bool = false, large: Bool = false, resume: Bool = false) -> XCUIApplication {
+        XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
         app.launchArguments = ["-ui-testing", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN", "-AppleInterfaceStyle", dark ? "Dark" : "Light"]
         if large { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
@@ -45,12 +46,20 @@ final class NativeUIRegressionTests: XCTestCase {
             app.buttons[groupID].tap()
             XCTAssertTrue(app.buttons[profileID].waitForExistence(timeout: 5))
             XCTAssertTrue(app.buttons[profileID].label.contains("480"))
+            XCTAssertTrue(taskButton("start", in: app).isHittable)
+            for action in ["start", "pause", "stop"] {
+                let control = app.buttons["groupCheckIn." + action]
+                XCTAssertTrue(control.exists)
+                XCTAssertGreaterThanOrEqual(control.frame.width, 44)
+                XCTAssertGreaterThanOrEqual(control.frame.height, 44)
+                XCTAssertLessThan(control.frame.maxY, app.frame.maxY)
+            }
             capture("environments-" + variant.2)
             selectTab("代理", in: app)
             XCTAssertTrue(app.buttons["proxy.validateAll"].waitForExistence(timeout: 5))
             capture("proxies-" + variant.2)
             selectTab("设置", in: app)
-            let backup = app.buttons["加密备份"]
+            let backup = app.buttons["settings.backup"]
             for _ in 0..<5 {
                 if backup.exists && backup.isHittable { break }
                 app.swipeUp()
@@ -60,6 +69,47 @@ final class NativeUIRegressionTests: XCTestCase {
             capture("settings-" + variant.2)
             app.terminate()
         }
+    }
+
+    func testBrowserToolsReturnSpaceToPage() {
+        let app = launch()
+        app.buttons[groupID].tap()
+        app.buttons[profileID].tap()
+        let web = app.webViews.firstMatch
+        let showTools = app.buttons["browser.showToolbar"]
+        XCTAssertTrue(web.waitForExistence(timeout: 10))
+        XCTAssertTrue(showTools.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(showTools.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(showTools.frame.height, 44)
+        let pageHeight = web.frame.height
+        showTools.tap()
+        let hideTools = app.buttons["browser.hideToolbar"]
+        XCTAssertTrue(hideTools.waitForExistence(timeout: 5))
+        XCTAssertLessThan(web.frame.height, pageHeight)
+        hideTools.tap()
+        XCTAssertTrue(showTools.waitForExistence(timeout: 5))
+        XCTAssertEqual(web.frame.height, pageHeight, accuracy: 2)
+        let fill = app.buttons["browser.fill"]
+        XCTAssertGreaterThan(fill.frame.midX, app.frame.midX)
+        capture("browser-tools-collapsed")
+    }
+
+    func testLandscapeSurfacesStayUsable() {
+        let app = launch()
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        XCTAssertTrue(app.buttons[groupID].isHittable)
+        capture("groups-landscape")
+        app.buttons[groupID].tap()
+        XCTAssertTrue(taskButton("start", in: app).isHittable)
+        XCTAssertTrue(app.buttons[profileID].isHittable)
+        capture("environments-landscape")
+        selectTab("代理", in: app)
+        XCTAssertTrue(app.buttons["proxy.validateAll"].waitForExistence(timeout: 5))
+        capture("proxies-landscape")
+        selectTab("设置", in: app)
+        XCTAssertTrue(app.navigationBars["设置"].waitForExistence(timeout: 5))
+        capture("settings-landscape")
     }
 
     func testPasswordDefaultsToSecureAndHidesAgainAfterBackground() {

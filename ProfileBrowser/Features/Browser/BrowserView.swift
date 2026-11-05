@@ -51,7 +51,7 @@ struct BrowserView: View {
                         .textSelection(.enabled)
                 }
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppUI.secondaryText)
                 .frame(maxWidth: .infinity, minHeight: 28)
                 .padding(.horizontal, 16)
                 .background(.bar)
@@ -79,6 +79,20 @@ struct BrowserView: View {
                 .webViewBackForwardNavigationGestures(.enabled)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityIdentifier("browser.webPage")
+                .overlay(alignment: .bottomTrailing) {
+                    if browserChromePresentation == nil, !browserChromeBinding.wrappedValue {
+                        Button("显示浏览器工具栏", systemImage: "chevron.up") {
+                            showsBrowserChrome = true
+                        }
+                        .labelStyle(.iconOnly)
+                        .frame(minWidth: AppUI.minimumTarget, minHeight: AppUI.minimumTarget)
+                        .buttonStyle(.glass)
+                        .buttonBorderShape(.circle)
+                        .padding(AppUI.Spacing.row)
+                        .accessibilityIdentifier("browser.showToolbar")
+                        .accessibilityHint("显示地址栏和浏览器控制")
+                    }
+                }
 
             if browserChromeBinding.wrappedValue {
                 BrowserBottomChrome(
@@ -86,22 +100,6 @@ struct BrowserView: View {
                     hideChrome: { browserChromeBinding.wrappedValue = false },
                     showDiagnostics: { showsDiagnostics = true }
                 )
-            } else if browserChromePresentation == nil {
-                HStack {
-                    Spacer()
-                    Button("显示浏览器工具栏", systemImage: "chevron.up") {
-                        showsBrowserChrome = true
-                    }
-                    .labelStyle(.iconOnly)
-                    .frame(minWidth: 44, minHeight: 44)
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
-                    .accessibilityIdentifier("browser.showToolbar")
-                    .accessibilityHint("显示地址栏和浏览器控制")
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 4)
-                .background(.bar)
             }
         }
         .navigationTitle(session.profile.name)
@@ -115,7 +113,7 @@ struct BrowserView: View {
                             .foregroundStyle(.primary)
                         Text(session.currentOrigin?.host ?? session.profile.homePageHost)
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppUI.secondaryText)
                     }
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -224,7 +222,7 @@ private struct AutomationStatusBanner: View {
                 Button("继续检测", action: resume)
                     .font(.footnote.weight(.semibold))
                     .buttonStyle(.bordered)
-                    .controlSize(.small)
+                    .frame(minHeight: AppUI.minimumTarget)
             }
         }
         .padding(.horizontal, 14)
@@ -252,9 +250,9 @@ private struct AutomationStatusBanner: View {
 
     private var iconColor: Color {
         switch state {
-        case .success: .green
-        case .captcha: .orange
-        case .error: .red
+        case .success: AppUI.success
+        case .captcha: AppUI.warning
+        case .error: AppUI.danger
         case .noButton, .skipped, .running, .inactive: .secondary
         }
     }

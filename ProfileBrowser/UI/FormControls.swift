@@ -10,13 +10,13 @@ struct FormField<Content: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: AppUI.Spacing.related) {
             Text(title)
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(.primary)
             content
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, AppUI.Spacing.tight)
     }
 }
 
@@ -24,15 +24,7 @@ struct InlineValidationMessage: View {
     let message: String
 
     var body: some View {
-        Label {
-            Text(message)
-                .foregroundStyle(.primary)
-        } icon: {
-            Image(systemName: "exclamationmark.circle")
-                .foregroundStyle(.red)
-        }
-        .font(.footnote)
-        .fixedSize(horizontal: false, vertical: true)
+        AppStatusMessage(message: message, tone: .error)
     }
 }
 
@@ -52,7 +44,7 @@ struct IntegerSettingField: View {
                     .focused($isFocused)
                     .accessibilityLabel(title)
                 Text(unit)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppUI.secondaryText)
                 Stepper(title, value: numericValue, in: range)
                     .labelsHidden()
                     .accessibilityLabel("调整\(title)")

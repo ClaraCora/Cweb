@@ -38,12 +38,25 @@ struct BackupView: View {
                     }
                 }
                 Section("导出") {
-                    SecureField("备份密码（至少 8 个字符）", text: $exportPassword)
-                    SecureField("再次输入密码", text: $confirmPassword)
+                    FormField("备份密码") {
+                        SecureField("至少 8 个字符", text: $exportPassword)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .accessibilityLabel("导出备份密码")
+                    }
+                    FormField("确认密码") {
+                        SecureField("再次输入备份密码", text: $confirmPassword)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .accessibilityLabel("确认备份密码")
+                        if !confirmPassword.isEmpty, exportPassword != confirmPassword {
+                            InlineValidationMessage(message: "两次输入的密码不一致。")
+                        }
+                    }
                     Button("导出完整加密备份", systemImage: "lock.doc") { exportBackup() }
                         .disabled(exportPassword.count < 8 || exportPassword != confirmPassword)
                     Text("包含环境、网站凭据、代理及其密码、预设链接、设置和脚本。不包含 Cookie 与缓存。")
-                        .font(.footnote).foregroundStyle(.secondary)
+                        .font(.footnote).foregroundStyle(AppUI.secondaryText)
                 }
                 .disabled(isBusy || !model.isBackupStoreAvailable)
 
@@ -55,15 +68,18 @@ struct BackupView: View {
                     if let file = pendingImport {
                         LabeledContent("已选文件", value: file.filename)
                         if restorePlan == nil {
-                            SecureField("备份密码", text: $importPassword)
-                                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            FormField("备份密码") {
+                                SecureField("输入此文件的备份密码", text: $importPassword)
+                                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                                    .accessibilityLabel("导入备份密码")
+                            }
                             Button("解锁并预览", systemImage: "lock.open") { unlockBackup(file) }
                                 .disabled(importPassword.count < 8)
                         }
                         Button("取消导入", role: .cancel) { clearImport() }
                     }
                     Text("支持旧版无扩展名备份，文件最大 32 MB。恢复会新增环境；同名分组会合并。")
-                        .font(.footnote).foregroundStyle(.secondary)
+                        .font(.footnote).foregroundStyle(AppUI.secondaryText)
                 }
                 .disabled(isBusy || !model.isBackupStoreAvailable)
 
@@ -74,7 +90,7 @@ struct BackupView: View {
                         LabeledContent("新增代理", value: "\(plan.newProxyCount)")
                         LabeledContent("预设链接", value: "\(plan.archive.presets?.count ?? 0)")
                         ForEach(Array(plan.warnings.enumerated()), id: \.offset) { _, warning in
-                            Text(warning).font(.footnote).foregroundStyle(.secondary)
+                            Text(warning).font(.footnote).foregroundStyle(AppUI.secondaryText)
                         }
                         Toggle("恢复应用设置与全局脚本", isOn: $restoreSettings)
                         Button("确认恢复", systemImage: "arrow.down.doc") { restore(plan) }
@@ -82,9 +98,11 @@ struct BackupView: View {
                     .disabled(isBusy)
                 }
                 if let errorMessage {
-                    Section { Label(errorMessage, systemImage: "exclamationmark.circle").foregroundStyle(.red) }
+                    Section { AppStatusMessage(message: errorMessage, tone: .error) }
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
+            .readableListMargins()
             .navigationTitle("加密备份")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

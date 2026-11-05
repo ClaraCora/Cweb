@@ -39,7 +39,7 @@ struct SocksProxyListView: View {
                                 Spacer(minLength: 8)
                                 Text("\(completedCount) / \(totalCount)")
                                     .monospacedDigit()
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(AppUI.secondaryText)
                             }
                             ProgressView(value: Double(completedCount), total: Double(max(1, totalCount)))
                         } else {
@@ -56,9 +56,7 @@ struct SocksProxyListView: View {
             } else if let statusMessage {
                 Section {
                     HStack(spacing: 8) {
-                        Label(statusMessage, systemImage: statusIsWarning ? "exclamationmark.circle" : "checkmark.circle")
-                            .font(.footnote)
-                            .foregroundStyle(.primary)
+                        AppStatusMessage(message: statusMessage, tone: statusIsWarning ? .warning : .success)
                             .accessibilityIdentifier("proxy.result")
                         Spacer(minLength: 0)
                         Button("关闭结果", systemImage: "xmark") {
@@ -79,7 +77,9 @@ struct SocksProxyListView: View {
         }
         .listStyle(.plain)
         .listSectionSpacing(0)
+        .scrollDismissesKeyboard(.interactively)
         .environment(\.defaultMinListRowHeight, 44)
+        .readableListMargins(minimum: 0)
         .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "编号、代号或地址")
         .navigationTitle("代理")
         .navigationBarTitleDisplayMode(.inline)
@@ -219,8 +219,10 @@ struct SocksProxyListView: View {
     }
 
     private var proxyCount: some View {
-        Text("共 \(model.socksProxies.count) 条 · \(model.socksProxies.filter(\.isAvailable).count) 可用")
-            .foregroundStyle(.secondary)
+        Text(searchText.isEmpty
+             ? "共 \(model.socksProxies.count) 条 · \(model.socksProxies.filter(\.isAvailable).count) 可用"
+             : "匹配 \(rankedProxies.count) / \(model.socksProxies.count) 条")
+            .foregroundStyle(AppUI.secondaryText)
             .monospacedDigit()
     }
 
@@ -323,7 +325,7 @@ struct SocksProxyListView: View {
                                     .lineLimit(1)
                                 Text(preset.url.absoluteString)
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(AppUI.secondaryText)
                                     .lineLimit(1)
                             }
                             Spacer(minLength: 8)
@@ -339,6 +341,7 @@ struct SocksProxyListView: View {
                 }
                 Button("管理预设链接", systemImage: "slider.horizontal.3") { showsPresets = true }
             }
+            .font(.subheadline)
         }
     }
 
@@ -461,7 +464,7 @@ private struct SocksProxyRow: View {
             HStack(alignment: .top, spacing: 12) {
                 Text("\(ranking.number)")
                     .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppUI.secondaryText)
                     .frame(minWidth: 24, alignment: .leading)
                     .padding(.top, 2)
 
@@ -480,7 +483,8 @@ private struct SocksProxyRow: View {
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ListRowButtonStyle())
+        .accessibilityIdentifier("proxy.row.\(ranking.number)")
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("第 \(ranking.number) 号，\(accessibilityName)，\(statusText)\(lockStatusText)")
         .accessibilityValue(accessibilityResult)
@@ -488,7 +492,7 @@ private struct SocksProxyRow: View {
     }
 
     private var identity: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: AppUI.Spacing.tight) {
             HStack(spacing: 6) {
                 Text(ranking.proxy.displayCode ?? endpoint)
                     .font(.subheadline.weight(.medium))
@@ -496,13 +500,13 @@ private struct SocksProxyRow: View {
                 if ranking.proxy.isLocked {
                     Image(systemName: "lock.fill")
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppUI.secondaryText)
                         .accessibilityHidden(true)
                 }
             }
             Text(ranking.proxy.displayCode == nil ? ranking.proxy.scheme.rawValue.uppercased() : endpoint)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppUI.secondaryText)
         }
         .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -514,45 +518,53 @@ private struct SocksProxyRow: View {
     }
 
     private var validationResult: some View {
-        VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: 3) {
+        VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: AppUI.Spacing.tight) {
             if isTesting {
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.small)
                     Text("测速中")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppUI.secondaryText)
                 }
             } else {
                 switch ranking.proxy.latestStatus {
                 case .available:
                     if let latency = ranking.proxy.latestLatency {
                         Text("\(latency) ms")
-                            .font(.subheadline.monospacedDigit())
-                            .foregroundStyle(.primary)
+                            .font(.subheadline.weight(.medium).monospacedDigit())
+                            .foregroundStyle(AppUI.latencyColor(latency))
                     }
-                    Text("可用")
-                        .font(.caption2)
-                        .foregroundStyle(.green)
+                    resultMetadata("可用", icon: "checkmark.circle")
                 case .unavailable:
                     Text("不可用")
                         .font(.subheadline)
-                        .foregroundStyle(.red)
-                    Text("连接失败")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppUI.danger)
+                    resultMetadata("连接失败", icon: "exclamationmark.circle")
                 case .untested:
                     Text("未测速")
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Text("等待验证")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppUI.secondaryText)
                 }
             }
-            if let date = ranking.proxy.latestMeasurement?.checkedAt {
-                Text(date, style: .time).font(.caption2).foregroundStyle(.secondary)
-            }
         }
+    }
+
+    private func resultMetadata(_ title: String, icon: String) -> some View {
+        HStack(spacing: AppUI.Spacing.tight) {
+            Image(systemName: icon).accessibilityHidden(true)
+            Text(title + checkedAtSuffix)
+        }
+        .font(.caption)
+        .foregroundStyle(AppUI.secondaryText)
+        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+    }
+
+    private var checkedAtSuffix: String {
+        guard let date = ranking.proxy.latestMeasurement?.checkedAt else { return "" }
+        let display = Calendar.current.isDateInToday(date)
+            ? date.formatted(date: .omitted, time: .shortened)
+            : date.formatted(date: .abbreviated, time: .shortened)
+        return " · " + display
     }
 
     private var accessibilityResult: String {
@@ -703,7 +715,7 @@ private struct SocksProxyBatchSelectionRow: View {
                 if ranking.proxy.displayCode != nil {
                     Text(ranking.proxy.displayAddress)
                         .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppUI.secondaryText)
                         .lineLimit(1)
                 }
             }
@@ -713,7 +725,7 @@ private struct SocksProxyBatchSelectionRow: View {
             if ranking.proxy.isLocked {
                 Label("已锁定", systemImage: "lock.fill")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppUI.secondaryText)
             } else {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(.title3)
@@ -780,7 +792,7 @@ private struct SocksProxyPresetListView: View {
                                         .lineLimit(1)
                                     Text(preset.url.absoluteString)
                                         .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(AppUI.secondaryText)
                                         .lineLimit(1)
                                 }
                             }

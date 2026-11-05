@@ -79,7 +79,9 @@ struct GroupCheckInView: View {
             }
             if showsTaskDetails { taskDetails }
         }
-        .padding(.horizontal, 12)
+        .frame(maxWidth: AppUI.readableWidth - 2 * AppUI.Spacing.page)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, AppUI.Spacing.page)
         .padding(.vertical, 4)
         .background(.bar)
         .overlay(alignment: .bottom) { Divider() }
@@ -110,14 +112,14 @@ struct GroupCheckInView: View {
                 .lineLimit(1)
                 Image(systemName: showsTaskDetails ? "chevron.up" : "chevron.down")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppUI.secondaryText)
                     .accessibilityHidden(true)
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ListRowButtonStyle())
         .accessibilityLabel("本组第 \(controller.queue.index + 1) 个，共 \(controller.queue.profileIDs.count) 个，\(statusTitle)，\(currentHost)")
         .accessibilityValue(controller.session?.automationMessage ?? "")
         .accessibilityHint(showsTaskDetails ? "收起任务详情" : "展开任务详情和浏览器工具入口")
@@ -132,7 +134,7 @@ struct GroupCheckInView: View {
                 Spacer()
                 Text("已完成 \(controller.queue.completedCount) · 已跳过 \(controller.queue.skippedCount)")
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppUI.secondaryText)
             }
             ProgressView(value: Double(controller.queue.index), total: Double(max(1, controller.queue.profileIDs.count)))
             if let message = controller.session?.automationMessage {
@@ -143,7 +145,7 @@ struct GroupCheckInView: View {
             }
             Text(controller.isPaused ? "继续后恢复自动检测。" : "每 5 秒重新检测；验证码请手动完成，确认签到后自动进入下一个。")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppUI.secondaryText)
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 0) { detailActions }
             } else {
@@ -199,9 +201,9 @@ struct GroupCheckInView: View {
         guard !controller.isPaused else { return .secondary }
         if controller.isRefreshingBalance { return .secondary }
         switch controller.session?.automationState ?? .inactive {
-        case .captcha, .noButton: return .orange
-        case .error: return .red
-        case .success, .skipped: return .green
+        case .captcha, .noButton: return AppUI.warning
+        case .error: return AppUI.danger
+        case .success, .skipped: return AppUI.success
         case .inactive, .running: return .secondary
         }
     }
@@ -212,7 +214,7 @@ struct GroupCheckInView: View {
                 Label(controller.queue.isFinished ? "本组已处理完毕" : "本组签到已停止", systemImage: controller.queue.isFinished ? "checkmark.circle" : "stop.circle")
                 Text("已完成 \(controller.queue.completedCount) · 已跳过 \(controller.queue.skippedCount) · 未处理 \(controller.queue.profileIDs.count - controller.queue.index)")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppUI.secondaryText)
             }
             Section("环境结果") {
                 ForEach(controller.profiles) { profile in

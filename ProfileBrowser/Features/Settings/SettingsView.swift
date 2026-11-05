@@ -17,10 +17,12 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section("外观") {
-                Picker("配色模式", selection: appearanceMode) {
+                Picker(selection: appearanceMode) {
                     ForEach(AppAppearanceMode.allCases) { mode in
                         Text(mode.title).tag(mode)
                     }
+                } label: {
+                    AppSettingsRow("配色模式", icon: "circle.lefthalf.filled")
                 }
             }
 
@@ -28,33 +30,48 @@ struct SettingsView: View {
                 NavigationLink {
                     GlobalScriptSettingsView()
                 } label: {
-                    settingsRow("签到脚本", detail: model.globalScriptSettings.enabled ? "进入环境时自动运行" : "手动启动分组签到", icon: "checkmark.circle")
+                    AppSettingsRow("签到脚本", detail: model.globalScriptSettings.enabled ? "进入环境时自动运行" : "手动启动分组签到", icon: "checkmark.circle")
                 }
                 NavigationLink {
                     SocksProxySettingsView(settings: model.socksProxyValidationSettings)
                 } label: {
-                    settingsRow("测速与保留规则", detail: proxyPolicySummary, icon: "slider.horizontal.3")
+                    AppSettingsRow("测速与保留规则", detail: proxyPolicySummary, icon: "slider.horizontal.3")
                 }
             }
 
             Section("数据") {
-                NavigationLink("签到记录", destination: GroupRunHistoryView())
+                NavigationLink {
+                    GroupRunHistoryView()
+                } label: {
+                    AppSettingsRow("签到记录", icon: "clock.arrow.circlepath")
+                }
                 Button {
                     showsBackup = true
                 } label: {
-                    Label("加密备份", systemImage: "lock.doc")
+                    HStack {
+                        AppSettingsRow("加密备份", icon: "lock.doc")
+                        Spacer(minLength: AppUI.Spacing.related)
+                        Image(systemName: "arrow.up.arrow.down")
+                            .font(.caption)
+                            .foregroundStyle(AppUI.secondaryText)
+                            .accessibilityHidden(true)
+                    }
                 }
+                .accessibilityLabel("加密备份")
+                .accessibilityHint("导出加密备份或导入已有备份")
+                .accessibilityIdentifier("settings.backup")
             }
 
             Section {
                 NavigationLink {
                     AboutSettingsView()
                 } label: {
-                    Label("关于环境浏览器", systemImage: "info.circle")
+                    AppSettingsRow("关于环境浏览器", icon: "info.circle")
                 }
             }
         }
         .formStyle(.grouped)
+        .readableListMargins()
         .navigationTitle("设置")
         .navigationBarTitleDisplayMode(.large)
         .sheet(isPresented: $showsBackup) {
@@ -70,17 +87,6 @@ struct SettingsView: View {
         return "\(settings.sortMode.title) · \(count)"
     }
 
-    private func settingsRow(_ title: String, detail: String, icon: String) -> some View {
-        Label {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                Text(detail).font(.footnote).foregroundStyle(.secondary)
-            }
-        } icon: {
-            Image(systemName: icon)
-        }
-        .padding(.vertical, 4)
-    }
 }
 
 private struct AboutSettingsView: View {
@@ -101,7 +107,7 @@ private struct AboutSettingsView: View {
                 }
                 if model.websiteCleanupFailureCount > 0 {
                     Text("\(model.websiteCleanupFailureCount) 个旧网站存储清理失败，下次冷启动将重试。")
-                        .font(.footnote).foregroundStyle(.secondary)
+                        .font(.footnote).foregroundStyle(AppUI.secondaryText)
                 }
             }
         }

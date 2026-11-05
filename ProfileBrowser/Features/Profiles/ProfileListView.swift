@@ -215,11 +215,13 @@ struct ProfileListView: View {
             if isCheckInScriptEmpty {
                 Text("签到脚本为空，请先在设置中恢复模板或填写脚本。")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppUI.secondaryText)
                     .padding(.vertical, 4)
             }
         }
-        .padding(.horizontal, 12)
+        .frame(maxWidth: AppUI.readableWidth - 2 * AppUI.Spacing.page)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, AppUI.Spacing.page)
         .padding(.vertical, 4)
         .background(.bar)
         .overlay(alignment: .bottom) { Divider() }
@@ -248,7 +250,7 @@ struct ProfileListView: View {
                         .monospacedDigit()
                     Text("返回签到页面")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppUI.secondaryText)
                 }
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
@@ -262,7 +264,7 @@ struct ProfileListView: View {
                     .font(.subheadline.weight(.medium))
                 Text("\(groupProfiles.count) 个环境 · 按序执行")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppUI.secondaryText)
             }
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .accessibilityHint("今天已完成签到的环境会自动跳过")
@@ -291,7 +293,17 @@ struct ProfileListView: View {
     @ViewBuilder
     private var content: some View {
         if visibleProfiles.isEmpty && !groupProfiles.isEmpty {
-            ContentUnavailableView("没有符合条件的环境", systemImage: "line.3.horizontal.decrease", description: Text("调整搜索内容或今日签到筛选后重试。"))
+            ContentUnavailableView {
+                Label("没有符合条件的环境", systemImage: "line.3.horizontal.decrease")
+            } description: {
+                Text("调整搜索内容或今日签到筛选后重试。")
+            } actions: {
+                Button("显示全部环境") {
+                    searchText = ""
+                    todayFilter = 0
+                }
+                .buttonStyle(.bordered)
+            }
         } else if visibleProfiles.isEmpty {
             ContentUnavailableView {
                 Label("这个分组还没有环境", systemImage: "person.crop.square")
@@ -325,33 +337,49 @@ struct ProfileListView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .scrollDismissesKeyboard(.interactively)
+            .readableListMargins()
         }
     }
 
     private var groupProxyHeader: some View {
-        HStack(spacing: 8) {
-            Text("\(visibleProfiles.count) 个环境")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 8)
-            Button {
-                isTestingProxies = true
-            } label: {
-                HStack(spacing: 6) {
-                    if isTestingProxies { ProgressView().controlSize(.small) }
-                    Text(isTestingProxies ? "测速 \(proxyTestCompleted)/\(proxyTestTotal)" : "批量测速")
-                        .font(.subheadline)
-                        .monospacedDigit()
-                }
-                .frame(minHeight: 44)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: AppUI.Spacing.related) {
+                profileCount.fixedSize()
+                Spacer(minLength: AppUI.Spacing.related)
+                proxyTestButton.fixedSize()
             }
-            .buttonStyle(.borderless)
-            .disabled(isTestingProxies || editMode == .active || checkInController?.canStop == true
-                || model.groupProxyTargets(for: visibleProfiles).isEmpty)
-            .accessibilityHint("仅测本组使用的代理，共用代理只测一次，直连环境不参与")
-            .accessibilityIdentifier("profiles.testProxies")
+            VStack(alignment: .leading, spacing: 0) {
+                profileCount
+                proxyTestButton
+            }
         }
         .textCase(nil)
+    }
+
+    private var profileCount: some View {
+        Text(todayFilter == 0 ? "\(visibleProfiles.count) 个环境" : "\(todayFilter == 1 ? "待签到" : "已完成") · \(visibleProfiles.count) 个环境")
+            .font(.footnote)
+            .foregroundStyle(AppUI.secondaryText)
+    }
+
+    private var proxyTestButton: some View {
+        Button {
+            isTestingProxies = true
+        } label: {
+            HStack(spacing: AppUI.Spacing.tight) {
+                if isTestingProxies { ProgressView().controlSize(.small) }
+                Text(isTestingProxies ? "测速 \(proxyTestCompleted)/\(proxyTestTotal)" : "批量测速")
+                    .font(.footnote)
+                    .monospacedDigit()
+            }
+            .frame(minHeight: AppUI.minimumTarget)
+        }
+        .buttonStyle(.borderless)
+        .disabled(isTestingProxies || editMode == .active || checkInController?.canStop == true
+            || model.groupProxyTargets(for: visibleProfiles).isEmpty)
+        .accessibilityHint("仅测本组使用的代理，共用代理只测一次，直连环境不参与")
+        .accessibilityIdentifier("profiles.testProxies")
     }
 
     private func measureGroupProxies() async {
@@ -444,7 +472,7 @@ struct ProfileListView: View {
                 isBusy: model.busyProfileID == profile.id
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ListRowButtonStyle())
         .accessibilityIdentifier("profile.\(profile.id.uuidString)")
         .disabled(model.busyProfileID == profile.id)
         .swipeActions(edge: .leading, allowsFullSwipe: false) {
@@ -467,6 +495,9 @@ struct ProfileListView: View {
             }
         }
         .contextMenu {
+            if let checkedAt = model.socksProxy(for: profile)?.latestMeasurement?.checkedAt {
+                Text("代理测于 \(checkedAt.formatted(date: .abbreviated, time: .shortened))")
+            }
             if !model.reservedProfileIDs.contains(profile.id) {
             Button("编辑环境", systemImage: "pencil") {
                 editorMode = .edit(profile)
@@ -578,33 +609,27 @@ private struct ProfileRow: View {
     let isBusy: Bool
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(alignment: .center, spacing: AppUI.Spacing.row) {
             if !dynamicTypeSize.isAccessibilitySize {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(profile.color.color.opacity(0.16))
                     Image(systemName: "person.crop.square.fill")
                         .foregroundStyle(profile.color.color)
                         .font(.title3)
                 }
-                .frame(width: 30, height: 34)
+                .frame(width: 32, height: 32)
                 .accessibilityHidden(true)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: AppUI.Spacing.tight) {
                 nameAndLatency
-                HStack(spacing: 6) {
-                    Text("\(todayCompleted ? "今日已完成 · " : "")\(profile.homePageHost) · \(proxySummary)")
-                        .font(.caption).lineLimit(1).truncationMode(.middle)
-                    if let proxyMeasuredAt {
-                        Text("测于 " + proxyMeasuredAt.formatted(date: .omitted, time: .shortened))
-                            .font(.caption2).fixedSize(horizontal: true, vertical: false)
-                    }
-                }
-                .foregroundStyle(.secondary)
-                if let balanceStatus {
-                    Text(balanceStatus).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                }
+                Text("\(profile.homePageHost) · \(proxySummary)")
+                    .font(.caption)
+                    .foregroundStyle(AppUI.secondaryText)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                    .truncationMode(.middle)
+                contextLine
                 if dynamicTypeSize.isAccessibilitySize { balanceLabel }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -618,9 +643,34 @@ private struct ProfileRow: View {
             }
         }
         .frame(minHeight: 44)
-        .padding(.vertical, 8)
+        .padding(.vertical, AppUI.Spacing.tight)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(profile.name)，\(proxyLatency.accessibilityDescription)\(balance.map { "，余额 \($0)" } ?? "")，\(balanceStatus ?? "")，主页 \(profile.homePageHost)，\(proxySummary)")
+        .accessibilityLabel("\(profile.name)，\(proxyLatency.accessibilityDescription)\(balance.map { "，余额 \($0)" } ?? "")，\(todayCompleted ? "今日已完成，" : "")\(balanceStatus ?? "")，主页 \(profile.homePageHost)，\(proxySummary)\(proxyMeasuredAt.map { "，代理测于 " + $0.formatted(date: .abbreviated, time: .shortened) } ?? "")")
+        .accessibilityHint("轻点进入环境，长按查看更多操作和测速时间")
+    }
+
+    @ViewBuilder
+    private var contextLine: some View {
+        if todayCompleted || balanceStatus != nil {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: AppUI.Spacing.related) { contextLabels }
+                VStack(alignment: .leading, spacing: AppUI.Spacing.tight) { contextLabels }
+            }
+            .font(.caption)
+            .foregroundStyle(AppUI.secondaryText)
+        }
+    }
+
+    @ViewBuilder
+    private var contextLabels: some View {
+        if todayCompleted {
+            Label("今日已完成", systemImage: "checkmark.circle")
+                .foregroundStyle(AppUI.success)
+                .fixedSize(horizontal: true, vertical: false)
+        }
+        if let balanceStatus {
+            Text(balanceStatus).fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private var nameAndLatency: some View {
@@ -653,8 +703,8 @@ private struct ProfileRow: View {
     private var balanceLabel: some View {
         if let balance {
             Text(balance)
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+                .foregroundStyle(.primary)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
                 .accessibilityLabel("余额 \(balance)")
@@ -690,12 +740,10 @@ private enum ProfileProxyLatency {
     var foregroundColor: Color {
         switch self {
         case .available(let milliseconds), .testing(.some(let milliseconds)):
-            switch milliseconds {
-            case ...500: Color("ProxyLatencyFast")
-            case ...2_000: Color("ProxyLatencyModerate")
-            default: Color("ProxyLatencySlow")
-            }
-        case .direct, .missing, .untested, .unavailable, .testing(.none):
+            AppUI.latencyColor(milliseconds)
+        case .missing, .unavailable:
+            AppUI.danger
+        case .direct, .untested, .testing(.none):
             .secondary
         }
     }
