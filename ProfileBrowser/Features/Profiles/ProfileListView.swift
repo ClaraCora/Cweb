@@ -173,7 +173,7 @@ struct ProfileListView: View {
     private var confirmationContent: some View {
         @Bindable var model = model
 
-        deletionContent
+        return deletionContent
             .alert("进入环境？", isPresented: entryAlertBinding, presenting: pendingEntry) { profile in
                 Button("进入") {
                     pendingEntry = nil
