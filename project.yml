@@ -33,6 +33,8 @@ targets:
       path: ProfileBrowser/Resources/Info.plist
       properties:
         CFBundleDisplayName: 环境浏览器
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CwebGitCommit: "$(CWEB_GIT_COMMIT)"
         UILaunchScreen: {}
         UIApplicationSceneManifest:

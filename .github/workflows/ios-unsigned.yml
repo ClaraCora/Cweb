@@ -163,8 +163,15 @@ jobs:
           SHORT_SHA="${GITHUB_SHA:0:7}"
           CWEB_APP_BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Info.plist")"
           CWEB_APP_COMMIT="$(/usr/libexec/PlistBuddy -c 'Print :CwebGitCommit' "$APP_PATH/Info.plist")"
-          test "$CWEB_APP_BUILD" = "${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
-          test "$CWEB_APP_COMMIT" = "$SHORT_SHA"
+          echo "App identity: build=$CWEB_APP_BUILD commit=$CWEB_APP_COMMIT"
+          if [ "$CWEB_APP_BUILD" != "${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}" ]; then
+            echo "::error::App build number is $CWEB_APP_BUILD; expected ${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}."
+            exit 1
+          fi
+          if [ "$CWEB_APP_COMMIT" != "$SHORT_SHA" ]; then
+            echo "::error::App commit is $CWEB_APP_COMMIT; expected $SHORT_SHA."
+            exit 1
+          fi
           IPA_NAME="ProfileBrowser-unsigned-${SHORT_SHA}.ipa"
           mkdir -p artifacts/Payload
           ditto "$APP_PATH" artifacts/Payload/ProfileBrowser.app
