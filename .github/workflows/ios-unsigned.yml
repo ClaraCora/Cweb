@@ -54,12 +54,14 @@ jobs:
       - name: Run simulator tests
         run: |
           set -euo pipefail
-          SIMULATOR_ID="$(xcrun simctl list devices available -j | jq -r '[.devices | to_entries[] | select(.key | contains("iOS-26")) | .value[] | select(.name | startswith("iPhone"))][0].udid')"
+          SIMULATOR_ID="$(xcrun simctl list devices available -j | jq -r '[.devices | to_entries[] | select(.key | contains("iOS-26"))] | sort_by(.key | split("iOS-")[1] | split("-") | map(tonumber)) | reverse | [.[].value[] | select(.name | startswith("iPhone"))][0].udid')"
           if [ -n "$SIMULATOR_ID" ] && [ "$SIMULATOR_ID" != "null" ]; then
+            xcrun simctl bootstatus "$SIMULATOR_ID" -b
             xcodebuild test \
               -project ProfileBrowser.xcodeproj \
               -scheme ProfileBrowser \
               -configuration Debug \
+              -parallel-testing-enabled NO \
               -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
               -derivedDataPath build/test \
               -resultBundlePath build/SimulatorTests.xcresult \
@@ -73,21 +75,49 @@ jobs:
       - name: Run iPad UI tests
         run: |
           set -euo pipefail
-          IPAD_ID="$(xcrun simctl list devices available -j | jq -r '[.devices | to_entries[] | select(.key | contains("iOS-26")) | .value[] | select(.name | startswith("iPad"))][0].udid')"
+          IPAD_ID="$(xcrun simctl list devices available -j | jq -r '[.devices | to_entries[] | select(.key | contains("iOS-26"))] | sort_by(.key | split("iOS-")[1] | split("-") | map(tonumber)) | reverse | [.[].value[] | select(.name | startswith("iPad"))][0].udid')"
           if [ -z "$IPAD_ID" ] || [ "$IPAD_ID" = "null" ]; then
             echo "::error::No available iOS 26 iPad Simulator. Native UI coverage is required."
             exit 1
           fi
+          xcrun simctl bootstatus "$IPAD_ID" -b
           xcodebuild test \
             -project ProfileBrowser.xcodeproj \
             -scheme ProfileBrowser \
             -configuration Debug \
+            -parallel-testing-enabled NO \
             -destination "platform=iOS Simulator,id=$IPAD_ID" \
             -only-testing:ProfileBrowserUITests \
             -derivedDataPath build/test \
             -resultBundlePath build/iPadUITests.xcresult \
             CURRENT_PROJECT_VERSION="${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}" \
             CWEB_GIT_COMMIT="${GITHUB_SHA:0:7}"
+
+      - name: Collect native failure diagnostics
+        if: failure()
+        run: |
+          set -euo pipefail
+          python3 scripts/summarize-native-crashes.py
+          for RESULT in build/SimulatorTests.xcresult build/iPadUITests.xcresult; do
+            if [ -d "$RESULT" ]; then
+              xcrun xcresulttool export diagnostics --path "$RESULT" --output-path "build/native-failure/$(basename "$RESULT")" || true
+            fi
+          done
+          mkdir -p artifacts
+          ditto -c -k --sequesterRsrc --keepParent build/native-failure artifacts/NativeFailureDiagnostics.zip
+
+      - name: Save native failure diagnostics to Releases
+        if: failure() && hashFiles('artifacts/NativeFailureDiagnostics.zip') != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ios-diagnostics-${{ github.run_number }}-${{ github.run_attempt }}
+          target_commitish: ${{ github.sha }}
+          name: Native test diagnostics ${{ github.run_number }}.${{ github.run_attempt }}
+          prerelease: true
+          make_latest: "false"
+          fail_on_unmatched_files: true
+          files: artifacts/NativeFailureDiagnostics.zip
+          body: Native test failure evidence for https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
       - name: Export native test evidence
         run: |
