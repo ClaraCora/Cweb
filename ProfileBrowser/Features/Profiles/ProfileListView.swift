@@ -34,15 +34,19 @@ struct ProfileListView: View {
     }
 
     var body: some View {
-        @Bindable var model = model
+        confirmationContent
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if !groupProfiles.isEmpty { checkInControls }
+            }
+            .environment(\.editMode, $editMode)
+    }
 
+    private var navigationContent: some View {
         content
             .navigationTitle(currentGroup?.name ?? "分组")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, prompt: "搜索环境名称、主页或代理")
-            .onAppear {
-                if let run = model.activeGroupRun, run.groupID == groupID { checkInController = run }
-            }
+            .onAppear(perform: restoreActiveGroupRun)
             .task(id: isTestingProxies) {
                 if isTestingProxies { await measureGroupProxies() }
             }
@@ -78,6 +82,10 @@ struct ProfileListView: View {
                     }
                 }
             }
+    }
+
+    private var presentedContent: some View {
+        navigationContent
             .sheet(item: $editorMode) { mode in
                 ProfileEditorView(
                     profile: mode.profile,
@@ -125,6 +133,10 @@ struct ProfileListView: View {
             .fullScreenCover(isPresented: $showsGroupCheckIn) {
                 if let checkInController { GroupCheckInView(controller: checkInController) }
             }
+    }
+
+    private var deletionContent: some View {
+        presentedContent
             .alert("删除整个分组？", isPresented: groupDeletionAlertBinding, presenting: pendingGroupDeletion) { group in
                 Button("删除", role: .destructive) {
                     pendingGroupDeletion = nil
@@ -156,6 +168,12 @@ struct ProfileListView: View {
             } message: { profile in
                 Text("将清除“\(profile.name)”的 Cookie、缓存和网站存储，但保留该环境和已保存凭据。")
             }
+    }
+
+    private var confirmationContent: some View {
+        @Bindable var model = model
+
+        deletionContent
             .alert("进入环境？", isPresented: entryAlertBinding, presenting: pendingEntry) { profile in
                 Button("进入") {
                     pendingEntry = nil
@@ -173,10 +191,11 @@ struct ProfileListView: View {
                     dismissButton: .default(Text("好"))
                 )
             }
-            .safeAreaInset(edge: .top, spacing: 0) {
-                if !groupProfiles.isEmpty { checkInControls }
-            }
-            .environment(\.editMode, $editMode)
+    }
+
+    private func restoreActiveGroupRun() {
+        guard let run = model.activeGroupRun, run.groupID == groupID else { return }
+        checkInController = run
     }
 
     private var checkInControls: some View {
