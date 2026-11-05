@@ -119,7 +119,7 @@ struct GroupCheckInView: View {
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .buttonStyle(ListRowButtonStyle())
+        .buttonStyle(.plain)
         .accessibilityLabel("本组第 \(controller.queue.index + 1) 个，共 \(controller.queue.profileIDs.count) 个，\(statusTitle)，\(currentHost)")
         .accessibilityValue(controller.session?.automationMessage ?? "")
         .accessibilityHint(showsTaskDetails ? "收起任务详情" : "展开任务详情和浏览器工具入口")

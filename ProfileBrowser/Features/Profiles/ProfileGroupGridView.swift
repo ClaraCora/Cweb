@@ -122,7 +122,7 @@ struct ProfileGroupGridView: View {
             }
         } else if model.profileGroups.isEmpty {
             ContentUnavailableView {
-                Label("还没有分组", systemImage: "rectangle.3.group.badge.plus")
+                Label("还没有分组", systemImage: "folder.badge.plus")
             } actions: {
                 Button("新建环境", systemImage: "plus") {
                     editorMode = .create

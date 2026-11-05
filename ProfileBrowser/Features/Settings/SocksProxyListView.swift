@@ -483,7 +483,7 @@ private struct SocksProxyRow: View {
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .buttonStyle(ListRowButtonStyle())
+        .buttonStyle(.plain)
         .accessibilityIdentifier("proxy.row.\(ranking.number)")
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("第 \(ranking.number) 号，\(accessibilityName)，\(statusText)\(lockStatusText)")

@@ -45,15 +45,6 @@ extension View {
     }
 }
 
-/// Keeps custom list rows responsive to touch without changing their bounds.
-struct ListRowButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label.opacity(!isEnabled ? 0.45 : configuration.isPressed ? 0.6 : 1)
-    }
-}
-
 struct AppSettingsRow: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let title: String

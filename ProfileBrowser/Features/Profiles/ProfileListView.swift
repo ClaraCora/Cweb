@@ -472,7 +472,7 @@ struct ProfileListView: View {
                 isBusy: model.busyProfileID == profile.id
             )
         }
-        .buttonStyle(ListRowButtonStyle())
+        .buttonStyle(.plain)
         .accessibilityIdentifier("profile.\(profile.id.uuidString)")
         .disabled(model.busyProfileID == profile.id)
         .swipeActions(edge: .leading, allowsFullSwipe: false) {
@@ -644,6 +644,7 @@ private struct ProfileRow: View {
         }
         .frame(minHeight: 44)
         .padding(.vertical, AppUI.Spacing.tight)
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(profile.name)，\(proxyLatency.accessibilityDescription)\(balance.map { "，余额 \($0)" } ?? "")，\(todayCompleted ? "今日已完成，" : "")\(balanceStatus ?? "")，主页 \(profile.homePageHost)，\(proxySummary)\(proxyMeasuredAt.map { "，代理测于 " + $0.formatted(date: .abbreviated, time: .shortened) } ?? "")")
         .accessibilityHint("轻点进入环境，长按查看更多操作和测速时间")

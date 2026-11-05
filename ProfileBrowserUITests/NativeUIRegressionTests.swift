@@ -76,7 +76,11 @@ final class NativeUIRegressionTests: XCTestCase {
     func testBrowserToolsReturnSpaceToPage() {
         let app = launch()
         app.buttons[groupID].tap()
-        app.buttons[profileID].tap()
+        let profile = app.buttons[profileID]
+        XCTAssertTrue(profile.waitForExistence(timeout: 5))
+        // On a wide iPad row the center is blank space. It must still open
+        // the environment, rather than requiring a tap directly on text.
+        profile.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let web = app.webViews.firstMatch
         let showTools = app.buttons["browser.showToolbar"]
         XCTAssertTrue(web.waitForExistence(timeout: 10))
