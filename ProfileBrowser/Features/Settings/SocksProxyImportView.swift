@@ -1,101 +1,91 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
-/// Imports a plain-text feed from one HTTP(S) URL. Keeping the URL entry in a
-/// sheet makes network access explicit and avoids any background requests.
 @MainActor
 struct SocksProxyImportView: View {
+    @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-
-    private let initialURL: URL?
-    private let onImport: (URL) async throws -> Void
-
-    @State private var urlText: String
-    @State private var isImporting = false
-    @State private var presentedError: PresentedError?
-
-    init(
-        url: URL? = nil,
-        onImport: @escaping (URL) async throws -> Void
-    ) {
-        initialURL = url
-        self.onImport = onImport
-        _urlText = State(initialValue: url?.absoluteString ?? "")
-    }
+    @State private var source = 0
+    @State private var urlText = ""
+    @State private var text = ""
+    @State private var filename: String?
+    @State private var showsFilePicker = false
+    @State private var task: Task<Void, Never>?
+    @State private var busy = false
+    @State private var report: ProxyImportReport?
+    @State private var errorMessage: String?
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("订阅链接") {
-                    TextField("https://example.com/proxies.txt", text: $urlText)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                }
-
                 Section {
-                    Text("链接应返回每行一个 SOCKS 地址的纯文本。只有你主动点击导入时才会访问网络。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .navigationTitle(initialURL == nil ? "导入代理" : "拉取预设")
-            .navigationBarTitleDisplayMode(.inline)
-            .editorDismissProtection(
-                isModified: urlText != (initialURL?.absoluteString ?? ""),
-                isBusy: isImporting
-            )
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("导入") {
-                        importFeed()
+                    Picker("来源", selection: $source) {
+                        Text("链接").tag(0); Text("TXT 文件").tag(1); Text("粘贴文本").tag(2)
+                    }.pickerStyle(.segmented)
+                    if source == 0 {
+                        TextField("https://example.com/proxies.txt", text: $urlText)
+                            .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    } else if source == 1 {
+                        Button(filename ?? "选择 TXT 文件") { showsFilePicker = true }
+                    } else {
+                        TextEditor(text: $text).frame(minHeight: 150)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .accessibilityLabel("代理文本，每行一个 SOCKS 地址")
                     }
-                    .disabled(!isValidURL || isImporting)
+                    Text("每行一个 SOCKS 地址，最多 2 MB。导出文件可直接重新导入。相同地址会更新凭据。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }.disabled(busy)
+                if busy {
+                    ProgressView("正在导入…")
+                    Button("取消导入") { task?.cancel() }
+                }
+                if let report {
+                    Section("导入结果") {
+                        Text(report.summary)
+                        ForEach(report.invalid) { issue in
+                            Text("第 \(issue.line) 行：\(issue.reason)").font(.footnote)
+                        }
+                    }
+                }
+                if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
+            }
+            .navigationTitle("导入代理").navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() }.disabled(busy) }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("导入") { importValues() }.disabled(busy || (source == 0 ? urlText.isEmpty : text.isEmpty))
                 }
             }
-            .overlay {
-                if isImporting {
-                    ProgressView("正在拉取")
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 14)
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                }
-            }
-            .alert(item: $presentedError) { error in
-                Alert(
-                    title: Text("导入失败"),
-                    message: Text(error.message),
-                    dismissButton: .default(Text("好"))
-                )
+            .fileImporter(isPresented: $showsFilePicker, allowedContentTypes: [.plainText, .data, .item]) { result in
+                do {
+                    let url = try result.get()
+                    busy = true
+                    task = Task {
+                        defer { busy = false }
+                        do {
+                            text = try await BackupService.background { try SocksProxyImportService.readTextFile(url) }
+                            filename = url.lastPathComponent
+                        } catch is CancellationError { }
+                        catch { errorMessage = error.localizedDescription }
+                    }
+                } catch { errorMessage = error.localizedDescription }
             }
         }
+        .interactiveDismissDisabled(busy)
+        .onDisappear { task?.cancel(); text = "" }
     }
 
-    private var validatedURL: URL? {
-        let trimmed = urlText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: trimmed),
-              let scheme = url.scheme?.lowercased(),
-              (scheme == "http" || scheme == "https"),
-              url.host != nil else { return nil }
-        return url
-    }
-
-    private var isValidURL: Bool { validatedURL != nil }
-
-    private func importFeed() {
-        guard let url = validatedURL else {
-            presentedError = PresentedError(message: "请输入有效的 HTTP 或 HTTPS 订阅链接。")
-            return
-        }
-
-        isImporting = true
-        Task { @MainActor in
-            defer { isImporting = false }
+    private func importValues() {
+        busy = true; report = nil; errorMessage = nil
+        task = Task {
+            defer { busy = false }
             do {
-                try await onImport(url)
-                dismiss()
-            } catch {
-                presentedError = PresentedError(message: error.localizedDescription)
-            }
+                if source == 0 {
+                    guard let url = URL(string: urlText.trimmingCharacters(in: .whitespacesAndNewlines)) else { throw SocksProxyImportError.invalidFeedURL }
+                    report = try await model.importSocksProxies(from: url)
+                } else { report = try model.importSocksProxies(text: text) }
+            } catch is CancellationError { }
+            catch { errorMessage = error.localizedDescription }
         }
     }
 }

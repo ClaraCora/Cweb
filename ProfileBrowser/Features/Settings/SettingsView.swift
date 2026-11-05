@@ -38,6 +38,7 @@ struct SettingsView: View {
             }
 
             Section("数据") {
+                NavigationLink("签到记录", destination: GroupRunHistoryView())
                 Button {
                     showsBackup = true
                 } label: {
@@ -83,13 +84,25 @@ struct SettingsView: View {
 }
 
 private struct AboutSettingsView: View {
+    @Environment(AppModel.self) private var model
+    private let identity = BuildIdentity()
+    @State private var copied = false
     var body: some View {
         Form {
             Section {
                 Label("环境浏览器 · Cweb", systemImage: "safari")
                     .font(.headline)
-                LabeledContent("版本", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0")
-                LabeledContent("构建", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1")
+                LabeledContent("版本", value: identity.version)
+                LabeledContent("构建", value: identity.build)
+                LabeledContent("提交", value: identity.commit)
+                Button(copied ? "已复制构建信息" : "复制构建信息", systemImage: "doc.on.doc") {
+                    UIPasteboard.general.string = identity.description
+                    copied = true
+                }
+                if model.websiteCleanupFailureCount > 0 {
+                    Text("\(model.websiteCleanupFailureCount) 个旧网站存储清理失败，下次冷启动将重试。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
             }
         }
         .navigationTitle("关于")

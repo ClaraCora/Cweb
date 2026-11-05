@@ -24,8 +24,8 @@ struct SocksProxySettingsView: View {
 
     var body: some View {
         Form {
-            Section("结果处理") {
-                Toggle("只保留可用代理", isOn: $draft.retainOnlyAvailable)
+            Section("手动清理规则") {
+                Toggle("清理时只保留可用代理", isOn: $draft.retainOnlyAvailable)
 
                 IntegerSettingField(title: "最多保留", text: $retainedCountText, range: 0...500, unit: "个")
                 Text("0 表示不限数量；锁定代理始终保留。")
@@ -88,7 +88,7 @@ struct SocksProxySettingsView: View {
                 }
                 .disabled(editedSettings == SocksProxyValidationSettings.defaults)
             } footer: {
-                Text("默认值：只保留可用代理、最多 30 个、按延迟排序，使用 https://example.com/ 并验证 TLS。数量限制只在下一次批量测试时生效。")
+                Text("默认值：清理时只保留可用代理、最多 30 个、按延迟排序，使用 https://example.com/ 并验证 TLS。测速不会删除记录。请从“更多”打开“预览规则清理”，确认影响后再删除。")
             }
         }
         .navigationTitle("测速与保留规则")

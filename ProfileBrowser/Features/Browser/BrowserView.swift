@@ -174,6 +174,7 @@ struct BrowserView: View {
         .sheet(isPresented: $showsDiagnostics) {
             DiagnosticsView(session: session)
         }
+        .onDisappear { if browserChromePresentation == nil { session.close() } }
         .alert("暂时无法填充", isPresented: $showsFillUnavailable) {
             Button("好", role: .cancel) {}
         } message: {

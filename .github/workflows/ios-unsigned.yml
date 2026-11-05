@@ -7,6 +7,8 @@ on:
     paths:
       - "ProfileBrowser/**"
       - "ProfileBrowserTests/**"
+      - "ProfileBrowserUITests/**"
+      - "scripts/**"
       - "scripts/check-in.test.cjs"
       - "project.yml"
       - ".github/workflows/ios-unsigned.yml"
@@ -52,17 +54,52 @@ jobs:
       - name: Run simulator tests
         run: |
           set -euo pipefail
-          SIMULATOR_ID="$(xcrun simctl list devices available -j | jq -r '[.devices[][] | select(.name | startswith("iPhone"))][0].udid')"
+          SIMULATOR_ID="$(xcrun simctl list devices available -j | jq -r '[.devices | to_entries[] | select(.key | contains("iOS-26")) | .value[] | select(.name | startswith("iPhone"))][0].udid')"
           if [ -n "$SIMULATOR_ID" ] && [ "$SIMULATOR_ID" != "null" ]; then
             xcodebuild test \
               -project ProfileBrowser.xcodeproj \
               -scheme ProfileBrowser \
               -configuration Debug \
               -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
-              -derivedDataPath build/test
+              -derivedDataPath build/test \
+              -resultBundlePath build/SimulatorTests.xcresult \
+              CURRENT_PROJECT_VERSION="${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}" \
+              CWEB_GIT_COMMIT="${GITHUB_SHA:0:7}"
           else
-            echo "No available iPhone Simulator found; continuing with device build."
+            echo "::error::No available iPhone Simulator. Native tests are required."
+            exit 1
           fi
+
+      - name: Run iPad UI tests
+        run: |
+          set -euo pipefail
+          IPAD_ID="$(xcrun simctl list devices available -j | jq -r '[.devices | to_entries[] | select(.key | contains("iOS-26")) | .value[] | select(.name | startswith("iPad"))][0].udid')"
+          if [ -z "$IPAD_ID" ] || [ "$IPAD_ID" = "null" ]; then
+            echo "::error::No available iOS 26 iPad Simulator. Native UI coverage is required."
+            exit 1
+          fi
+          xcodebuild test \
+            -project ProfileBrowser.xcodeproj \
+            -scheme ProfileBrowser \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$IPAD_ID" \
+            -only-testing:ProfileBrowserUITests \
+            -derivedDataPath build/test \
+            -resultBundlePath build/iPadUITests.xcresult \
+            CURRENT_PROJECT_VERSION="${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}" \
+            CWEB_GIT_COMMIT="${GITHUB_SHA:0:7}"
+
+      - name: Export native test evidence
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          xcrun xcresulttool export attachments --path build/SimulatorTests.xcresult --output-path artifacts/screenshots/iPhone
+          xcrun xcresulttool export attachments --path build/iPadUITests.xcresult --output-path artifacts/screenshots/iPad
+          mkdir -p build/native-test-results
+          ditto build/SimulatorTests.xcresult build/native-test-results/SimulatorTests.xcresult
+          ditto build/iPadUITests.xcresult build/native-test-results/iPadUITests.xcresult
+          ditto -c -k --sequesterRsrc --keepParent build/native-test-results artifacts/SimulatorTests.xcresult.zip
+          ditto -c -k --sequesterRsrc --keepParent artifacts/screenshots artifacts/NativeScreenshots.zip
 
       - name: Build device app without signing
         run: |
@@ -73,6 +110,8 @@ jobs:
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath build/device \
+            CURRENT_PROJECT_VERSION="${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}" \
+            CWEB_GIT_COMMIT="${GITHUB_SHA:0:7}" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
@@ -89,6 +128,10 @@ jobs:
           test ! -e "$APP_PATH/embedded.mobileprovision"
 
           SHORT_SHA="${GITHUB_SHA:0:7}"
+          CWEB_APP_BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Info.plist")"
+          CWEB_APP_COMMIT="$(/usr/libexec/PlistBuddy -c 'Print :CwebGitCommit' "$APP_PATH/Info.plist")"
+          test "$CWEB_APP_BUILD" = "${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          test "$CWEB_APP_COMMIT" = "$SHORT_SHA"
           IPA_NAME="ProfileBrowser-unsigned-${SHORT_SHA}.ipa"
           mkdir -p artifacts/Payload
           ditto "$APP_PATH" artifacts/Payload/ProfileBrowser.app
@@ -119,6 +162,8 @@ jobs:
             artifacts/*.ipa
             artifacts/SHA256SUMS.txt
             artifacts/BUILD-INFO.txt
+            artifacts/SimulatorTests.xcresult.zip
+            artifacts/NativeScreenshots.zip
           body: |
             自动构建的未签名 iOS IPA，安装前需自行签名。
 

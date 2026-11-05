@@ -2,6 +2,8 @@ import SwiftUI
 
 @MainActor
 struct AppRootView: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.scenePhase) private var scenePhase
     var body: some View {
         TabView {
             ProfileGroupGridView()
@@ -22,6 +24,11 @@ struct AppRootView: View {
             .tabItem {
                 Label("设置", systemImage: "gearshape")
             }
+        }
+        .onChange(of: scenePhase) { _, phase in if phase == .background { model.activeGroupRun?.pause() } }
+        .task {
+            if !model.isProfileStoreAvailable { await model.retryLoadingProfiles() }
+            await model.cleanOrphanedWebsiteDataOnColdLaunch()
         }
     }
 }

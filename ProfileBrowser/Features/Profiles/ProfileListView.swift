@@ -9,6 +9,8 @@ struct ProfileListView: View {
     let groupID: UUID
     let onDeleteGroup: ((UUID) -> Void)?
 
+    @State private var searchText = ""
+    @State private var todayFilter = 0
     @State private var editorMode: ProfileEditorMode?
     @State private var groupEditor: ProfileGroup?
     @State private var pendingGroupDeletion: ProfileGroup?
@@ -37,6 +39,10 @@ struct ProfileListView: View {
         content
             .navigationTitle(currentGroup?.name ?? "分组")
             .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $searchText, prompt: "搜索环境名称、主页或代理")
+            .onAppear {
+                if let run = model.activeGroupRun, run.groupID == groupID { checkInController = run }
+            }
             .task(id: isTestingProxies) {
                 if isTestingProxies { await measureGroupProxies() }
             }
@@ -48,22 +54,25 @@ struct ProfileListView: View {
                     Button(editMode == .active ? "完成" : "排序") {
                         editMode = editMode == .active ? .inactive : .active
                     }
+                    .disabled(!searchText.isEmpty || todayFilter != 0 || isGroupLocked)
                     .accessibilityIdentifier("profiles.reorder")
                     Button("新建", systemImage: "plus") {
                         editorMode = .create
                     }
                     Menu {
+                        Picker("今日签到", selection: $todayFilter) {
+                            Text("全部环境").tag(0); Text("今天待签到").tag(1); Text("今天已完成").tag(2)
+                        }
                         if let currentGroup {
-                            Button("编辑分组", systemImage: "pencil") {
-                                groupEditor = currentGroup
-                            }
+                            Button("编辑分组", systemImage: "pencil") { groupEditor = currentGroup }
+                                .disabled(isGroupLocked)
                         }
                         Button("删除整个分组", systemImage: "trash", role: .destructive) {
                             if let currentGroup {
                                 pendingGroupDeletion = currentGroup
                             }
                         }
-                        .disabled(currentGroup == nil)
+                        .disabled(currentGroup == nil || isGroupLocked)
                     } label: {
                         Label("更多", systemImage: "ellipsis.circle")
                     }
@@ -128,7 +137,7 @@ struct ProfileListView: View {
             .alert("删除环境？", isPresented: deletionAlertBinding, presenting: pendingDeletion) { profile in
                 Button("删除", role: .destructive) {
                     pendingDeletion = nil
-                    if visibleProfiles.count == 1,
+                    if groupProfiles.count == 1,
                        model.profiles.contains(where: { $0.id == profile.id }) {
                         requestGroupDeletion(groupID)
                     } else {
@@ -150,6 +159,7 @@ struct ProfileListView: View {
             .alert("进入环境？", isPresented: entryAlertBinding, presenting: pendingEntry) { profile in
                 Button("进入") {
                     pendingEntry = nil
+                    model.confirmEntry(for: profile)
                     activeProfile = profile
                 }
                 Button("取消", role: .cancel) {}
@@ -164,7 +174,7 @@ struct ProfileListView: View {
                 )
             }
             .safeAreaInset(edge: .top, spacing: 0) {
-                if !visibleProfiles.isEmpty { checkInControls }
+                if !groupProfiles.isEmpty { checkInControls }
             }
             .environment(\.editMode, $editMode)
     }
@@ -229,9 +239,9 @@ struct ProfileListView: View {
             .accessibilityLabel("返回签到页面，第 \(checkInController.queue.index + 1) 个，共 \(checkInController.queue.profileIDs.count) 个，已完成 \(checkInController.queue.completedCount) 个")
         } else {
             VStack(alignment: .leading, spacing: 2) {
-                Text("分组签到")
+                Text(model.pendingGroupRun?.groupID == groupID ? "恢复上次任务" : "分组签到")
                     .font(.subheadline.weight(.medium))
-                Text("\(visibleProfiles.count) 个环境 · 按序执行")
+                Text("\(groupProfiles.count) 个环境 · 按序执行")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -241,7 +251,7 @@ struct ProfileListView: View {
     }
 
     private var canStartCheckIn: Bool {
-        editMode != .active && !visibleProfiles.isEmpty && !isTestingProxies
+        editMode != .active && !groupProfiles.isEmpty && !isTestingProxies
             && !isCheckInScriptEmpty
             && (checkInController?.canStop != true || checkInController?.canStart == true)
     }
@@ -252,17 +262,18 @@ struct ProfileListView: View {
 
     private func startCheckIn() {
         if checkInController?.canStop != true {
-            checkInController = GroupCheckInController(
-                groupName: currentGroup?.name ?? "分组", profiles: visibleProfiles, model: model
-            )
+            guard let group = currentGroup else { return }
+            checkInController = model.groupRun(for: group)
         }
         checkInController?.start()
-        showsGroupCheckIn = true
+        showsGroupCheckIn = checkInController?.hasStarted == true
     }
 
     @ViewBuilder
     private var content: some View {
-        if visibleProfiles.isEmpty {
+        if visibleProfiles.isEmpty && !groupProfiles.isEmpty {
+            ContentUnavailableView("没有符合条件的环境", systemImage: "line.3.horizontal.decrease", description: Text("调整搜索内容或今日签到筛选后重试。"))
+        } else if visibleProfiles.isEmpty {
             ContentUnavailableView {
                 Label("这个分组还没有环境", systemImage: "person.crop.square")
             } actions: {
@@ -352,7 +363,18 @@ struct ProfileListView: View {
         }
     }
 
+    private var isGroupLocked: Bool { !model.reservedProfileIDs.isDisjoint(with: Set(groupProfiles.map(\.id))) }
+
     private var visibleProfiles: [BrowserProfile] {
+        groupProfiles.filter { profile in
+            let pending = model.shouldRunAutomation(for: profile.id)
+            let matches = searchText.isEmpty || (profile.name + " " + profile.homePageHost + " " + proxySummary(for: profile))
+                .localizedStandardContains(searchText)
+            return matches && (todayFilter == 0 || (todayFilter == 1 ? pending : !pending))
+        }
+    }
+
+    private var groupProfiles: [BrowserProfile] {
         model.sortedProfiles.filter { profile in
             if let profileGroupID = profile.groupID {
                 return profileGroupID == groupID
@@ -367,6 +389,9 @@ struct ProfileListView: View {
 
     private func entryConfirmationMessage(for profile: BrowserProfile) -> String {
         let environment = "将使用“\(profile.name)”的独立网站数据和 User-Agent 打开主页。"
+        if profile.unresolvedProxyNumber != nil {
+            return "此环境需要重新选择代理。请先编辑环境，明确选择代理或不使用代理；处理前不会联网。"
+        }
         guard let proxyNumber = profile.socksProxyNumber else {
             return "\(environment)\n\n代理：未选择，将使用设备当前网络。"
         }
@@ -381,11 +406,20 @@ struct ProfileListView: View {
     private func profileButton(for profile: BrowserProfile) -> some View {
         Button {
             guard editMode != .active else { return }
-            pendingEntry = profile
+            guard !model.reservedProfileIDs.contains(profile.id) else {
+                model.present(ProfileError.taskInProgress); return
+            }
+            if profile.unresolvedProxyNumber != nil || (profile.socksProxyNumber != nil && model.socksProxy(for: profile) == nil) {
+                editorMode = .edit(profile)
+            } else if model.needsEntryConfirmation(for: profile) { pendingEntry = profile }
+            else { activeProfile = profile }
         } label: {
             ProfileRow(
                 profile: profile,
                 balance: model.balance(for: profile),
+                balanceStatus: model.balanceStatus(for: profile),
+                todayCompleted: !model.shouldRunAutomation(for: profile.id),
+                proxyMeasuredAt: model.socksProxy(for: profile)?.latestMeasurement?.checkedAt,
                 proxySummary: proxySummary(for: profile),
                 proxyLatency: proxyLatency(for: profile),
                 isBusy: model.busyProfileID == profile.id
@@ -395,12 +429,15 @@ struct ProfileListView: View {
         .accessibilityIdentifier("profile.\(profile.id.uuidString)")
         .disabled(model.busyProfileID == profile.id)
         .swipeActions(edge: .leading, allowsFullSwipe: false) {
+            if !model.reservedProfileIDs.contains(profile.id) {
             Button("清理", systemImage: "eraser") {
                 pendingClear = profile
             }
             .tint(.orange)
+            }
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            if !model.reservedProfileIDs.contains(profile.id) {
             Button("删除", systemImage: "trash", role: .destructive) {
                 pendingDeletion = profile
             }
@@ -408,8 +445,10 @@ struct ProfileListView: View {
                 editorMode = .edit(profile)
             }
             .tint(.indigo)
+            }
         }
         .contextMenu {
+            if !model.reservedProfileIDs.contains(profile.id) {
             Button("编辑环境", systemImage: "pencil") {
                 editorMode = .edit(profile)
             }
@@ -423,7 +462,7 @@ struct ProfileListView: View {
             Button("IP 检测", systemImage: "network") {
                 ipDetectionProfile = profile
             }
-            Button("余额清零", systemImage: "dollarsign.arrow.trianglehead.counterclockwise") {
+            Button("清除缓存金额", systemImage: "dollarsign.arrow.trianglehead.counterclockwise") {
                 do {
                     try model.resetCachedBalance(for: profile)
                 } catch {
@@ -437,6 +476,7 @@ struct ProfileListView: View {
             Button("删除环境", systemImage: "trash", role: .destructive) {
                 pendingDeletion = profile
             }
+            }
         }
     }
 
@@ -448,16 +488,18 @@ struct ProfileListView: View {
     }
 
     private func proxySummary(for profile: BrowserProfile) -> String {
+        if profile.unresolvedProxyNumber != nil { return "代理待选择 · 已阻止联网" }
         guard let number = profile.socksProxyNumber else { return "设备网络" }
         guard let proxy = model.socksProxy(for: profile) else { return "第 \(number) 号代理（缺失）" }
         return "第 \(number) 号代理\(proxy.displayCode.map { " · \($0)" } ?? "")"
     }
 
     private func proxyLatency(for profile: BrowserProfile) -> ProfileProxyLatency {
+        if profile.unresolvedProxyNumber != nil { return .missing }
         guard profile.socksProxyNumber != nil else { return .direct }
         guard let proxy = model.socksProxy(for: profile) else { return .missing }
-        let status = proxy.lastLatencyCheck?.status ?? proxy.status
-        let latency = proxy.lastLatencyCheck?.latencyMilliseconds ?? proxy.latencyMilliseconds
+        let status = proxy.latestStatus
+        let latency = proxy.latestLatency
         if testingProxyIDs.contains(proxy.id) {
             return .testing(status == .available ? latency : nil)
         }
@@ -509,6 +551,9 @@ private struct ProfileRow: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let profile: BrowserProfile
     let balance: String?
+    let balanceStatus: String?
+    let todayCompleted: Bool
+    let proxyMeasuredAt: Date?
     let proxySummary: String
     let proxyLatency: ProfileProxyLatency
     let isBusy: Bool
@@ -529,11 +574,18 @@ private struct ProfileRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 nameAndLatency
-                Text("\(profile.homePageHost) · \(proxySummary)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                HStack(spacing: 6) {
+                    Text("\(todayCompleted ? "今日已完成 · " : "")\(profile.homePageHost) · \(proxySummary)")
+                        .font(.caption).lineLimit(1).truncationMode(.middle)
+                    if let proxyMeasuredAt {
+                        Text("测于 " + proxyMeasuredAt.formatted(date: .omitted, time: .shortened))
+                            .font(.caption2).fixedSize(horizontal: true, vertical: false)
+                    }
+                }
+                .foregroundStyle(.secondary)
+                if let balanceStatus {
+                    Text(balanceStatus).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
                 if dynamicTypeSize.isAccessibilitySize { balanceLabel }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -549,7 +601,7 @@ private struct ProfileRow: View {
         .frame(minHeight: 44)
         .padding(.vertical, 8)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(profile.name)，\(proxyLatency.accessibilityDescription)\(balance.map { "，余额 \($0)" } ?? "")，主页 \(profile.homePageHost)，\(proxySummary)")
+        .accessibilityLabel("\(profile.name)，\(proxyLatency.accessibilityDescription)\(balance.map { "，余额 \($0)" } ?? "")，\(balanceStatus ?? "")，主页 \(profile.homePageHost)，\(proxySummary)")
     }
 
     private var nameAndLatency: some View {

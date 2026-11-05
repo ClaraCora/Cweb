@@ -437,7 +437,7 @@ struct AppModelTests {
     }
 
     @Test
-    func duplicatingProfileClearsSocksProxySelection() throws {
+    func duplicatingProxiedProfileRequiresExplicitNetworkSelection() throws {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: UUID().uuidString, directoryHint: .isDirectory)
         let profileURL = directory.appending(path: "profiles.json")
@@ -456,10 +456,11 @@ struct AppModelTests {
 
         try model.duplicateProfile(try #require(model.profiles.first))
         #expect(model.profiles.map(\.socksProxyNumber) == [1, nil])
+        #expect(model.profiles.last?.unresolvedProxyNumber == 1)
     }
 
     @Test
-    func importedConflictingSocksProxySelectionIsCleared() throws {
+    func importedConflictingSocksProxySelectionBlocksDirectUse() throws {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: UUID().uuidString, directoryHint: .isDirectory)
         let profileURL = directory.appending(path: "profiles.json")
@@ -478,6 +479,12 @@ struct AppModelTests {
         ])
 
         #expect(model.profiles.map(\.socksProxyNumber) == [1, nil, 1])
+        #expect(model.profiles[1].unresolvedProxyNumber == 1)
+        let session = BrowserSession(profile: model.profiles[1])
+        session.start()
+        #expect(session.presentedError != nil)
+        #expect(session.page.url == nil)
+        session.close()
     }
 
     @Test
@@ -495,7 +502,9 @@ struct AppModelTests {
 
         let model = AppModel(profileRepository: repository)
         #expect(model.profiles.map(\.socksProxyNumber) == [1, nil, 1])
+        #expect(model.profiles[1].unresolvedProxyNumber == 1)
         #expect(try repository.load().map(\.socksProxyNumber) == [1, nil, 1])
+        #expect(try repository.load()[1].unresolvedProxyNumber == 1)
     }
 
     @Test
@@ -582,8 +591,11 @@ struct AppModelTests {
 
         try await model.validateSocksProxies()
 
-        #expect(model.socksProxies.map(\.id) == [locked.id, fast.id])
+        #expect(model.socksProxies.map(\.id) == [locked.id, fast.id, slow.id])
         #expect(model.socksProxies.first?.status == .unavailable)
+        #expect(model.proxyCleanupIDs == [slow.id])
+        try model.deleteSocksProxies(withIDs: model.proxyCleanupIDs)
+        #expect(model.socksProxies.map(\.id) == [locked.id, fast.id])
         #expect(try proxyRepository.load().map(\.id) == [locked.id, fast.id])
     }
 
@@ -627,7 +639,9 @@ struct AppModelTests {
 
         try await model.validateSocksProxies()
 
-        #expect(model.socksProxies.map(\.id) == [first.id, second.id])
+        #expect(model.socksProxies.map(\.id) == [first.id, second.id, third.id])
+        #expect(try proxyRepository.load().map(\.id) == [first.id, second.id, third.id])
+        try model.deleteSocksProxies(withIDs: model.proxyCleanupIDs)
         #expect(try proxyRepository.load().map(\.id) == [first.id, second.id])
         #expect(model.rankedSocksProxies.map(\.proxy.id) == [second.id, first.id])
         #expect(model.socksProxy(forDisplayNumber: 1)?.id == second.id)

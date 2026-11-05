@@ -3,6 +3,8 @@ import SwiftUI
 
 @MainActor
 struct CredentialListView: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var authenticationToken = UUID()
     @Environment(\.dismiss) private var dismiss
 
     let profile: BrowserProfile
@@ -82,8 +84,15 @@ struct CredentialListView: View {
             } message: {
                 Text(statusMessage ?? "")
             }
-            .task {
-                await unlock()
+            .task { await unlock() }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .background {
+                    authenticationToken = UUID()
+                    authenticationState = .locked
+                    credentials = []
+                    editorMode = nil
+                    credentialBeingDeleted = nil
+                }
             }
         }
     }
@@ -148,13 +157,17 @@ struct CredentialListView: View {
 
     private func unlock() async {
         guard authenticationState != .unlocking else { return }
+        let token = UUID()
+        authenticationToken = token
         authenticationState = .unlocking
 
         do {
             try await AuthenticationService().authenticate(reason: "查看并填充“\(profile.name)”保存的账号密码")
+            guard authenticationToken == token, scenePhase != .background else { return }
             try reloadCredentials()
             authenticationState = .unlocked
         } catch {
+            guard authenticationToken == token else { return }
             authenticationState = .locked
             if let laError = error as? LAError, laError.code == .userCancel || laError.code == .appCancel {
                 return
@@ -168,11 +181,14 @@ struct CredentialListView: View {
     }
 
     private func fill(_ credential: StoredCredential) {
+        guard authenticationState == .unlocked, scenePhase == .active else { return }
         Task {
             do {
                 let result = try await onFill(credential)
-                if result.passwordFilled {
+                if result.passwordFilled && result.usernameFilled {
                     dismiss()
+                } else if result.passwordFilled {
+                    statusMessage = "已填入密码；同一登录表单内未找到用户名输入框，请检查账号后登录。"
                 } else if result.usernameFilled {
                     statusMessage = "已填入用户名，当前页面没有找到密码框。"
                 } else {

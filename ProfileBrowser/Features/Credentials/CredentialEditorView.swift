@@ -41,7 +41,7 @@ struct CredentialEditorView: View {
                     TextField("用户名或邮箱", text: $username)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    TextField("密码", text: $password)
+                    SecretField("密码", text: $password)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                 }

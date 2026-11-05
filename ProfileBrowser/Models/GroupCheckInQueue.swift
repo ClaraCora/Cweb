@@ -2,8 +2,8 @@ import Foundation
 
 /// Only the active environment may advance this queue. Late or duplicate
 /// messages from a previous WebPage cannot complete the next environment.
-struct GroupCheckInQueue {
-    enum Outcome: Equatable {
+struct GroupCheckInQueue: Codable, Sendable {
+    enum Outcome: String, Codable, Sendable {
         case completed
         case alreadyCompleted
         case skipped
@@ -37,4 +37,13 @@ struct GroupCheckInQueue {
     }
 
     mutating func stop() { isStopped = true }
+}
+
+struct GroupRunRecord: Codable, Identifiable, Sendable {
+    let id: UUID
+    let groupID: UUID?
+    let groupName: String
+    var queue: GroupCheckInQueue
+    var updatedAt: Date
+    var statuses: [UUID: String]
 }

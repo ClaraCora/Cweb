@@ -6,12 +6,16 @@ enum AutomationBridge {
 }
 
 enum AutomationScriptBuilder {
-    static func build(code: String, matches: [String], completionKey: String? = nil) -> String {
+    static func build(code: String, matches: [String], completionKey: String? = nil, siteRules: [WebsiteRule] = []) -> String {
         let matchJSON = encodeMatches(matches)
         let completionKeyJSON = encodeString(completionKey)
+        let rulesJSON = String(data: (try? JSONEncoder().encode(siteRules)) ?? Data("[]".utf8), encoding: .utf8) ?? "[]"
         return """
         (() => {
             const __cwebMatches = \(matchJSON);
+            const __cwebRules = \(rulesJSON);
+            window.CwebSiteRule = __cwebRules.find(rule =>
+                rule.host.trim().toLowerCase() === window.location.hostname.toLowerCase()) || {};
             const __cwebCompletionKey = \(completionKeyJSON);
             const __cwebPauseKey = __cwebCompletionKey
                 ? __cwebCompletionKey + ".paused"
@@ -160,7 +164,8 @@ final class AutomationMessageHandler: NSObject, WKScriptMessageHandler {
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard let payload = message.body as? [String: Any],
+        guard message.frameInfo.isMainFrame,
+              let payload = message.body as? [String: Any],
               let type = payload["type"] as? String else {
             return
         }

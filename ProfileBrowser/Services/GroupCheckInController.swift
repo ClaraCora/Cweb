@@ -4,6 +4,10 @@ import Observation
 @MainActor
 @Observable
 final class GroupCheckInController {
+    private let startedAt: Date
+    let id: UUID
+    let groupID: UUID?
+    private var statuses: [UUID: String] = [:]
     let groupName: String
     let profiles: [BrowserProfile]
     let settings: GlobalScriptSettings
@@ -12,7 +16,7 @@ final class GroupCheckInController {
     private(set) var isPaused = false
     private(set) var hasStarted = false
     private(set) var isRefreshingBalance = false
-    private let model: AppModel
+    private unowned let model: AppModel
     private let refreshBalance: @MainActor (BrowserSession) async -> Void
     private var pendingCompletion: GroupCheckInQueue.Outcome?
     @ObservationIgnored private var balanceRefreshTask: Task<Void, Never>?
@@ -21,13 +25,19 @@ final class GroupCheckInController {
         groupName: String,
         profiles: [BrowserProfile],
         model: AppModel,
-        refreshBalance: (@MainActor (BrowserSession) async -> Void)? = nil
+        refreshBalance: (@MainActor (BrowserSession) async -> Void)? = nil,
+        groupID: UUID? = nil,
+        restoring record: GroupRunRecord? = nil
     ) {
+        self.startedAt = record?.updatedAt ?? .now
+        self.id = record?.id ?? UUID()
+        self.groupID = groupID ?? record?.groupID
+        self.statuses = record?.statuses ?? [:]
         self.groupName = groupName
         self.profiles = profiles
         self.model = model
-        self.refreshBalance = refreshBalance ?? { await model.refreshBalance(for: $0, afterCheckIn: true) }
-        queue = GroupCheckInQueue(profileIDs: profiles.map(\.id))
+        self.refreshBalance = refreshBalance ?? { [unowned model] in await model.refreshBalance(for: $0, afterCheckIn: true) }
+        queue = record?.queue ?? GroupCheckInQueue(profileIDs: profiles.map(\.id))
         var settings = model.globalScriptSettings
         // An explicit group run does not change automatic execution on entry.
         settings.enabled = true
@@ -41,6 +51,9 @@ final class GroupCheckInController {
 
     func start() {
         guard canStart else { return }
+        guard Calendar.current.isDateInToday(startedAt) else { expire(); return }
+        do { try model.claimGroupRun(self) } catch { model.present(error); return }
+        defer { checkpoint() }
         if !hasStarted {
             hasStarted = true
             openNext()
@@ -62,6 +75,7 @@ final class GroupCheckInController {
         guard canPause, let session else { return }
         isPaused = true
         session.pauseAutomation()
+        checkpoint()
     }
 
     func stop() {
@@ -70,9 +84,11 @@ final class GroupCheckInController {
         session?.close()
         session = nil
         isPaused = false
+        checkpoint()
     }
 
     func recheck() async {
+        guard Calendar.current.isDateInToday(startedAt) else { expire(); return }
         guard !isPaused, pendingCompletion == nil, let activeSession = session else { return }
         if !model.shouldRunAutomation(for: activeSession.profile.id) {
             completeAfterRefreshingBalance(.alreadyCompleted)
@@ -82,9 +98,10 @@ final class GroupCheckInController {
     }
 
     func receive(_ profileID: UUID, _ event: AutomationEvent) {
-        guard !isPaused, event.kind == .success, queue.currentProfileID == profileID,
-              pendingCompletion == nil else { return }
-        completeAfterRefreshingBalance(.completed)
+        guard !isPaused, queue.currentProfileID == profileID, pendingCompletion == nil else { return }
+        statuses[profileID] = event.message
+        checkpoint()
+        if event.kind == .success { completeAfterRefreshingBalance(.completed) }
     }
 
     func skip() {
@@ -120,11 +137,26 @@ final class GroupCheckInController {
         session = nil
         isPaused = false
         openNext()
+        checkpoint()
+    }
+
+    private func expire() {
+        stop()
+        model.present(StorageTransactionError.recovery("签到任务已跨日，请重新开始本组任务以检测今天的状态。"))
+    }
+
+    private func checkpoint() {
+        model.saveGroupRun(GroupRunRecord(id: id, groupID: groupID, groupName: groupName,
+            queue: queue, updatedAt: .now, statuses: statuses))
     }
 
     private func openNext() {
         while let id = queue.currentProfileID {
-            guard let profile = profiles.first(where: { $0.id == id }) else {
+            guard let profile = model.profiles.first(where: { $0.id == id }) else {
+                queue.finish(id, outcome: .skipped)
+                continue
+            }
+            if let groupID, profile.groupID != groupID {
                 queue.finish(id, outcome: .skipped)
                 continue
             }

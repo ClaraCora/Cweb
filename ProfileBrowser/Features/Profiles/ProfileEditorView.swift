@@ -18,6 +18,7 @@ struct ProfileEditorView: View {
     @State private var autofillUsername: String
     @State private var autofillPassword: String
     @State private var socksProxyNumber: Int?
+    @State private var hasSelectedProxy = false
     @State private var color: ProfileColor
     @State private var localError: PresentedError?
     @State private var showsGroupSelection = false
@@ -78,7 +79,10 @@ struct ProfileEditorView: View {
             }
             .sheet(isPresented: $showsProxySelection) {
                 ProfileProxySelectionView(
-                    selection: $socksProxyNumber,
+                    selection: Binding(
+                        get: { socksProxyNumber },
+                        set: { socksProxyNumber = $0; hasSelectedProxy = true }
+                    ),
                     groupName: normalizedGroupName,
                     profileID: originalProfile?.id
                 )
@@ -132,9 +136,13 @@ struct ProfileEditorView: View {
                 focusedField = nil
                 showsProxySelection = true
             } label: {
-                LabeledContent("代理编号", value: socksProxyNumber.map { "第 \($0) 号" } ?? "不使用代理")
+                LabeledContent("代理编号", value: proxySelectionTitle)
             }
             .accessibilityIdentifier("profileEditor.proxy")
+
+            if originalProfile?.unresolvedProxyNumber != nil && !hasSelectedProxy {
+                InlineValidationMessage(message: "原代理选择发生冲突或来自复制，请明确选择代理或不使用代理；处理前不会联网。")
+            }
 
             if let socksProxyNumber {
                 if let occupant = proxyOccupant(for: socksProxyNumber) {
@@ -167,7 +175,7 @@ struct ProfileEditorView: View {
                     .onSubmit { focusedField = .password }
             }
             FormField("密码") {
-                TextField("可选", text: $autofillPassword)
+                SecretField("可选", text: $autofillPassword)
                     .textContentType(nil)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -271,6 +279,7 @@ struct ProfileEditorView: View {
             || userAgent != (originalProfile?.userAgent ?? BrowserProfile.defaultUserAgent)
             || color != (originalProfile?.color ?? .indigo)
             || socksProxyNumber != originalProfile?.socksProxyNumber
+            || hasSelectedProxy
             || !autofillUsername.isEmpty || !autofillPassword.isEmpty
     }
 
@@ -305,6 +314,7 @@ struct ProfileEditorView: View {
                 profile.userAgent = userAgent.trimmingCharacters(in: .whitespacesAndNewlines)
                 profile.color = color
                 profile.socksProxyNumber = socksProxyNumber
+                if hasSelectedProxy { profile.unresolvedProxyNumber = nil }
                 try onSave(.update(
                     profile,
                     autofillUsername: autofillUsername,
@@ -326,6 +336,11 @@ struct ProfileEditorView: View {
         } catch {
             localError = PresentedError(message: error.localizedDescription)
         }
+    }
+
+    private var proxySelectionTitle: String {
+        if originalProfile?.unresolvedProxyNumber != nil && !hasSelectedProxy { return "待重新选择" }
+        return socksProxyNumber.map { "第 \($0) 号" } ?? "不使用代理"
     }
 
     private func proxyOccupant(for number: Int) -> BrowserProfile? {

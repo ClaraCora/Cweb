@@ -68,7 +68,7 @@ enum AccountBalanceReader {
             }
             if attempt + 1 < attempts { try await wait() }
         }
-        return latestValue
+        return nil
     }
 }
 

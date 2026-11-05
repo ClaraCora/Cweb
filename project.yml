@@ -15,6 +15,7 @@ settings:
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     CURRENT_PROJECT_VERSION: 1
     MARKETING_VERSION: 1.0.0
+    CWEB_GIT_COMMIT: local
 
 targets:
   ProfileBrowser:
@@ -32,6 +33,7 @@ targets:
       path: ProfileBrowser/Resources/Info.plist
       properties:
         CFBundleDisplayName: 环境浏览器
+        CwebGitCommit: "$(CWEB_GIT_COMMIT)"
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
@@ -59,16 +61,32 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.personal.profilebrowser.tests
         GENERATE_INFOPLIST_FILE: YES
 
+  ProfileBrowserUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: ProfileBrowserUITests
+    dependencies:
+      - target: ProfileBrowser
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.personal.profilebrowser.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: ProfileBrowser
+
 schemes:
   ProfileBrowser:
     build:
       targets:
         ProfileBrowser: all
         ProfileBrowserTests: [test]
+        ProfileBrowserUITests: [test]
     test:
       gatherCoverageData: true
       targets:
         - ProfileBrowserTests
+        - ProfileBrowserUITests
     run:
       config: Debug
     archive:

@@ -4,7 +4,8 @@ import UniformTypeIdentifiers
 @MainActor
 struct SocksProxyExportView: View {
     @Environment(\.dismiss) private var dismiss
-    let rankings: [SocksProxyRanking]
+    @Environment(AppModel.self) private var model
+    private var rankings: [SocksProxyRanking] { model.rankedSocksProxies }
     @State private var selectedIDs: Set<UUID>
     @State private var showsExporter = false
     @State private var document = SocksProxyExportDocument()
@@ -12,7 +13,6 @@ struct SocksProxyExportView: View {
     @State private var exported = false
 
     init(rankings: [SocksProxyRanking]) {
-        self.rankings = rankings
         _selectedIDs = State(initialValue: Set(rankings.map(\.id)))
     }
 
@@ -23,6 +23,12 @@ struct SocksProxyExportView: View {
                     ForEach(rankings) { ranking in
                         VStack(alignment: .leading, spacing: 4) {
                             Text("\(ranking.number) · \(ranking.proxy.displayCode ?? ranking.proxy.displayAddress)")
+                            if let measurement = ranking.proxy.latestMeasurement {
+                                Text(measurement.status == .available ? "\(measurement.latencyMilliseconds.map(String.init) ?? "—") ms" : "最近检测不可用")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                Text(measurement.checkedAt, format: .dateTime.month().day().hour().minute())
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
                             if ranking.proxy.displayCode != nil {
                                 Text(ranking.proxy.displayAddress)
                                     .font(.caption)
@@ -39,6 +45,7 @@ struct SocksProxyExportView: View {
                 }
             }
             .environment(\.editMode, .constant(.active))
+            .onChange(of: rankings.map(\.id)) { _, ids in selectedIDs.formIntersection(Set(ids)) }
             .navigationTitle("批量导出")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

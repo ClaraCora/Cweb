@@ -80,6 +80,7 @@ struct IPDetectionView: View {
     }
 
     private var networkPathDescription: String {
+        if profile.unresolvedProxyNumber != nil { return "代理待选择 · 已阻止联网" }
         if let number = profile.socksProxyNumber {
             if let proxy = session.socksProxy {
                 return "SOCKS 第 \(number) 号 · \(proxy.displayCode ?? proxy.displayAddress)"

@@ -9,13 +9,17 @@ struct SocksProxyRepository {
     private let presetsFileURL: URL
     private let settingsFileURL: URL
     private let credentialStore: SocksProxyCredentialStore
+    private let writeData: (Data, URL) throws -> Void
 
     init(
         fileManager: FileManager = .default,
         fileURL: URL? = nil,
         presetsFileURL: URL? = nil,
         settingsFileURL: URL? = nil,
-        credentialStore: SocksProxyCredentialStore = SocksProxyCredentialStore()
+        credentialStore: SocksProxyCredentialStore = SocksProxyCredentialStore(),
+        writeData: @escaping (Data, URL) throws -> Void = {
+            try $0.write(to: $1, options: [.atomic, .completeFileProtection])
+        }
     ) {
         self.fileManager = fileManager
 
@@ -34,6 +38,7 @@ struct SocksProxyRepository {
         self.settingsFileURL = settingsFileURL
             ?? baseURL.appending(path: "socks-proxy-settings.json", directoryHint: .notDirectory)
         self.credentialStore = credentialStore
+        self.writeData = writeData
     }
 
     func load() throws -> [SocksProxy] {
@@ -46,21 +51,20 @@ struct SocksProxyRepository {
     }
 
     func save(_ proxies: [SocksProxy]) throws {
-        let previousIDs: Set<UUID>
-        if fileManager.fileExists(atPath: fileURL.path),
-           let previous: [SocksProxy] = try? loadArray(from: fileURL) {
-            previousIDs = Set(previous.map(\.id))
-        } else {
-            previousIDs = []
-        }
-
-        try saveArray(proxies, to: fileURL)
-        for proxy in proxies {
-            try credentialStore.save(password: proxy.password, for: proxy.id)
-        }
-        let currentIDs = Set(proxies.map(\.id))
-        for removedID in previousIDs.subtracting(currentIDs) {
-            try credentialStore.delete(for: removedID)
+        // Never ignore a corrupt existing file: it is needed to restore secrets.
+        let previous: [SocksProxy] = try loadArray(from: fileURL)
+        let ids = Set(previous.map(\.id)).union(proxies.map(\.id))
+        let passwords = try ids.map { ($0, try credentialStore.password(for: $0)) }
+        try StorageTransaction.perform {
+            for proxy in proxies { try credentialStore.save(password: proxy.password, for: proxy.id) }
+            for id in Set(previous.map(\.id)).subtracting(proxies.map(\.id)) {
+                try credentialStore.delete(for: id)
+            }
+            try saveArray(proxies, to: fileURL)
+        } rollback: {
+            try StorageTransaction.restoreAll(passwords) { id, password in
+                try credentialStore.save(password: password, for: id)
+            }
         }
     }
 
@@ -229,7 +233,7 @@ struct SocksProxyRepository {
         let directory = url.deletingLastPathComponent()
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         let data = try Self.encoder.encode(value)
-        try data.write(to: url, options: [.atomic, .completeFileProtection])
+        try writeData(data, url)
     }
 
     private static let encoder: JSONEncoder = {

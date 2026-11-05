@@ -5,7 +5,6 @@ import UniformTypeIdentifiers
 struct BackupView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-
     @State private var exportPassword = ""
     @State private var confirmPassword = ""
     @State private var importPassword = ""
@@ -13,162 +12,166 @@ struct BackupView: View {
     @State private var showsExporter = false
     @State private var showsImporter = false
     @State private var pendingImport: BackupImportFile?
-    @State private var isReadingBackup = false
-    @State private var importErrorMessage: String?
-    @State private var presentedError: PresentedError?
+    @State private var restorePlan: BackupRestorePlan?
+    @State private var restoreSettings = false
+    @State private var operation: Task<Void, Never>?
+    @State private var activity: String?
+    @State private var errorMessage: String?
     @State private var statusMessage: String?
 
     var body: some View {
         NavigationStack {
             Form {
+                if !model.isBackupStoreAvailable {
+                    Section {
+                        Label("有数据尚未成功读取，暂不能创建或恢复备份。", systemImage: "exclamationmark.circle")
+                        Button("重试读取数据") {
+                            model.retryLoadingBackupStores()
+                            Task { await model.retryLoadingProfiles() }
+                        }.disabled(isBusy)
+                    }
+                }
+                if let activity {
+                    Section {
+                        ProgressView(activity)
+                        Button("取消操作", role: .cancel) { operation?.cancel() }
+                    }
+                }
                 Section("导出") {
                     SecureField("备份密码（至少 8 个字符）", text: $exportPassword)
                     SecureField("再次输入密码", text: $confirmPassword)
-                    Button("导出加密备份", systemImage: "lock.doc") {
-                        exportBackup()
-                    }
-                    .disabled(
-                        !model.isProfileStoreAvailable
-                            || exportPassword.count < 8
-                            || exportPassword != confirmPassword
-                            || isReadingBackup
-                    )
+                    Button("导出完整加密备份", systemImage: "lock.doc") { exportBackup() }
+                        .disabled(exportPassword.count < 8 || exportPassword != confirmPassword)
+                    Text("包含环境、网站凭据、代理及其密码、预设链接、设置和脚本。不包含 Cookie 与缓存。")
+                        .font(.footnote).foregroundStyle(.secondary)
                 }
+                .disabled(isBusy || !model.isBackupStoreAvailable)
 
                 Section("导入") {
                     Button(pendingImport == nil ? "选择备份文件" : "重新选择备份文件", systemImage: "doc.badge.arrow.up") {
-                        clearPendingImport()
+                        clearImport()
                         showsImporter = true
                     }
-                    .disabled(!model.isProfileStoreAvailable || isReadingBackup)
-
-                    if isReadingBackup {
-                        ProgressView("正在读取备份…")
-                    }
-
-                    if let pendingImport {
-                        LabeledContent("已选文件") {
-                            Text(pendingImport.filename)
-                                .multilineTextAlignment(.trailing)
-                                .textSelection(.enabled)
+                    if let file = pendingImport {
+                        LabeledContent("已选文件", value: file.filename)
+                        if restorePlan == nil {
+                            SecureField("备份密码", text: $importPassword)
+                                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            Button("解锁并预览", systemImage: "lock.open") { unlockBackup(file) }
+                                .disabled(importPassword.count < 8)
                         }
-                        SecureField("备份密码（至少 8 个字符）", text: $importPassword)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .onChange(of: importPassword) { _, _ in
-                                importErrorMessage = nil
-                            }
-                        Button("解锁并导入", systemImage: "lock.open") {
-                            importBackup()
-                        }
-                        .disabled(!model.isProfileStoreAvailable || importPassword.count < 8)
-                        Button("取消导入", role: .cancel) {
-                            clearPendingImport()
-                        }
+                        Button("取消导入", role: .cancel) { clearImport() }
                     }
+                    Text("支持旧版无扩展名备份，文件最大 32 MB。恢复会新增环境；同名分组会合并。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                .disabled(isBusy || !model.isBackupStoreAvailable)
 
-                    if let importErrorMessage {
-                        Label(importErrorMessage, systemImage: "exclamationmark.circle")
-                            .foregroundStyle(.red)
+                if let plan = restorePlan {
+                    Section("恢复预览") {
+                        LabeledContent("环境", value: "\(plan.profiles.count)")
+                        LabeledContent("网站凭据", value: "\(plan.credentials.count)")
+                        LabeledContent("新增代理", value: "\(plan.newProxyCount)")
+                        LabeledContent("预设链接", value: "\(plan.archive.presets?.count ?? 0)")
+                        ForEach(Array(plan.warnings.enumerated()), id: \.offset) { _, warning in
+                            Text(warning).font(.footnote).foregroundStyle(.secondary)
+                        }
+                        Toggle("恢复应用设置与全局脚本", isOn: $restoreSettings)
+                        Button("确认恢复", systemImage: "arrow.down.doc") { restore(plan) }
                     }
-                    Text("导入会新增环境，不会覆盖已有环境。网站 Cookie 和缓存不在备份中。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    .disabled(isBusy)
+                }
+                if let errorMessage {
+                    Section { Label(errorMessage, systemImage: "exclamationmark.circle").foregroundStyle(.red) }
                 }
             }
             .navigationTitle("加密备份")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") {
-                        clearPendingImport()
-                        dismiss()
-                    }
-                    .disabled(isReadingBackup)
+                    Button("完成") { clearImport(); dismiss() }.disabled(isBusy)
                 }
             }
-            .fileExporter(
-                isPresented: $showsExporter,
-                document: backupDocument,
-                contentType: .json,
-                defaultFilename: BackupDocument.defaultFilename
-            ) { result in
-                if case .failure(let error) = result {
-                    presentedError = PresentedError(message: error.localizedDescription)
-                }
+            .fileExporter(isPresented: $showsExporter, document: backupDocument, contentType: .json,
+                          defaultFilename: BackupDocument.defaultFilename) { result in
+                if case .failure(let error) = result { errorMessage = error.localizedDescription }
+                backupDocument = nil
+                exportPassword = ""
+                confirmPassword = ""
             }
             .sheet(isPresented: $showsImporter) {
                 BackupFilePicker { url in
                     showsImporter = false
-                    if let url {
-                        selectBackup(from: url)
-                    }
-                }
-                .ignoresSafeArea()
+                    if let url { readBackup(url) }
+                }.ignoresSafeArea()
             }
-            .alert(item: $presentedError) { error in
-                Alert(title: Text("备份失败"), message: Text(error.message), dismissButton: .default(Text("好")))
-            }
-            .alert("导入完成", isPresented: statusAlertBinding) {
+            .alert("恢复完成", isPresented: Binding(get: { statusMessage != nil }, set: { if !$0 { statusMessage = nil } })) {
                 Button("好", role: .cancel) {}
-            } message: {
-                Text(statusMessage ?? "")
-            }
+            } message: { Text(statusMessage ?? "") }
         }
-        .interactiveDismissDisabled(isReadingBackup)
+        .interactiveDismissDisabled(isBusy)
+        .onDisappear { operation?.cancel(); clearImport(); backupDocument = nil; exportPassword = ""; confirmPassword = "" }
     }
 
-    private func selectBackup(from url: URL) {
-        clearPendingImport()
-        isReadingBackup = true
-        Task {
-            defer { isReadingBackup = false }
-            do {
-                pendingImport = try await Task.detached(priority: .userInitiated) {
-                    try BackupImportFile(contentsOf: url)
-                }.value
-            } catch {
-                importErrorMessage = error.localizedDescription
-            }
+    private var isBusy: Bool { activity != nil }
+
+    private func start(_ title: String, work: @escaping @MainActor () async throws -> Void) {
+        guard !isBusy else { return }
+        activity = title
+        errorMessage = nil
+        operation = Task {
+            defer { activity = nil; operation = nil }
+            do { try await work() }
+            catch is CancellationError { }
+            catch { errorMessage = error.localizedDescription }
         }
     }
 
-    private func clearPendingImport() {
+    private func clearImport() {
         pendingImport = nil
+        restorePlan = nil
+        restoreSettings = false
         importPassword = ""
-        importErrorMessage = nil
+        errorMessage = nil
+    }
+
+    private func readBackup(_ url: URL) {
+        clearImport()
+        start("正在读取备份…") {
+            let file = try await BackupService.background { try BackupImportFile(contentsOf: url) }
+            try Task.checkCancellation()
+            pendingImport = file
+        }
     }
 
     private func exportBackup() {
-        guard model.isProfileStoreAvailable else {
-            presentedError = PresentedError(message: ProfileError.profileStoreUnavailable.localizedDescription)
-            return
-        }
-        do {
-            backupDocument = BackupDocument(data: try BackupService(vault: model.credentialVault).export(profiles: model.profiles, password: exportPassword))
+        start("正在加密备份…") {
+            let snapshot = try model.backupSnapshot()
+            let password = exportPassword
+            let data = try await BackupService.background { try BackupService.encrypt(snapshot, password: password) }
+            try Task.checkCancellation()
+            backupDocument = BackupDocument(data: data)
             showsExporter = true
-        } catch {
-            presentedError = PresentedError(message: error.localizedDescription)
         }
     }
 
-    private func importBackup() {
-        guard let pendingImport else { return }
-        guard model.isProfileStoreAvailable else {
-            importErrorMessage = ProfileError.profileStoreUnavailable.localizedDescription
-            return
-        }
-        do {
-            let profiles = try BackupService(vault: model.credentialVault).importProfiles(from: pendingImport.data, password: importPassword)
-            try model.addImportedProfiles(profiles)
-            clearPendingImport()
-            statusMessage = "已新增 \(profiles.count) 个环境。"
-        } catch {
-            importErrorMessage = error.localizedDescription
+    private func unlockBackup(_ file: BackupImportFile) {
+        start("正在解锁备份…") {
+            let password = importPassword
+            let archive = try await BackupService.background { try BackupService.decrypt(file.data, password: password) }
+            try Task.checkCancellation()
+            restorePlan = model.prepareBackupRestore(archive)
+            importPassword = ""
         }
     }
 
-    private var statusAlertBinding: Binding<Bool> {
-        Binding(get: { statusMessage != nil }, set: { if !$0 { statusMessage = nil } })
+    private func restore(_ plan: BackupRestorePlan) {
+        start("正在恢复备份…") {
+            await Task.yield()
+            try Task.checkCancellation()
+            // The commit is synchronous so cancellation cannot split a transaction.
+            statusMessage = try model.restoreBackup(plan, restoreSettings: restoreSettings)
+            clearImport()
+        }
     }
 }

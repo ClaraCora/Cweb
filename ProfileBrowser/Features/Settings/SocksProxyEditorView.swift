@@ -82,8 +82,8 @@ struct SocksProxyEditorView: View {
                 if let originalProxy, !isCopy {
                     Section("状态") {
                         LabeledContent("地址", value: originalProxy.displayAddress)
-                        LabeledContent("可用性", value: statusText(originalProxy.status))
-                        if let latency = originalProxy.latencyMilliseconds {
+                        LabeledContent("可用性", value: statusText(originalProxy.latestStatus))
+                        if let latency = originalProxy.latestLatency {
                             LabeledContent("延迟", value: "\(latency) ms")
                         }
                     }

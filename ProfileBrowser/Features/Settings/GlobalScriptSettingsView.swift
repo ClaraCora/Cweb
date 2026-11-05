@@ -10,6 +10,9 @@ struct GlobalScriptSettingsView: View {
     var body: some View {
         Form {
             Section {
+                NavigationLink("网站识别规则") { WebsiteRulesView() }
+            }
+            Section {
                 Toggle("进入环境时自动运行", isOn: $scriptDraft.enabled)
 
                 FormField("脚本内容") {

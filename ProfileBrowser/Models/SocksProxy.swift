@@ -207,7 +207,19 @@ struct SocksProxy: Identifiable, Codable, Hashable, Sendable {
         Self.normalizeCode(code)
     }
 
-    var isAvailable: Bool { status == .available }
+    var latestMeasurement: SocksProxyValidationResult? {
+        if let check = lastLatencyCheck, lastCheckedAt == nil || check.checkedAt >= lastCheckedAt! { return check }
+        guard let lastCheckedAt else { return nil }
+        return SocksProxyValidationResult(proxyID: id, status: status, latencyMilliseconds: latencyMilliseconds,
+            checkedAt: lastCheckedAt, message: validationMessage)
+    }
+    var latestStatus: SocksProxyStatus { latestMeasurement?.status ?? status }
+    var latestLatency: Int? {
+        guard latestStatus == .available else { return nil }
+        if let measurement = latestMeasurement { return measurement.latencyMilliseconds }
+        return status == .available ? latencyMilliseconds : nil
+    }
+    var isAvailable: Bool { latestStatus == .available }
 
     var latency: Int? { latencyMilliseconds }
 

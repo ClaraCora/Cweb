@@ -45,7 +45,8 @@ struct BackupServiceTests {
         #expect(imported[0].websiteDataStoreID != profile.websiteDataStoreID)
         #expect(imported[0].socksProxyNumber == profile.socksProxyNumber)
         #expect(imported[0].groupSortOrder == profile.groupSortOrder)
-        let importedCredentials = try vault.credentials(profileID: imported[0].id, origin: origin)
+        #expect(try vault.credentials(profileID: imported[0].id, origin: origin).isEmpty)
+        let importedCredentials = try BackupService.decrypt(data, password: "correct horse").credentials
         #expect(importedCredentials.count == 1)
         #expect(importedCredentials[0].username == credential.username)
         #expect(importedCredentials[0].password == credential.password)
@@ -125,7 +126,7 @@ struct BackupServiceTests {
         }
     }
 
-    @Test(arguments: [0, 2])
+    @Test(arguments: [0, 3])
     func rejectsUnsupportedVersion(version: Int) throws {
         let data = try legacyBackup(replacing: "version", with: version)
         #expect(throws: BackupError.invalidFormat) {

@@ -6,10 +6,12 @@ struct SocksProxyListView: View {
 
     @State private var editorMode: SocksProxyEditorMode?
     @State private var showsImport = false
+    @State private var importReport: ProxyImportReport?
     @State private var showsPresets = false
     @State private var showsBatchDelete = false
     @State private var showsExport = false
     @State private var presetsExpanded = false
+    @State private var showsCleanup = false
     @State private var pendingClear = false
     @State private var pendingDelete: SocksProxy?
     @State private var activity: ProxyActivity?
@@ -91,7 +93,7 @@ struct SocksProxyListView: View {
                 .accessibilityIdentifier("proxy.validateAll")
 
                 Menu {
-                    Button("从链接导入", systemImage: "link.badge.plus") { showsImport = true }
+                    Button("导入代理", systemImage: "link.badge.plus") { showsImport = true }
                     Button("添加代理", systemImage: "plus") { editorMode = .create }
                     Button("批量导出", systemImage: "square.and.arrow.up") { showsExport = true }
                         .disabled(model.socksProxies.isEmpty)
@@ -105,6 +107,13 @@ struct SocksProxyListView: View {
                         Label("测速与保留规则", systemImage: "slider.horizontal.3")
                     }
                     Divider()
+                    Button("预览规则清理", systemImage: "line.3.horizontal.decrease") { showsCleanup = true }
+                        .disabled(model.proxyCleanupIDs.isEmpty)
+                    if model.canUndoProxyDeletion {
+                        Button("撤销最近删除", systemImage: "arrow.uturn.backward") {
+                            do { try model.undoProxyDeletion() } catch { model.present(error) }
+                        }
+                    }
                     Button("批量删除", systemImage: "checklist") {
                         showsBatchDelete = true
                     }
@@ -131,9 +140,10 @@ struct SocksProxyListView: View {
             }
         }
         .sheet(isPresented: $showsImport) {
-            SocksProxyImportView { url in
-                try await model.importSocksProxies(from: url)
-            }
+            SocksProxyImportView()
+        }
+        .sheet(item: $importReport) { report in
+            ProxyImportReportView(report: report)
         }
         .sheet(isPresented: $showsPresets) {
             SocksProxyPresetListView()
@@ -141,6 +151,7 @@ struct SocksProxyListView: View {
         .sheet(isPresented: $showsExport) {
             SocksProxyExportView(rankings: model.rankedSocksProxies)
         }
+        .sheet(isPresented: $showsCleanup) { ProxyCleanupView() }
         .sheet(isPresented: $showsBatchDelete) {
             SocksProxyBatchDeleteView { deletedCount in
                 statusIsWarning = false
@@ -159,7 +170,7 @@ struct SocksProxyListView: View {
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("将删除当前保存的 \(unlockedProxyCount) 个未锁定代理。锁定代理会保留；环境仍保留已选择的显示编号。")
+            Text("将删除 \(unlockedProxyCount) 个未锁定代理。" + model.proxyDeletionImpact(for: Set(model.socksProxies.filter { !$0.isLocked }.map(\.id))))
         }
         .alert("删除代理？", isPresented: deleteAlertBinding, presenting: pendingDelete) { proxy in
             Button("删除", role: .destructive) {
@@ -172,7 +183,7 @@ struct SocksProxyListView: View {
             }
             Button("取消", role: .cancel) {}
         } message: { proxy in
-            Text("将删除 \(proxy.displayAddress)。")
+            Text("将删除 \(proxy.displayAddress)。" + model.proxyDeletionImpact(for: [proxy.id]))
         }
         .alert(item: $model.presentedError) { error in
             Alert(
@@ -367,7 +378,7 @@ struct SocksProxyListView: View {
                     totalCount = total
                 }
                 statusIsWarning = false
-                statusMessage = "测速完成，当前保留 \(model.socksProxies.count) 个代理。"
+                statusMessage = "测速完成，共 \(model.socksProxies.count) 个代理。"
             } catch {
                 model.present(error)
             }
@@ -409,9 +420,10 @@ struct SocksProxyListView: View {
         Task { @MainActor in
             defer { activity = nil }
             do {
-                try await model.importSocksProxies(from: preset.url)
+                let report = try await model.importSocksProxies(from: preset.url)
                 statusIsWarning = false
-                statusMessage = "已拉取 \(preset.displayName)。"
+                statusMessage = "\(preset.displayName)：\(report.summary)"
+                importReport = report
             } catch {
                 model.present(error)
             }
@@ -511,9 +523,9 @@ private struct SocksProxyRow: View {
                         .foregroundStyle(.secondary)
                 }
             } else {
-                switch ranking.proxy.status {
+                switch ranking.proxy.latestStatus {
                 case .available:
-                    if let latency = ranking.proxy.latencyMilliseconds {
+                    if let latency = ranking.proxy.latestLatency {
                         Text("\(latency) ms")
                             .font(.subheadline.monospacedDigit())
                             .foregroundStyle(.primary)
@@ -537,15 +549,18 @@ private struct SocksProxyRow: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            if let date = ranking.proxy.latestMeasurement?.checkedAt {
+                Text(date, style: .time).font(.caption2).foregroundStyle(.secondary)
+            }
         }
     }
 
     private var accessibilityResult: String {
         if isTesting { return "正在测速" }
-        if let latency = ranking.proxy.latencyMilliseconds, ranking.proxy.isAvailable {
+        if let latency = ranking.proxy.latestLatency, ranking.proxy.isAvailable {
             return "延迟 \(latency) 毫秒"
         }
-        return ranking.proxy.validationMessage ?? ""
+        return ranking.proxy.latestMeasurement?.message ?? ""
     }
 
     private var accessibilityName: String {
@@ -556,7 +571,7 @@ private struct SocksProxyRow: View {
     }
 
     private var statusText: String {
-        switch ranking.proxy.status {
+        switch ranking.proxy.latestStatus {
         case .available: "可用"
         case .unavailable: "不可用"
         case .untested: "未测速"
@@ -633,7 +648,7 @@ private struct SocksProxyBatchDeleteView: View {
                 }
                 Button("取消", role: .cancel) {}
             } message: {
-                Text("将永久删除选中的 \(selectedIDs.count) 个代理。环境仍保留已选择的显示编号。")
+                Text("将删除选中的 \(selectedIDs.count) 个代理。" + model.proxyDeletionImpact(for: selectedIDs))
             }
             .alert(item: $presentedError) { error in
                 Alert(

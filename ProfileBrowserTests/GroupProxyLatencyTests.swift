@@ -74,6 +74,20 @@ struct GroupProxyLatencyTests {
     }
 
     @Test
+    func metadataEditKeepsMeasurementCompletedAfterTheEditorOpened() async throws {
+        let proxy = SocksProxy(host: "proxy.example", port: 1080)
+        let probe = GroupLatencyProbe(results: [proxy.id: .init(status: .available, latencyMilliseconds: 1250)])
+        let fixture = try GroupProxyFixture(proxies: [proxy], probe: probe)
+        defer { fixture.cleanUp() }
+        var draft = fixture.model.socksProxies[0]
+        _ = try await fixture.model.validateGroupProxyLatencies(for: [BrowserProfile(name: "环境", socksProxyNumber: 1)])
+        draft.code = "新代号"
+        try fixture.model.updateSocksProxy(draft)
+        #expect(fixture.model.socksProxies[0].latestLatency == 1250)
+        #expect(fixture.model.socksProxies[0].displayCode == "新代号")
+    }
+
+    @Test
     func lateMeasurementCannotRestoreResultsForEditedProxy() async throws {
         let proxy = SocksProxy(host: "proxy.example", port: 1080)
         let probe = GatedGroupLatencyProbe()

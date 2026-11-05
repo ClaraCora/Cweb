@@ -45,6 +45,9 @@ function element(text, options = {}) {
             assert.equal(selector, "h1, h2, h3, h4, h5, h6");
             return this.heading ? {} : null;
         },
+        querySelectorAll(selector) {
+            return (this.children || []).filter(node => selector.split(',').some(part => matches(node, part.trim())));
+        },
         click() {
             this.clicks++;
             this.onClick?.();
@@ -86,12 +89,14 @@ function page(nodes = [], options = {}) {
         selector.split(",").some(part => matches(node, part.trim())));
     const document = { documentElement: {}, querySelectorAll: select };
     const window = {
+        CwebSiteRule: options.rule || {},
         getComputedStyle: node => ({ visibility: node.visibility }),
         addEventListener: (type, listener) => listeners.set(type, listener),
         CwebCheckIn: {
             isPaused: () => paused,
             success: message => events.push({ type: "success", message }),
             noButton: message => events.push({ type: "noButton", message }),
+            error: message => events.push({ type: "error", message }),
             captchaDetected: message => {
                 paused = true;
                 events.push({ type: "captcha", message });
@@ -140,6 +145,46 @@ function page(nodes = [], options = {}) {
         }
     };
 }
+
+test("yesterday and dated historical results cannot complete today's check-in", () => {
+    for (const text of ['昨天已完成签到', '昨日已签到', '2020-01-01 签到成功']) {
+        const action = element('立即签到');
+        const p = page([action, element(text, {tag:'div'})]);
+        assert.equal(action.clicks, 1);
+        assert.deepEqual(p.types(), []);
+    }
+});
+
+test("submission failure is reported and only explicit resume submits again", () => {
+    const action = element('立即签到');
+    const nodes = [action];
+    const p = page(nodes);
+    p.mutate(() => nodes.push(element('签到失败，请重试', {tag:'div'})));
+    p.advance(2000);
+    assert.ok(p.types().includes('error'));
+    for(let i=0;i<12;i++){p.recheck();p.advance(5000);}
+    assert.equal(action.clicks, 1);
+    p.mutate(() => nodes.pop());
+    p.resume();p.advance(1000);
+    assert.equal(action.clicks, 2);
+});
+
+test("submission timeout is visible without automatic duplicate submissions", () => {
+    const action = element('立即签到');
+    const p = page([action]);
+    p.advance(31000);
+    assert.deepEqual(p.types(), ['error']);
+    p.recheck();p.advance(5000);
+    assert.equal(action.clicks, 1);
+});
+
+test("site rule scopes completion to today's check-in panel", () => {
+    const action = element('立即签到');
+    const panel = element('', {tag:'div', attributes:{id:'daily'}, children:[action]});
+    const p = page([panel, element('已签到', {tag:'div'})], {rule:{checkInContainerSelector:'[id="daily"]'}});
+    assert.equal(action.clicks, 1);
+    assert.deepEqual(p.types(), []);
+});
 
 test("SuperAPI already checked in: no clicks, one success, no late error", () => {
     const header = element("每日签到\n已签到\n\n今天 +$0.1", { heading: true });
@@ -357,10 +402,11 @@ test("retrying a CAPTCHA never clicks until it has disappeared", () => {
     assert.ok(!p.types().includes("success"));
 });
 
-function bridgePage({ completed = false, paused = false, nativePaused = false, matches = ["*://*/*"], code = "" } = {}) {
+function bridgePage({ completed = false, paused = false, nativePaused = false, matches = ["*://*/*"], code = "", rules = [] } = {}) {
     const source = readFileSync(join(root, "ProfileBrowser/Services/AutomationScriptBridge.swift"), "utf8");
     const raw = source.replaceAll('\\(matchJSON)', JSON.stringify(matches))
         .replaceAll('\\(completionKeyJSON)', '"daily"')
+        .replaceAll('\\(rulesJSON)', JSON.stringify(rules))
         .replaceAll('\\(AutomationBridge.messageName)', 'cwebAutomation')
         .replaceAll('\\(code)', code);
     const built = swiftString(raw, 'return """');
@@ -371,7 +417,7 @@ function bridgePage({ completed = false, paused = false, nativePaused = false, m
     const dispatched = [];
     const window = {
         __cwebAutomationManuallyPaused: nativePaused,
-        location: { href: "https://example.com/checkin" },
+        location: { href: "https://example.com/checkin", hostname: "example.com" },
         localStorage: {
             getItem: key => storage.get(key) ?? null,
             setItem: (key, value) => storage.set(key, value),
@@ -433,4 +479,98 @@ test("completion found during native pause is delivered when the user resumes", 
     assert.deepEqual(p.types(), []);
     p.window.CwebCheckIn.resume();
     assert.deepEqual(p.types(), ["resume", "success"]);
+});
+
+
+test("historical parent row cannot complete via its child status", () => {
+    const history = element("昨天 签到成功", {tag: "li"});
+    const status = element("签到成功", {tag: "span", parentElement: history});
+    const action = element("立即签到");
+    const p = page([status, action]);
+    assert.equal(action.clicks, 1);
+    assert.deepEqual(p.types(), []);
+});
+
+test("captcha after submission resumes detection without submitting twice", () => {
+    const captcha = element("", {tag: "iframe", attributes: {src: "captcha"}, laidOut: false});
+    const action = element("立即签到", { onClick: () => { captcha.laidOut = true; } });
+    const p = page([action, captcha]);
+    p.advance(1200);
+    assert.ok(p.types().includes("captcha"));
+    captcha.laidOut = false;
+    p.resume(); p.advance(300);
+    assert.equal(action.clicks, 1);
+});
+
+const fillScript = swiftString(readFileSync(join(root, "ProfileBrowser/Services/CredentialFillScript.swift"), "utf8"), 'source = """');
+class Input {
+    constructor(options = {}) { Object.assign(this, {type:"text", name:"", autocomplete:"", disabled:false, readOnly:false, hidden:false, events:[]}, options); }
+    get value() { return this._value || ""; }
+    set value(value) { this._value = value; }
+    getClientRects() { return this.hidden ? [] : [{}]; }
+    closest(selector) { if (selector.startsWith('[hidden]')) return this.hidden ? {} : null; return null; }
+    dispatchEvent(event) { this.events.push(event.type); }
+}
+function inputMatches(input, selector) {
+    if (selector === 'input:not([type="password"])') return input.type !== "password";
+    if (selector === 'input:not([type])') return false;
+    const match = selector.match(/^input\[(type|autocomplete|name)(\*?=)"([^"]*)"(?: i)?\]$/);
+    assert.ok(match, selector);
+    return match[2] === '*=' ? input[match[1]].toLowerCase().includes(match[3]) : input[match[1]] === match[3];
+}
+function form(inputs) {
+    const value = {querySelectorAll: selector => inputs.filter(input => inputMatches(input, selector))};
+    inputs.forEach(input => { input.form = value; input.parentElement = value; });
+    return value;
+}
+function fillPage(inputs, activeElement) {
+    const document = {body:{}, activeElement, querySelectorAll: selector => inputs.filter(input => inputMatches(input, selector))};
+    return runInNewContext('(function() {' + fillScript + '})()', {document, HTMLInputElement:Input,
+        getComputedStyle: () => ({display:'block',visibility:'visible'}), Event: class {constructor(type) {this.type=type;}}, username:'account', password:'secret'});
+}
+
+test("autofill ignores page search and hidden fields and uses username priority in the password form", () => {
+    const search = new Input({type:"search", name:"query"}); form([search]);
+    const hidden = new Input({type:"password", hidden:true}); form([hidden]);
+    const generic = new Input({name:"other"});
+    const username = new Input({autocomplete:"username"});
+    const password = new Input({type:"password", autocomplete:"current-password"}); form([generic, username, password]);
+    const result = fillPage([search, hidden, generic, username, password]);
+    assert.equal(result.usernameFilled, true); assert.equal(result.passwordFilled, true);
+    assert.equal(search.value, ''); assert.equal(hidden.value, ''); assert.equal(generic.value, '');
+    assert.equal(username.value, 'account'); assert.equal(password.value, 'secret');
+    assert.deepEqual(password.events, ['input','change']);
+});
+
+test("autofill prefers focused login form and avoids registration passwords", () => {
+    const register = new Input({type:"password", autocomplete:"new-password"}); form([register]);
+    const firstUser = new Input({type:"email"}); const firstPassword = new Input({type:"password"}); form([firstUser, firstPassword]);
+    const user = new Input({autocomplete:"username"}); const password = new Input({type:"password"}); form([user, password]);
+    fillPage([register, firstUser, firstPassword, user, password], user);
+    assert.equal(user.value, 'account'); assert.equal(password.value, 'secret');
+    assert.equal(firstUser.value, ''); assert.equal(firstPassword.value, ''); assert.equal(register.value, '');
+});
+
+test("autofill does not fill username when no visible login password exists", () => {
+    const search = new Input({name:"userSearch"}); form([search]);
+    const result = fillPage([search]);
+    assert.equal(result.usernameFilled, false); assert.equal(search.value, '');
+});
+
+const balanceScript = swiftString(readFileSync(join(root, "ProfileBrowser/Services/BalanceReadScript.swift"), "utf8"), 'source = """');
+function readBalance({values=[], ready=true, loading=false, state='complete'} = {}) {
+    const document = {readyState:state, querySelector:() => ready ? new Input() : null,
+        querySelectorAll: selector => selector === '#balance' ? values.map(textContent => Object.assign(new Input(),{textContent}))
+            : selector.startsWith('[aria-busy=') && loading ? [new Input()] : []};
+    return runInNewContext('(function() {' + balanceScript + '})()', {document, balanceSelector:'#balance', readySelector:'#loaded', getComputedStyle:()=>({display:'block'})});
+}
+
+test("balance waits for page and explicit readiness and rejects ambiguous sources", () => {
+    assert.equal(readBalance({values:['$0.00'], ready:false}), null);
+    assert.equal(readBalance({values:['$0.00'], loading:true}), null);
+    assert.equal(readBalance({values:['$12.00'], state:'interactive'}), null);
+    assert.equal(readBalance({values:['$12.00','$40.00']}), null);
+    assert.equal(readBalance({values:['loading…']}), null);
+    assert.equal(readBalance({values:['$0.00']}), '$0.00');
+    assert.equal(readBalance({values:['$12.50']}), '$12.50');
 });

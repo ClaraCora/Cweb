@@ -23,10 +23,16 @@ struct BrowserProfile: Identifiable, Codable, Hashable, Sendable {
     var homePage: URL
     var color: ProfileColor
     var cachedBalance: String?
+    var balanceUpdatedAt: Date?
+    var balanceReadError: String?
+    var balanceSourceVerified: Bool?
     /// The currently selected SOCKS display number. This intentionally points
     /// to the volatile ranked position rather than a proxy record ID: feed
     /// refreshes can replace the endpoint behind the same number.
     var socksProxyNumber: Int?
+    /// A copied or conflicting binding requires an explicit choice before any
+    /// network request. It must never be confused with intentional direct use.
+    var unresolvedProxyNumber: Int?
     let createdAt: Date
     var updatedAt: Date
     var lastOpenedAt: Date?
@@ -46,6 +52,7 @@ struct BrowserProfile: Identifiable, Codable, Hashable, Sendable {
         color: ProfileColor = .indigo,
         cachedBalance: String? = nil,
         socksProxyNumber: Int? = nil,
+        unresolvedProxyNumber: Int? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now,
         lastOpenedAt: Date? = nil
@@ -64,6 +71,7 @@ struct BrowserProfile: Identifiable, Codable, Hashable, Sendable {
         self.color = color
         self.cachedBalance = cachedBalance
         self.socksProxyNumber = socksProxyNumber
+        self.unresolvedProxyNumber = unresolvedProxyNumber
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.lastOpenedAt = lastOpenedAt

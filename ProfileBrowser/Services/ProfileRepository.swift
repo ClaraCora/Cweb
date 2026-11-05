@@ -4,14 +4,19 @@ struct ProfileRepository {
     private let fileManager: FileManager
     private let fileURL: URL
     private let readData: (URL) throws -> Data
+    private let writeData: (Data, URL) throws -> Void
 
     init(
         fileManager: FileManager = .default,
         fileURL: URL? = nil,
+        writeData: @escaping (Data, URL) throws -> Void = {
+            try $0.write(to: $1, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        },
         readData: @escaping (URL) throws -> Data = { try Data(contentsOf: $0) }
     ) {
         self.fileManager = fileManager
         self.readData = readData
+        self.writeData = writeData
 
         if let fileURL {
             self.fileURL = fileURL
@@ -33,10 +38,7 @@ struct ProfileRepository {
         let directory = fileURL.deletingLastPathComponent()
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         let data = try Self.makeEncoder().encode(profiles)
-        try data.write(
-            to: fileURL,
-            options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
-        )
+        try writeData(data, fileURL)
     }
 
     private static func makeEncoder() -> JSONEncoder {

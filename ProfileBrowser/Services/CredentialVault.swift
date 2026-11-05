@@ -7,9 +7,12 @@ final class CredentialVault {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private var inMemoryItems: [UUID: Data]?
+    enum Mutation { case save(StoredCredential), delete(UUID), deleteAll(UUID) }
+    private let beforeMutation: ((Mutation) throws -> Void)?
 
-    init(inMemory: Bool = false) {
+    init(inMemory: Bool = false, beforeMutation: ((Mutation) throws -> Void)? = nil) {
         inMemoryItems = inMemory ? [:] : nil
+        self.beforeMutation = beforeMutation
     }
 
     func credentials(profileID: UUID, origin: WebOrigin? = nil) throws -> [StoredCredential] {
@@ -55,6 +58,7 @@ final class CredentialVault {
     }
 
     func save(_ credential: StoredCredential) throws {
+        try beforeMutation?(.save(credential))
         let data = try encoder.encode(credential)
         if inMemoryItems != nil {
             inMemoryItems![credential.id] = data
@@ -80,6 +84,7 @@ final class CredentialVault {
     }
 
     func delete(_ credential: StoredCredential) throws {
+        try beforeMutation?(.delete(credential.id))
         if inMemoryItems != nil {
             inMemoryItems!.removeValue(forKey: credential.id)
             return
@@ -97,6 +102,7 @@ final class CredentialVault {
     }
 
     func deleteAll(profileID: UUID) throws {
+        try beforeMutation?(.deleteAll(profileID))
         if inMemoryItems != nil {
             let matchingIDs = try inMemoryItems!.compactMap { id, data -> UUID? in
                 let credential = try decoder.decode(StoredCredential.self, from: data)
@@ -120,6 +126,19 @@ final class CredentialVault {
 
     private func service(for profileID: UUID) -> String {
         "\(servicePrefix).\(profileID.uuidString.lowercased())"
+    }
+
+    func replace(profileID: UUID, with values: [StoredCredential]) throws {
+        let existing = try credentials(profileID: profileID)
+        let retained = Set(values.map(\.id))
+        var errors: [String] = []
+        for value in values {
+            do { try save(value) } catch { errors.append(error.localizedDescription) }
+        }
+        for value in existing where !retained.contains(value.id) {
+            do { try delete(value) } catch { errors.append(error.localizedDescription) }
+        }
+        if !errors.isEmpty { throw StorageTransactionError.recovery(errors.joined(separator: "\n")) }
     }
 }
 

@@ -57,6 +57,7 @@ struct GroupCheckInTests {
             userDefaults: defaults
         )
         let profiles = (1...3).map { BrowserProfile(name: "环境 \($0)") }
+        try model.addImportedProfiles(profiles)
         model.recordAutomationSuccess(for: profiles[0].id)
         let controller = GroupCheckInController(groupName: "测试", profiles: profiles, model: model, refreshBalance: { _ in })
         #expect(controller.session == nil) // Creating a run never starts browsing.

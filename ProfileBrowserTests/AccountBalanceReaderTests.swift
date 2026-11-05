@@ -52,6 +52,16 @@ struct AccountBalanceReaderTests {
     }
 
     @Test
+    func unstableAmountIsNotPublishedAsAFreshBalance() async throws {
+        var read = 0
+        let value = try await AccountBalanceReader.read(afterCheckIn: true) {} readValue: {
+            read += 1
+            return "$" + String(read)
+        } wait: {}
+        #expect(value == nil)
+    }
+
+    @Test
     func entryReadReturnsImmediatelyAndRetriesTransientErrors() async throws {
         var reads = 0
         var waits = 0

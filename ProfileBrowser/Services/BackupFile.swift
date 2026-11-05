@@ -40,8 +40,10 @@ struct BackupImportFile: Sendable {
         var readResult: Result<Data, Error>?
         NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &coordinationError) { readableURL in
             readResult = Result {
-                let values = try readableURL.resourceValues(forKeys: [.isRegularFileKey])
+                let values = try readableURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
                 guard values.isRegularFile == true else { throw BackupError.invalidFormat }
+                guard let size = values.fileSize, size <= BackupService.maximumFileSize else { throw BackupError.fileTooLarge }
+                try Task.checkCancellation()
                 return try Data(contentsOf: readableURL)
             }
         }

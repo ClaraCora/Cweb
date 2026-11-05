@@ -5,6 +5,7 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
     var enabled: Bool
     var source: String
     var updatedAt: Date
+    var siteRules: [WebsiteRule]? = nil
 
     static let `default` = GlobalScriptSettings(
         enabled: false,
@@ -18,6 +19,14 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
         (() => {
             const api = window.CwebCheckIn;
             if (!api) return;
+            const rule = window.CwebSiteRule || {};
+            const select = (selector) => {
+                try {
+                    const root = rule.checkInContainerSelector
+                        ? document.querySelectorAll(rule.checkInContainerSelector)[0] : document;
+                    return root ? [...root.querySelectorAll(selector)] : [];
+                } catch (_) { return []; }
+            };
 
             const signWords = /签到|每日签到|check[\\s-]?in|daily\\s*sign/i;
             // A generic "success" or "已完成" elsewhere is not a check-in result.
@@ -33,8 +42,10 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
             let debounceTimer;
             let noButtonTimer;
             let successTimer;
+            let submissionTimer;
             let hasClicked = false;
             let hasCompleted = false;
+            let submissionFailed = false;
 
             const textOf = (element) =>
                 (typeof element?.innerText === "string"
@@ -46,9 +57,9 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
                 return visibility !== "hidden" && visibility !== "collapse";
             };
 
-            const findSignButton = () => [...document.querySelectorAll(
+            const findSignButton = () => select(rule.actionSelector ||
                 'button, a, [role="button"]'
-            )].find((element) => {
+            ).find((element) => {
                 const text = textOf(element);
                 return isVisible(element) && text && signWords.test(text)
                     && !/已签到|已完成|不可用|disabled/i.test(text)
@@ -59,19 +70,45 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
                     && !element.querySelector("h1, h2, h3, h4, h5, h6");
             });
 
-            const pageShowsCompletion = () => [...document.querySelectorAll(
+            const historical = (text) => {
+                if (/昨天|昨日|前天|历史|上次|上月|yesterday|previous|last\\s+(?:day|week|month)/i.test(text)) return true;
+                const date = text.match(/(20\\d{2})[-/.年](\\d{1,2})[-/.月](\\d{1,2})/);
+                if (!date) return false;
+                const today = new Date();
+                return Number(date[1]) !== today.getFullYear()
+                    || Number(date[2]) !== today.getMonth() + 1 || Number(date[3]) !== today.getDate();
+            };
+
+            const hasHistoricalContext = (element) => {
+                let current = element;
+                for (let depth = 0; current && depth < 4; depth++, current = current.parentElement) {
+                    if (current === document.body || current === document.documentElement) break;
+                    if (historical(textOf(current))) return true;
+                    if (current.getAttribute && historical(current.getAttribute('data-date') || '')) return true;
+                }
+                return false;
+            };
+
+            const pageShowsCompletion = () => select(rule.completionSelector ||
                 '[role="status"], [aria-live], .toast, .alert, button, a, [role="button"], p, span, div, li, td, strong'
-            )].some((element) => {
+            ).some((element) => {
                 const text = textOf(element);
                 return text.length <= 160 && isVisible(element) && completionWords.test(text)
-                    && !/未签到|未完成|签到失败/i.test(text);
+                    && !hasHistoricalContext(element) && !/未签到|未完成|签到失败/i.test(text);
             });
+
+            const pageShowsFailure = () => select(rule.failureSelector ||
+                '[role="status"], [aria-live], .toast, .alert, p, span, div'
+            ).some((element) => isVisible(element) && textOf(element).length <= 160
+                && !hasHistoricalContext(element)
+                && /签到失败|签到出错|check[\\s-]?in\\s+(?:failed|error)/i.test(textOf(element)));
 
             const finish = () => {
                 hasCompleted = true;
                 clearTimeout(noButtonTimer);
                 clearTimeout(debounceTimer);
                 clearTimeout(successTimer);
+                clearTimeout(submissionTimer);
                 observer.disconnect();
                 api.success("页面显示已完成签到");
             };
@@ -90,12 +127,25 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
                     return;
                 }
 
+                if (hasClicked && pageShowsFailure()) {
+                    clearTimeout(submissionTimer);
+                    submissionFailed = true;
+                    api.error("签到提交失败，请检查页面后手动重试或跳过");
+                    return;
+                }
+
                 const button = findSignButton();
                 if (!button) return;
 
                 clearTimeout(noButtonTimer);
                 if (hasClicked) return;
                 hasClicked = true;
+                submissionTimer = setTimeout(() => {
+                    if (!hasCompleted && !api.isPaused()) {
+                        submissionFailed = true;
+                        api.error("提交后未收到签到结果，请检查页面后手动重试或跳过");
+                    }
+                }, Math.max(5, Math.min(120, rule.submissionTimeoutSeconds || 30)) * 1000);
                 button.click();
 
                 // Reuse the same checks so a newly displayed CAPTCHA always
@@ -120,7 +170,16 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
 
             window.addEventListener("cwebAutomationResume", () => {
                 if (hasCompleted) return;
-                hasClicked = false;
+                if (submissionFailed) { hasClicked = false; submissionFailed = false; }
+                clearTimeout(submissionTimer);
+                if (hasClicked) {
+                    submissionTimer = setTimeout(() => {
+                        if (!hasCompleted && !api.isPaused()) {
+                            submissionFailed = true;
+                            api.error("提交后未收到签到结果，请检查页面后手动重试或跳过");
+                        }
+                    }, Math.max(5, Math.min(120, rule.submissionTimeoutSeconds || 30)) * 1000);
+                }
                 armNoButtonTimer();
                 schedule();
             });
@@ -153,7 +212,8 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
             .map { String(format: "%02x", $0) }.joined()
         let bundledFingerprints: Set<String> = [
             "0a086ed37b237890a33ca9c3a5cd601f866d4a1940742d14c3ba38d94709d41a",
-            "6b022d4272cb410163ce49c802c932c45a9920c6e685839eed538872eb72c43c"
+            "6b022d4272cb410163ce49c802c932c45a9920c6e685839eed538872eb72c43c",
+            "34c285f8ce439f24819a6b013f52824e3d5cefb10073403d809dd3a0a9c8a554"
         ]
         guard bundledFingerprints.contains(digest) else {
             return self

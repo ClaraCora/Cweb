@@ -157,6 +157,13 @@ struct GroupCheckInView: View {
 
     @ViewBuilder
     private var detailActions: some View {
+        if controller.session?.automationState == .error {
+            Button("重新尝试签到", systemImage: "arrow.clockwise") {
+                Task { await controller.session?.resumeAutomation() }
+            }
+            .disabled(controller.isPaused || controller.isRefreshingBalance)
+            .frame(minHeight: 44)
+        }
         Button("跳过当前环境", systemImage: "forward.end") { controller.skip() }
             .disabled(!controller.canSkip)
             .frame(minHeight: 44)

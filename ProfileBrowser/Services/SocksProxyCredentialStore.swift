@@ -10,7 +10,10 @@ final class SocksProxyCredentialStore: @unchecked Sendable {
     private var inMemoryItems: [UUID: Data]?
     private let lock = NSLock()
 
-    init(inMemory: Bool = false) {
+    private let beforeMutation: (@Sendable (UUID) throws -> Void)?
+
+    init(inMemory: Bool = false, beforeMutation: (@Sendable (UUID) throws -> Void)? = nil) {
+        self.beforeMutation = beforeMutation
         inMemoryItems = inMemory ? [:] : nil
     }
 
@@ -37,6 +40,7 @@ final class SocksProxyCredentialStore: @unchecked Sendable {
     }
 
     func save(password: String?, for proxyID: UUID) throws {
+        try beforeMutation?(proxyID)
         let normalized = password?.isEmpty == false ? password : nil
         if inMemoryItems != nil {
             lock.lock()
@@ -72,6 +76,7 @@ final class SocksProxyCredentialStore: @unchecked Sendable {
     }
 
     func delete(for proxyID: UUID) throws {
+        try beforeMutation?(proxyID)
         if inMemoryItems != nil {
             lock.lock()
             inMemoryItems!.removeValue(forKey: proxyID)

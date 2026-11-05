@@ -36,11 +36,15 @@ final class BrowserSession {
         self.socksProxy = socksProxy
         self.addressText = profile.homePage.absoluteString
 
+        WebsiteDataStoreManager.lease(profile.websiteDataStoreID)
         let dataStore = WKWebsiteDataStore(forIdentifier: profile.websiteDataStoreID)
         self.dataStore = dataStore
 
         var proxyConfigurationError: String?
-        if let socksProxy, let endpoint = Self.endpoint(for: socksProxy) {
+        if profile.unresolvedProxyNumber != nil {
+            dataStore.proxyConfigurations = []
+            proxyConfigurationError = "此环境的代理选择需要处理，请在编辑环境中重新选择代理或明确选择不使用代理。"
+        } else if let socksProxy, let endpoint = Self.endpoint(for: socksProxy) {
             var proxyConfiguration = ProxyConfiguration(socksv5Proxy: endpoint)
             // Never fall back to a direct connection if the selected proxy
             // fails. That would expose the environment's real network path.
@@ -137,7 +141,8 @@ final class BrowserSession {
         let source = AutomationScriptBuilder.build(
             code: parsed.source,
             matches: parsed.matches,
-            completionKey: completionKey
+            completionKey: completionKey,
+            siteRules: settings.siteRules ?? []
         )
         let injectionTime: WKUserScriptInjectionTime = parsed.runsAtDocumentStart
             ? .atDocumentStart
@@ -255,6 +260,16 @@ final class BrowserSession {
     }
 
     func start() {
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-ui-testing") {
+            guard !hasStarted, !isClosed else { return }
+            hasStarted = true
+            startNavigation {
+                page.load(html: "<html><head><meta name='viewport' content='width=device-width'></head><body><h1>本地测试页面</h1><p>请处理验证码后继续</p><form><input autocomplete='username'><input type='password' autocomplete='current-password'></form></body></html>", baseURL: profile.homePage)
+            }
+            return
+        }
+#endif
         guard !hasStarted, !isClosed else { return }
         if let proxyConfigurationError {
             presentedError = PresentedError(message: proxyConfigurationError)
@@ -449,29 +464,8 @@ final class BrowserSession {
             throw CredentialFillError.originChanged
         }
 
-        let functionBody = """
-        const setValue = (element, value) => {
-            if (!element) return false;
-            const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
-            descriptor.set.call(element, value);
-            element.dispatchEvent(new Event('input', { bubbles: true }));
-            element.dispatchEvent(new Event('change', { bubbles: true }));
-            return true;
-        };
-
-        const passwordInput = document.querySelector('input[type="password"]');
-        const usernameInput = document.querySelector(
-            'input[autocomplete="username"], input[type="email"], input[name*="user" i], input[type="text"]'
-        );
-
-        return {
-            usernameFilled: setValue(usernameInput, username),
-            passwordFilled: setValue(passwordInput, password)
-        };
-        """
-
         let value = try await page.callJavaScript(
-            functionBody,
+            CredentialFillScript.source,
             arguments: [
                 "username": credential.username,
                 "password": credential.password
@@ -486,32 +480,14 @@ final class BrowserSession {
         )
     }
 
-    func readAccountBalance() async throws -> String? {
-        let functionBody = """
-        if (document.readyState === 'loading') return null;
-        const element = [...document.querySelectorAll('div')].find((node) => {
-            const classes = node.classList;
-            return classes.contains('text-foreground')
-                && classes.contains('mt-1.5')
-                && classes.contains('font-mono')
-                && classes.contains('text-lg')
-                && classes.contains('font-bold')
-                && classes.contains('tracking-tight')
-                && classes.contains('tabular-nums');
-        });
-        return element?.textContent?.trim() || null;
-        """
-
+    func readAccountBalance(rule: WebsiteRule? = nil) async throws -> String? {
         let value = try await page.callJavaScript(
-            functionBody,
-            arguments: [:],
-            in: nil,
-            contentWorld: .page
+            BalanceReadScript.source,
+            arguments: ["balanceSelector": rule?.balanceSelector ?? "", "readySelector": rule?.balanceReadySelector ?? ""],
+            in: nil, contentWorld: .page
         )
         guard !isClosed, let balance = value as? String else { return nil }
-        let trimmed = balance.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        return trimmed
+        return balance
     }
 
     static func resolveAddress(_ input: String) -> URL? {
