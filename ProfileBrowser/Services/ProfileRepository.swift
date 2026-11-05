@@ -9,10 +9,10 @@ struct ProfileRepository {
     init(
         fileManager: FileManager = .default,
         fileURL: URL? = nil,
+        readData: @escaping (URL) throws -> Data = { try Data(contentsOf: $0) },
         writeData: @escaping (Data, URL) throws -> Void = {
             try $0.write(to: $1, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-        },
-        readData: @escaping (URL) throws -> Data = { try Data(contentsOf: $0) }
+        }
     ) {
         self.fileManager = fileManager
         self.readData = readData

@@ -23,6 +23,7 @@
 
 ## 本地检查结果与边界
 
+- 构建 #65（9dc01db）在编译 AppModelTests 时失败：两处旧读取尾随闭包被 Swift 6 绑定到新写入参数。已恢复读取参数在前的顺序，并在测试调用处显式标注 `readData:`；相关 key path 和颜色推断错误为连带错误。此修复仍需 Apple 环境重新编译确认。
 - `node --test scripts/check-in.test.cjs`：33/33 通过，无跳过。
 - 本次新增及修改的 52 个 Swift 文件通过 tree-sitter 语法解析；这不是 Swift 类型检查。
 - XcodeGen 工程描述和 GitHub Actions 工作流通过 YAML 解析；`git diff --check` 无空白错误。

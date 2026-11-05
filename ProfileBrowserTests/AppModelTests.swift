@@ -16,13 +16,13 @@ struct AppModelTests {
         try writer.save([expected])
 
         var readAttempt = 0
-        let repository = ProfileRepository(fileURL: fileURL) { url in
+        let repository = ProfileRepository(fileURL: fileURL, readData: { url in
             readAttempt += 1
             if readAttempt == 1 {
                 throw CocoaError(.fileReadUnknown)
             }
             return try Data(contentsOf: url)
-        }
+        })
         let model = AppModel(profileRepository: repository)
 
         #expect(model.isLoadingProfiles)
@@ -47,9 +47,9 @@ struct AppModelTests {
         let originalData = Data("not available yet".utf8)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try originalData.write(to: fileURL)
-        let repository = ProfileRepository(fileURL: fileURL) { _ in
+        let repository = ProfileRepository(fileURL: fileURL, readData: { _ in
             throw CocoaError(.fileReadNoPermission)
-        }
+        })
         let model = AppModel(profileRepository: repository)
 
         #expect(throws: ProfileError.profileStoreUnavailable) {
