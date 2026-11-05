@@ -55,6 +55,7 @@ struct ListRowButtonStyle: ButtonStyle {
 }
 
 struct AppSettingsRow: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let title: String
     let detail: String?
     let icon: String
@@ -66,9 +67,16 @@ struct AppSettingsRow: View {
     }
 
     var body: some View {
-        Label {
+        HStack(spacing: AppUI.Spacing.row) {
+            if !dynamicTypeSize.isAccessibilitySize {
+                Image(systemName: icon)
+                    .font(.body)
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 24)
+                    .accessibilityHidden(true)
+            }
             VStack(alignment: .leading, spacing: AppUI.Spacing.tight) {
-                Text(title).foregroundStyle(.primary)
+                Text(title).foregroundStyle(Color.primary)
                 if let detail {
                     Text(detail)
                         .font(.caption)
@@ -76,15 +84,11 @@ struct AppSettingsRow: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-        } icon: {
-            Image(systemName: icon)
-                .font(.body)
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 24)
-                .accessibilityHidden(true)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, AppUI.Spacing.tight)
         .frame(minHeight: AppUI.minimumTarget)
+        .contentShape(Rectangle())
     }
 }
 

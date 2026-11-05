@@ -48,14 +48,7 @@ struct SettingsView: View {
                 Button {
                     showsBackup = true
                 } label: {
-                    HStack {
-                        AppSettingsRow("加密备份", icon: "lock.doc")
-                        Spacer(minLength: AppUI.Spacing.related)
-                        Image(systemName: "arrow.up.arrow.down")
-                            .font(.caption)
-                            .foregroundStyle(AppUI.secondaryText)
-                            .accessibilityHidden(true)
-                    }
+                    AppSettingsRow("加密备份", icon: "lock.doc")
                 }
                 .accessibilityLabel("加密备份")
                 .accessibilityHint("导出加密备份或导入已有备份")

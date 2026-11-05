@@ -8,7 +8,9 @@ final class NativeUIRegressionTests: XCTestCase {
     private func launch(dark: Bool = false, large: Bool = false, resume: Bool = false) -> XCUIApplication {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
-        app.launchArguments = ["-ui-testing", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN", "-AppleInterfaceStyle", dark ? "Dark" : "Light"]
+        // Exercise the real app appearance preference; AppleInterfaceStyle is
+        // not reliably applied to a SwiftUI scene by iOS 26 test launches.
+        app.launchArguments = ["-ui-testing", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN", "-app.appearanceMode", dark ? "dark" : "light"]
         if large { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
         if resume { app.launchArguments.append("-ui-test-resume") }
         app.launch()

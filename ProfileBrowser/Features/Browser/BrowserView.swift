@@ -81,11 +81,14 @@ struct BrowserView: View {
                 .accessibilityIdentifier("browser.webPage")
                 .overlay(alignment: .bottomTrailing) {
                     if browserChromePresentation == nil, !browserChromeBinding.wrappedValue {
-                        Button("显示浏览器工具栏", systemImage: "chevron.up") {
+                        Button {
                             showsBrowserChrome = true
+                        } label: {
+                            Label("显示浏览器工具栏", systemImage: "chevron.up")
+                                .labelStyle(.iconOnly)
+                                .frame(minWidth: AppUI.minimumTarget, minHeight: AppUI.minimumTarget)
+                                .contentShape(Rectangle())
                         }
-                        .labelStyle(.iconOnly)
-                        .frame(minWidth: AppUI.minimumTarget, minHeight: AppUI.minimumTarget)
                         .buttonStyle(.glass)
                         .buttonBorderShape(.circle)
                         .padding(AppUI.Spacing.row)
