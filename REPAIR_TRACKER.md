@@ -63,3 +63,23 @@
 - 按用户最新要求，推送与默认手动构建均跳过 iPhone/iPad 模拟器测试及截图导出，只编译设备版 IPA 并发布到 Releases。保留 `workflow_dispatch.run_native_tests` 手动开关，默认关闭；关闭时发布不再要求原生测试 ZIP。
 - 本地检查：33 项 JavaScript 回归通过，3 个改动 Swift 文件通过语法解析，工作流 YAML 与默认测试关闭条件检查通过，`git diff --check` 通过。Windows 不能运行 SwiftUI；本次不宣称已做原生截图验收。
 - [构建 #77](https://github.com/ClaraCora/Cweb/actions/runs/41996668438) 成功，提交 `55f1a38`，总耗时约 1 分 38 秒；确认 iPhone/iPad 模拟器测试、原生诊断和截图导出均跳过，设备 Release 编译、打包及 Releases 发布通过。[构建 77.1 下载](https://github.com/ClaraCora/Cweb/releases/tag/ios-unsigned-77-1) 已下载校验 ZIP、SHA256 与包内构建/提交信息，均一致；SHA256：`dc56fc4a2b4af2fb59f757eefc0e1f18470f7d9279eadbc972f644064fc05682`。本轮未执行模拟器或实机视觉验证，显示效果待实机确认。
+
+## 金额读取回归修复（2026-11-06，本机 macOS）
+
+- 原金额脚本要求整个页面 `complete`、全页没有加载指示器且候选元素恰好一个，导致包含消费/充值金额卡片、响应式副本或无关加载区域的页面读不到余额。真实 WebKit 回归已在旧代码上复现多卡片、无标签旧页面及响应式副本读取失败。
+- 改为 DOM 就绪后只检查余额自身及显式就绪规则；相同金额副本可以读取，冲突的明确来源仍会拒绝。旧样式卡片优先使用附近余额标签，无标签时保留原先首个金额行为，来源继续标记待核验；忽略 `visibility:hidden` 的副本。
+- 原生 HTTP 测试另复现了签到刷新被旧导航取消的竞态（`NSURLErrorDomain -999`，服务器未收到第二次页面请求）。新导航现在等待旧导航任务取消完毕后才创建，主动停止和刷新超时也保留取消任务供下次导航等待。
+- 新增 `BalanceReadWebKitTests`：覆盖多卡片、无标签旧页面、重复金额/无关加载/隐藏副本、未就绪/金额自身忙碌/冲突/合法零金额，以及真实本地 HTTP 页面手动进入、签到后源站刷新、缓存落盘和不重复执行签到脚本。HTTP 测试故意悬挂无关图片请求，确认 `interactive` 状态仍可读取。
+- 本地 Xcode 26.6、iOS 26.5 iPhone 16 Pro 模拟器：上述 5 项真实 WebKit 测试通过；33 项 JavaScript 回归通过。测试使用本地页面，不包含用户账户或真实站点的登录数据。
+- 完整本地回归：113 项 Swift Testing 单元测试（14 个套件，含上述 5 项）及 6 项 XCTest 界面测试全部通过，零失败、零跳过。原生结果保存在 `build/validation/FullRegression.xcresult`；机器摘要为 `build/unsigned/TEST-RESULTS.json`。界面覆盖工具栏、已签到行高度、横屏、深浅色/大字体、密码前后台遮挡和任务重启恢复。
+- 本地设备 Release 编译及未签名 IPA 打包通过，版本 `1.0.0`、构建 `78.1`、基线提交标记 `b4ca208-local`。最终产物为 `build/unsigned/ProfileBrowser-unsigned-78.1-balance-fix.ipa`，SHA256：`1e8e58b52a6ffffb70d99a71d9ba4c6287ec5bcdd5f9f8eb6c70713bb6a0b88e`。已检查 ZIP 完整性、设备平台、arm64 可执行文件、版本元数据，以及 App/可执行文件均未签名且无描述文件。构建信息、校验和及本地验证记录与包放在同一目录。
+
+## 余额来源提示与 JuAPI 卡片兼容（2026-11-06，本机 macOS）
+
+- 复现 78.1 的后续问题：自动读取成功仍因未同时配置两个选择器被标为待核验；JuAPI 控制台使用 `dashboard-stat-label/value`，旧选择器完全未匹配。修复前的真实 WebKit 测试在这两项上失败，证据为 `build/validation/BalanceStylesBaseline.xcresult`。
+- 读取结果现在携带金额及来源状态；明确语义属性、余额标签卡片和用户指定的余额元素均可确认来源，显示更新时间。加载标记为可选项，配置后仍严格检查。无标签的旧版首个金额回退保留来源待确认提示。
+- 增加 JuAPI `dashboard-stat-*`、Semi 和 Ant 统计卡片识别，将余额标签限定到同一张卡片，排除历史余额、历史消耗、请求次数和统计额度。余额占位、忙碌或明确来源冲突时仍拒绝读取；已发现余额卡片但金额尚未渲染时，不回退抓取其他金额。
+- 在用户已登录的 JuAPI 控制台进行了只读 DOM 检查，新逻辑读出的金额与“当前余额”卡片一致，来源状态为已确认。测试页面使用合成金额，不保存账号、Cookie 或真实账户金额；真实站点本次没有执行签到或充值。
+- 余额专项回归：20 项原生测试通过，包含 JuAPI 实际结构、Semi/Ant、规则不带加载标记、来源状态稳定性、冲突/忙碌/占位以及两类页面手动进入和签到刷新后的缓存持久化。证据为 `build/validation/BalanceStylesFixed.xcresult`。
+- 本轮本机回归：33 项 JavaScript、118 项 Swift Testing 单元测试（14 个套件）、1 项已签到行状态及紧凑高度的原生 UI 测试全部通过，零失败、零跳过；本轮未重跑其余 5 项 UI 用例。原生证据为 `build/validation/Balance78_2Regression.xcresult` 和 `build/validation/Balance78_2UI.xcresult`。
+- 设备 Release 编译和 IPA 打包完成；新包为 `build/unsigned/78.2/ProfileBrowser-unsigned-78.2-balance-fix.ipa`，版本 `1.0.0 (78.2)`，SHA256：`368e61a9f9244aa4ff280703cf3faefa2e850dd4826e55ed6b624f42a93229d1`。已验证 ZIP、arm64/iPhoneOS 平台、包内版本和本地提交标记，以及 App/可执行文件均未签名且无描述文件。校验和、构建信息和验证记录保存在同一目录。

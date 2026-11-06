@@ -652,7 +652,7 @@ final class AppModel {
         guard profile.cachedBalance != nil else { return nil }
         guard let date = profile.balanceUpdatedAt else { return "历史缓存，尚未更新" }
         if !Calendar.current.isDate(date, inSameDayAs: now) { return "历史缓存，已过期" }
-        if profile.balanceSourceVerified != true { return "页面金额待核验，请配置网站余额规则" }
+        if profile.balanceSourceVerified != true { return "页面金额已读取，来源待确认" }
         return "更新于 " + date.formatted(date: .omitted, time: .shortened)
     }
 
@@ -667,7 +667,7 @@ final class AppModel {
         let host = session.currentOrigin?.host.lowercased() ?? session.profile.homePageHost.lowercased()
         let rule = globalScriptSettings.siteRules?.first { $0.normalizedHost == host }
         do {
-            let value = try await AccountBalanceReader.read(
+            let reading = try await AccountBalanceReader.readResult(
                 afterCheckIn: afterCheckIn,
                 reloadPage: {
                     guard !session.isClosed, self.balanceRefreshes[profileID]?.token == token else { throw CancellationError() }
@@ -675,13 +675,13 @@ final class AppModel {
                 },
                 readValue: {
                     guard !session.isClosed, self.balanceRefreshes[profileID]?.token == token else { throw CancellationError() }
-                    return try await session.readAccountBalance(rule: rule)
+                    return try await session.readAccountBalanceResult(rule: rule)
                 }
             )
             try Task.checkCancellation()
             guard !session.isClosed, balanceRefreshes[profileID]?.token == token else { return }
-            saveBalanceState(value, for: profileID, verified: rule?.balanceSelector.isEmpty == false && rule?.balanceReadySelector.isEmpty == false,
-                error: value == nil ? "余额读取超时，显示历史缓存" : nil)
+            saveBalanceState(reading?.value, for: profileID, verified: reading?.sourceVerified == true,
+                error: reading == nil ? "余额读取超时，显示历史缓存" : nil)
         } catch is CancellationError { }
         catch {
             guard balanceRefreshes[profileID]?.token == token else { return }

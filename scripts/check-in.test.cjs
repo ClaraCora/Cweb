@@ -560,16 +560,20 @@ test("autofill does not fill username when no visible login password exists", ()
 const balanceScript = swiftString(readFileSync(join(root, "ProfileBrowser/Services/BalanceReadScript.swift"), "utf8"), 'source = """');
 function readBalance({values=[], ready=true, loading=false, state='complete'} = {}) {
     const document = {readyState:state, querySelector:() => ready ? new Input() : null,
-        querySelectorAll: selector => selector === '#balance' ? values.map(textContent => Object.assign(new Input(),{textContent}))
+        querySelectorAll: selector => selector === '#balance' ? values.map(textContent => Object.assign(new Input(),{textContent, querySelectorAll:()=>[]}))
             : selector.startsWith('[aria-busy=') && loading ? [new Input()] : []};
-    return runInNewContext('(function() {' + balanceScript + '})()', {document, balanceSelector:'#balance', readySelector:'#loaded', getComputedStyle:()=>({display:'block'})});
+    const result = runInNewContext('(function() {' + balanceScript + '})()', {document, balanceSelector:'#balance', readySelector:'#loaded', getComputedStyle:()=>({display:'block'})});
+    if (result) assert.equal(result.verified, true);
+    return result?.value ?? null;
 }
 
-test("balance waits for page and explicit readiness and rejects ambiguous sources", () => {
+test("balance waits for its source and explicit readiness without waiting for unrelated resources", () => {
     assert.equal(readBalance({values:['$0.00'], ready:false}), null);
-    assert.equal(readBalance({values:['$0.00'], loading:true}), null);
-    assert.equal(readBalance({values:['$12.00'], state:'interactive'}), null);
+    assert.equal(readBalance({values:['$0.00'], loading:true}), '$0.00');
+    assert.equal(readBalance({values:['$12.00'], state:'loading'}), null);
+    assert.equal(readBalance({values:['$12.00'], state:'interactive'}), '$12.00');
     assert.equal(readBalance({values:['$12.00','$40.00']}), null);
+    assert.equal(readBalance({values:['$12.00','$12.00']}), '$12.00');
     assert.equal(readBalance({values:['loading…']}), null);
     assert.equal(readBalance({values:['$0.00']}), '$0.00');
     assert.equal(readBalance({values:['$12.50']}), '$12.50');

@@ -17,6 +17,7 @@ final class BrowserSession {
     private(set) var automationMessage: String?
 
     private var hasStarted = false
+    // Retain a cancelled task until the next navigation can await its teardown.
     private var navigationTask: Task<Void, Never>?
     private var navigationGeneration = 0
     private var committedNavigationGeneration = 0
@@ -264,7 +265,7 @@ final class BrowserSession {
         if ProcessInfo.processInfo.arguments.contains("-ui-testing") {
             guard !hasStarted, !isClosed else { return }
             hasStarted = true
-            startNavigation {
+            startNavigation { [profile] page in
                 page.load(html: "<html><head><meta name='viewport' content='width=device-width'></head><body><h1>本地测试页面</h1><p>请处理验证码后继续</p><form><input autocomplete='username'><input type='password' autocomplete='current-password'></form></body></html>", baseURL: profile.homePage)
             }
             return
@@ -314,7 +315,7 @@ final class BrowserSession {
             return
         }
         addressText = url.absoluteString
-        startNavigation { page.load(url) }
+        startNavigation { $0.load(url) }
     }
 
     func syncAddressBar(with url: URL?) {
@@ -324,12 +325,12 @@ final class BrowserSession {
 
     func goBack() {
         guard let item = page.backForwardList.backList.last else { return }
-        startNavigation { page.load(item) }
+        startNavigation { $0.load(item) }
     }
 
     func goForward() {
         guard let item = page.backForwardList.forwardList.first else { return }
-        startNavigation { page.load(item) }
+        startNavigation { $0.load(item) }
     }
 
     func goHome() {
@@ -339,11 +340,10 @@ final class BrowserSession {
     func reloadOrStop() {
         if page.isLoading {
             navigationTask?.cancel()
-            navigationTask = nil
             navigationGeneration += 1
             page.stopLoading()
         } else {
-            startNavigation { page.reload() }
+            startNavigation { $0.reload() }
         }
     }
 
@@ -356,7 +356,7 @@ final class BrowserSession {
             throw CancellationError()
         }
         finishAutomationForBalanceRefresh()
-        startNavigation { page.reload(fromOrigin: true) }
+        startNavigation { $0.reload(fromOrigin: true) }
         let generation = navigationGeneration
         do {
             // Wait for the new document, not all its images/third-party
@@ -373,7 +373,6 @@ final class BrowserSession {
             if navigationGeneration == generation, !isClosed {
                 navigationGeneration += 1
                 navigationTask?.cancel()
-                navigationTask = nil
                 page.stopLoading()
             }
             throw error
@@ -392,34 +391,34 @@ final class BrowserSession {
     /// per active navigation also ensures a cancelled/previous load cannot
     /// surface an error after a newer navigation has begun.
     private func startNavigation<S: AsyncSequence>(
-        _ makeSequence: () -> S
+        _ makeSequence: @escaping @MainActor (WebPage) -> S
     ) where S.Element == WebPage.NavigationEvent {
-        navigationTask?.cancel()
-        navigationTask = nil
+        let previousTask = navigationTask
+        previousTask?.cancel()
         navigationGeneration += 1
         let generation = navigationGeneration
-        // Evaluate the loading API only after cancelling the previous task.
-        // WebPage stops its current load when the task observing the previous
-        // sequence is cancelled; reversing this order could stop the new load.
-        let sequence = makeSequence()
 
         navigationTask = Task { @MainActor [weak self] in
+            // Cancellation of WebPage's sequence stops its current load
+            // asynchronously. Wait for that cancellation to finish before
+            // creating the replacement, or it can stop the new reload too.
+            await previousTask?.value
+            guard !Task.isCancelled, let self, self.navigationGeneration == generation else { return }
+            let sequence = makeSequence(self.page)
             do {
                 for try await event in sequence {
-                    guard !Task.isCancelled, let self, self.navigationGeneration == generation else { return }
+                    guard !Task.isCancelled, self.navigationGeneration == generation else { return }
                     if case .committed = event { self.committedNavigationGeneration = generation }
                 }
             } catch {
                 guard !Task.isCancelled,
-                      let self,
                       self.navigationGeneration == generation else { return }
                 self.presentedError = PresentedError(
                     message: Self.navigationErrorMessage(error)
                 )
             }
 
-            guard let self,
-                  self.navigationGeneration == generation else { return }
+            guard self.navigationGeneration == generation else { return }
             self.navigationTask = nil
         }
     }
@@ -481,13 +480,19 @@ final class BrowserSession {
     }
 
     func readAccountBalance(rule: WebsiteRule? = nil) async throws -> String? {
+        try await readAccountBalanceResult(rule: rule)?.value
+    }
+
+    func readAccountBalanceResult(rule: WebsiteRule? = nil) async throws -> AccountBalanceReading? {
         let value = try await page.callJavaScript(
             BalanceReadScript.source,
             arguments: ["balanceSelector": rule?.balanceSelector ?? "", "readySelector": rule?.balanceReadySelector ?? ""],
             in: nil, contentWorld: .page
         )
-        guard !isClosed, let balance = value as? String else { return nil }
-        return balance
+        guard !isClosed, let result = value as? [String: Any],
+              let balance = result["value"] as? String,
+              let verified = result["verified"] as? Bool else { return nil }
+        return AccountBalanceReading(value: balance, sourceVerified: verified)
     }
 
     static func resolveAddress(_ input: String) -> URL? {

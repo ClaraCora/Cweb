@@ -1,5 +1,10 @@
 import Foundation
 
+struct AccountBalanceReading: Equatable {
+    let value: String
+    let sourceVerified: Bool
+}
+
 /// Reloads after confirmed check-in instead of waiting for an old document's
 /// balance to change. The whole operation is bounded, including WebKit calls.
 @MainActor
@@ -11,8 +16,22 @@ enum AccountBalanceReader {
         wait: @escaping @MainActor () async throws -> Void = { try await Task.sleep(for: .milliseconds(250)) },
         timeout: Duration? = nil
     ) async throws -> String? {
+        try await readResult(afterCheckIn: afterCheckIn, reloadPage: reloadPage, readValue: {
+            guard let value = try await readValue()?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !value.isEmpty else { return nil }
+            return value
+        }, wait: wait, timeout: timeout)
+    }
+
+    static func readResult<Value: Equatable>(
+        afterCheckIn: Bool,
+        reloadPage: @escaping @MainActor () async throws -> Void,
+        readValue: @escaping @MainActor () async throws -> Value?,
+        wait: @escaping @MainActor () async throws -> Void = { try await Task.sleep(for: .milliseconds(250)) },
+        timeout: Duration? = nil
+    ) async throws -> Value? {
         try Task.checkCancellation()
-        let completion = BalanceReadCompletion()
+        let completion = BalanceReadCompletion<Value>()
         let operation = Task { @MainActor in
             do {
                 try Task.checkCancellation()
@@ -37,26 +56,26 @@ enum AccountBalanceReader {
         }
     }
 
-    private static func readDocument(
+    private static func readDocument<Value: Equatable>(
         afterCheckIn: Bool,
-        readValue: @MainActor () async throws -> String?,
+        readValue: @MainActor () async throws -> Value?,
         wait: @MainActor () async throws -> Void
-    ) async throws -> String? {
+    ) async throws -> Value? {
         let attempts = afterCheckIn ? 20 : 48
-        var latestValue: String?
+        var latestValue: Value?
         var consecutiveMatches = 0
         for attempt in 0..<attempts {
             try Task.checkCancellation()
-            let value: String?
+            let value: Value?
             do {
-                value = try await readValue()?.trimmingCharacters(in: .whitespacesAndNewlines)
+                value = try await readValue()
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
                 value = nil
             }
             try Task.checkCancellation()
-            if let value, !value.isEmpty {
+            if let value {
                 if !afterCheckIn { return value }
                 consecutiveMatches = value == latestValue ? consecutiveMatches + 1 : 1
                 latestValue = value
@@ -73,6 +92,6 @@ enum AccountBalanceReader {
 }
 
 @MainActor
-private final class BalanceReadCompletion {
-    var result: Result<String?, Error>?
+private final class BalanceReadCompletion<Value> {
+    var result: Result<Value?, Error>?
 }

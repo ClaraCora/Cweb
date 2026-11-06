@@ -5,6 +5,17 @@ import Testing
 @MainActor
 struct AccountBalanceReaderTests {
     @Test
+    func sourceVerificationMustAlsoBeStableBeforePublishingAReading() async throws {
+        var reads = 0
+        let result = try await AccountBalanceReader.readResult(afterCheckIn: true, reloadPage: {}, readValue: {
+            reads += 1
+            return AccountBalanceReading(value: "$12.50", sourceVerified: reads > 1)
+        }, wait: {})
+        #expect(reads == 3)
+        #expect(result == AccountBalanceReading(value: "$12.50", sourceVerified: true))
+    }
+
+    @Test
     func successReloadsBeforeReadingAndUsesTheNewDocument() async throws {
         var reloads = 0
         var balance = "$10.00"
