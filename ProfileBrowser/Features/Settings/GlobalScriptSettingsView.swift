@@ -6,6 +6,9 @@ struct GlobalScriptSettingsView: View {
     @State private var scriptDraft = GlobalScriptSettings.default
     @State private var hasLoadedScript = false
     @State private var presentedError: PresentedError?
+    @State private var confirmsReset = false
+    @State private var previousSource: String?
+    @State private var saveFeedback: String?
 
     var body: some View {
         Form {
@@ -32,9 +35,13 @@ struct GlobalScriptSettingsView: View {
                 }
 
                 Button("恢复默认模板", systemImage: "arrow.counterclockwise") {
-                    scriptDraft.source = GlobalScriptSettings.default.source
+                    confirmsReset = true
                 }
 
+                if let previousSource {
+                    Button("撤销恢复模板") { scriptDraft.source = previousSource; self.previousSource = nil }
+                }
+                if !hasScriptChanges, let saveFeedback { Text(saveFeedback).font(.footnote).foregroundStyle(.secondary) }
                 if let result = model.lastAutomationResult {
                     let profileName = model.profiles.first(where: { $0.id == result.profileID })?.name ?? "已删除环境"
                     Label {
@@ -71,6 +78,10 @@ struct GlobalScriptSettingsView: View {
                     .disabled(!hasScriptChanges)
             }
         }
+        .confirmationDialog("替换当前脚本为默认模板？", isPresented: $confirmsReset, titleVisibility: .visible) {
+            Button("恢复模板") { previousSource = scriptDraft.source; scriptDraft.source = GlobalScriptSettings.default.source }
+            Button("取消", role: .cancel) {}
+        }
         .alert(item: $presentedError) { error in
             Alert(title: Text("保存失败"), message: Text(error.message), dismissButton: .default(Text("好")))
         }
@@ -88,6 +99,7 @@ struct GlobalScriptSettingsView: View {
                 source: scriptDraft.source
             )
             scriptDraft = model.globalScriptSettings
+            saveFeedback = "已保存，下次进入环境或新任务生效。"
         } catch {
             presentedError = PresentedError(message: error.localizedDescription)
         }

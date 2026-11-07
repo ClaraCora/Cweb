@@ -111,7 +111,7 @@ struct BackupService {
             return BrowserProfile(id: id, name: original.name, groupName: original.groupName,
                 groupCode: original.groupCode, groupEmoji: original.groupEmoji, groupSortOrder: original.groupSortOrder,
                 userAgent: original.userAgent, homePage: original.homePage, color: original.color,
-                socksProxyNumber: original.socksProxyNumber, unresolvedProxyNumber: original.unresolvedProxyNumber)
+                socksProxyNumber: original.socksProxyNumber, fixedProxyID: original.fixedProxyID, unresolvedProxyNumber: original.unresolvedProxyNumber)
         }
         archive.credentials = archive.credentials.map { original in
             StoredCredential(profileID: idMap[original.profileID]!, origin: original.origin,

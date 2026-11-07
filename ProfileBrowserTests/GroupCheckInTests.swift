@@ -59,8 +59,9 @@ struct GroupCheckInTests {
         )
         let profiles = (1...3).map { BrowserProfile(name: "环境 \($0)") }
         try model.addImportedProfiles(profiles)
+        for profile in model.profiles { model.confirmEntry(for: profile) }
         model.recordAutomationSuccess(for: profiles[0].id)
-        let controller = GroupCheckInController(groupName: "测试", profiles: profiles, model: model, refreshBalance: { _ in })
+        let controller = GroupCheckInController(groupName: "测试", profiles: profiles, model: model, refreshBalance: { _ in .updated("$0.00") })
         #expect(controller.session == nil) // Creating a run never starts browsing.
         controller.start()
         #expect(controller.queue.currentProfileID == profiles[1].id)
@@ -93,7 +94,7 @@ struct GroupCheckInTests {
         let gate = BalanceRefreshGate()
         let controller = GroupCheckInController(
             groupName: "测试", profiles: fixture.profiles, model: fixture.model,
-            refreshBalance: { _ in await gate.wait() }
+            refreshBalance: { _ in await gate.wait(); return .updated("$0.00") }
         )
         controller.start()
         let firstSession = try #require(controller.session)
@@ -132,7 +133,7 @@ struct GroupCheckInTests {
         let gate = BalanceRefreshGate()
         let controller = GroupCheckInController(
             groupName: "测试", profiles: fixture.profiles, model: fixture.model,
-            refreshBalance: { _ in await gate.wait() }
+            refreshBalance: { _ in await gate.wait(); return .updated("$0.00") }
         )
         controller.start()
         let session = try #require(controller.session)
@@ -232,6 +233,7 @@ private struct GroupRunFixture {
             ),
             userDefaults: defaults
         )
+        for profile in model.profiles { model.confirmEntry(for: profile) }
     }
 
     func cleanUp() {

@@ -402,9 +402,11 @@ test("retrying a CAPTCHA never clicks until it has disappeared", () => {
     assert.ok(!p.types().includes("success"));
 });
 
-function bridgePage({ completed = false, paused = false, nativePaused = false, matches = ["*://*/*"], code = "", rules = [] } = {}) {
+function bridgePage({ completed = false, paused = false, nativePaused = false, matches = ["*://*/*"], code = "", rules = [], homeOrigin = null } = {}) {
     const source = readFileSync(join(root, "ProfileBrowser/Services/AutomationScriptBridge.swift"), "utf8");
     const raw = source.replaceAll('\\(matchJSON)', JSON.stringify(matches))
+        .replaceAll('\\(runTokenJSON)', '"test-run"')
+        .replaceAll('\\(homeOriginJSON)', JSON.stringify(homeOrigin))
         .replaceAll('\\(completionKeyJSON)', '"daily"')
         .replaceAll('\\(rulesJSON)', JSON.stringify(rules))
         .replaceAll('\\(AutomationBridge.messageName)', 'cwebAutomation')
@@ -417,7 +419,7 @@ function bridgePage({ completed = false, paused = false, nativePaused = false, m
     const dispatched = [];
     const window = {
         __cwebAutomationManuallyPaused: nativePaused,
-        location: { href: "https://example.com/checkin", hostname: "example.com" },
+        location: { href: "https://example.com/checkin", hostname: "example.com", origin: "https://example.com" },
         localStorage: {
             getItem: key => storage.get(key) ?? null,
             setItem: (key, value) => storage.set(key, value),
@@ -577,4 +579,63 @@ test("balance waits for its source and explicit readiness without waiting for un
     assert.equal(readBalance({values:['loading…']}), null);
     assert.equal(readBalance({values:['$0.00']}), '$0.00');
     assert.equal(readBalance({values:['$12.50']}), '$12.50');
+});
+
+test("cumulative and history text cannot mark today's check-in complete", () => {
+    for (const label of ['累计已签到 21 天','本月已签到 8 天','查看已签到记录','已签到天数：20']) {
+        const action = element('立即签到');
+        const p = page([element(label, {tag:'div'}), action]);
+        assert.equal(action.clicks, 1, label);
+        assert.deepEqual(p.types(), [], label);
+    }
+});
+
+test("a completed button is independent of sibling history and statistics", () => {
+    const panel = element('今日已签到\n签到记录\n累计签到 30 天', { tag: 'section' });
+    const completed = element('今日已签到', { disabled: true, parentElement: panel });
+    assert.deepEqual(page([completed]).types(), ['success']);
+});
+
+test("broad scripts stop before executing on an unrelated origin", () => {
+    const p = bridgePage({ homeOrigin: 'https://home.example', code: 'window.executed = true;' });
+    assert.equal(p.window.executed, undefined);
+    assert.deepEqual(p.types(), []);
+    const explicit = bridgePage({ homeOrigin: 'https://home.example', matches: ['https://example.com/*'], code: 'window.executed = true;' });
+    assert.equal(explicit.window.executed, true);
+    const rule = bridgePage({ homeOrigin: 'https://home.example', rules: [{host:'example.com'}], code: 'window.executed = true;' });
+    assert.equal(rule.window.executed, true);
+});
+
+test("history navigation cannot take precedence over the check-in action", () => {
+    const links = ['签到记录','签到规则','历史签到','签到说明'].map(text => element(text, {tag:'a'}));
+    const action = element('立即签到');
+    page([...links, action]);
+    assert.ok(links.every(link => link.clicks === 0));
+    assert.equal(action.clicks, 1);
+});
+
+test("explicit selectors support site-specific action and outcome wording", () => {
+    const action = element('领取奖励', {attributes:{class:'claim'}});
+    const done = element('Done', {tag:'div', attributes:{class:'completed'}, laidOut:false});
+    const p = page([action,done], {rule:{actionSelector:'.claim',completionSelector:'.completed'}});
+    assert.equal(action.clicks,1);
+    p.mutate(() => { done.laidOut=true; }); p.advance(300);
+    assert.deepEqual(p.types(),['success']);
+});
+
+test("email verification status is not a CAPTCHA; explicit CAPTCHA selector works", () => {
+    const status=element('邮箱已验证',{tag:'div',attributes:{id:'email-verify'}});
+    const action=element('立即签到'); const p=page([status,action]);
+    assert.equal(action.clicks,1); assert.deepEqual(p.types(),[]);
+    const custom=element('请验证',{tag:'div',attributes:{class:'challenge'}});
+    const blocked=page([custom,element('立即签到')],{rule:{captchaSelector:'.challenge'}});
+    assert.deepEqual(blocked.types(),['captcha']);
+});
+
+test("explicit failure selector preserves site-specific error wording", () => {
+    const action=element('立即签到');
+    const failure=element('领取失败',{tag:'div',attributes:{class:'failed'},laidOut:false});
+    const p=page([action,failure],{rule:{failureSelector:'.failed'}});
+    p.mutate(()=>{failure.laidOut=true;});p.advance(300);
+    assert.deepEqual(p.types(),['error']);assert.equal(action.clicks,1);
 });

@@ -5,6 +5,8 @@ struct GroupCheckInView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(AppModel.self) private var model
+    @State private var retryController: GroupCheckInController?
     let controller: GroupCheckInController
     @State private var showsTaskDetails = false
     @State private var showsBrowserChrome = false
@@ -18,11 +20,14 @@ struct GroupCheckInView: View {
                         session: session,
                         automationSettings: controller.settings,
                         automationIsPaused: controller.isPaused,
+                        automaticallyRefreshesBalance: controller.mode != .balanceOnly,
                         browserChromePresentation: $showsBrowserChrome
                     ) { [weak run = controller] id, event in
                         run?.receive(id, event)
                     }
                         .id(session.profile.id)
+                } else if !controller.hasStarted {
+                    preflight
                 } else {
                     results
                 }
@@ -57,11 +62,42 @@ struct GroupCheckInView: View {
                 await controller.recheck()
             }
         }
+        .sheet(item: $retryController) { GroupCheckInView(controller: $0) }
+        .onChange(of: controller.session?.automationState) { _, state in
+            if state == .error || state == .noButton || state == .captcha { showsTaskDetails = true }
+        }
         .onChange(of: controller.session?.profile.id) { _, _ in
             showsBrowserChrome = false
             showsTaskDetails = false
         }
         .onDisappear { controller.pause() }
+    }
+
+    private var preflight: some View {
+        List {
+            Section("开始前确认") {
+                if controller.preflightIssues.isEmpty {
+                    Text("以下环境的入口或网络路径发生变化，请确认后开始。")
+                } else {
+                    ForEach(controller.preflightIssues, id: \.self) { Text($0) }
+                    Text("可以返回编辑相关环境，或将异常环境标记为待处理后继续。")
+                }
+                ForEach(controller.changedEntries) { profile in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(profile.name).font(.headline)
+                        Text(profile.homePageHost)
+                        Text(model.socksProxy(for: profile).map { $0.displayCode ?? $0.displayAddress } ?? "设备网络")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+                Button("确认并开始") { controller.confirmAndStart() }
+                    .disabled(!controller.preflightIssues.isEmpty)
+                if !controller.preflightIssues.isEmpty {
+                    Button("异常项待处理，开始其余环境") { controller.excludeUnavailableAndStart() }
+                        .accessibilityIdentifier("groupCheckIn.startAvailable")
+                }
+            }
+        }
     }
 
     private var taskBar: some View {
@@ -132,7 +168,7 @@ struct GroupCheckInView: View {
                 Text(controller.groupName)
                     .font(.subheadline.weight(.medium))
                 Spacer()
-                Text("已完成 \(controller.queue.completedCount) · 已跳过 \(controller.queue.skippedCount)")
+                Text("已完成 \(controller.queue.completedCount) · 待处理 \(controller.queue.failedCount) · 已跳过 \(controller.queue.skippedCount)")
                     .font(.footnote)
                     .foregroundStyle(AppUI.secondaryText)
             }
@@ -143,7 +179,7 @@ struct GroupCheckInView: View {
                     .foregroundStyle(.primary)
                     .lineLimit(3)
             }
-            Text(controller.isPaused ? "继续后恢复自动检测。" : "每 5 秒重新检测；验证码请手动完成，确认签到后自动进入下一个。")
+            Text(controller.isPaused ? "继续后恢复自动检测。" : "每 5 秒检测；验证码等待手动处理，其他异常超时后转入待处理并继续。")
                 .font(.caption)
                 .foregroundStyle(AppUI.secondaryText)
             if dynamicTypeSize.isAccessibilitySize {
@@ -212,25 +248,27 @@ struct GroupCheckInView: View {
         List {
             Section {
                 Label(controller.queue.isFinished ? "本组已处理完毕" : "本组签到已停止", systemImage: controller.queue.isFinished ? "checkmark.circle" : "stop.circle")
-                Text("已完成 \(controller.queue.completedCount) · 已跳过 \(controller.queue.skippedCount) · 未处理 \(controller.queue.profileIDs.count - controller.queue.index)")
+                Text("已完成 \(controller.queue.completedCount) · 待处理 \(controller.queue.failedCount) · 已跳过 \(controller.queue.skippedCount) · 未处理 \(controller.queue.profileIDs.count - controller.queue.index)")
                     .font(.subheadline)
                     .foregroundStyle(AppUI.secondaryText)
             }
+            Section {
+                Button("重试未完成项") { retry(balanceOnly: false) }
+                    .disabled(controller.record.retryProfileIDs.isEmpty)
+                Button("仅重试余额") { retry(balanceOnly: true) }
+                    .disabled(controller.record.balanceRetryProfileIDs.isEmpty)
+            }
             Section("环境结果") {
                 ForEach(controller.profiles) { profile in
-                    LabeledContent(profile.name, value: outcomeTitle(for: profile.id))
+                    GroupRunResultRow(name: profile.name, outcome: controller.queue.outcomes[profile.id], detail: controller.details[profile.id])
                 }
             }
         }
     }
 
-    private func outcomeTitle(for id: UUID) -> String {
-        switch controller.queue.outcomes[id] {
-        case .completed: "签到完成"
-        case .alreadyCompleted: "今天已完成"
-        case .skipped: "已跳过"
-        case nil: "未处理"
-        }
+    private func retry(balanceOnly: Bool) {
+        let next = model.retryGroupRun(controller.record, balanceOnly: balanceOnly)
+        next.start()
+        retryController = next
     }
-
 }

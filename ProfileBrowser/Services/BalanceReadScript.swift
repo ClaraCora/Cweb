@@ -8,6 +8,11 @@ enum BalanceReadScript {
         return style.display !== 'none' && style.visibility !== 'hidden'
             && style.visibility !== 'collapse' && node.getClientRects().length > 0;
     };
+    for (const [field, selector] of [['余额元素', balanceSelector], ['余额已加载标记', readySelector]]) {
+        if (!selector) continue;
+        try { document.querySelectorAll(selector); }
+        catch (_) { return {selectorError: field}; }
+    }
     if (readySelector && !visible(document.querySelector(readySelector))) return null;
     const isBalanceLabel = (text) => /^(?:(?:当前|當前|账户|帳戶|帐户|賬戶|可用|剩余|剩餘|钱包|錢包)?(?:余额|餘額)|剩余额度|剩餘額度|可用额度|可用額度|(?:(?:current|available|account|remaining|wallet)\\s+)?balance)(?:\\s*[（(](?:USD|CNY|RMB|EUR|美元|元)[）)])?\\s*[:：]?$/i.test((text || '').trim());
     let verified = true;

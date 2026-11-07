@@ -28,15 +28,15 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
                 } catch (_) { return []; }
             };
 
-            const signWords = /签到|每日签到|check[\\s-]?in|daily\\s*sign/i;
+            const signWords = /^(?:立即签到|每日签到|签到|去签到|check[\\s-]?in|daily\\s*sign(?:[\\s-]?in)?)$/i;
             // A generic "success" or "已完成" elsewhere is not a check-in result.
             const completionWords = /已签到|签到成功|已完成签到|(?:今日|今天|本日)签到[：:\\s]*已完成|already\\s+(?:checked[\\s-]?in|signed[\\s-]?in)|checked[\\s-]?in\\s+today|check[\\s-]?in\\s+(?:successful|completed)|successfully\\s+checked[\\s-]?in/i;
             const captchaSelectors = [
                 '[class*="captcha" i]',
                 '[id*="captcha" i]',
-                '[class*="verify" i]',
-                '[id*="verify" i]',
-                'iframe[src*="captcha" i]'
+                'iframe[src*="captcha" i]',
+                'iframe[src*="challenges.cloudflare.com" i]',
+                '.g-recaptcha', '.h-captcha', '.cf-turnstile'
             ];
 
             let debounceTimer;
@@ -61,7 +61,8 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
                 'button, a, [role="button"]'
             ).find((element) => {
                 const text = textOf(element);
-                return isVisible(element) && text && signWords.test(text)
+                return isVisible(element) && text && (rule.actionSelector || signWords.test(text))
+                    && (rule.actionSelector || !/记录|规则|说明|历史|history|record|rules/i.test(text))
                     && !/已签到|已完成|不可用|disabled/i.test(text)
                     && !element.disabled
                     && element.getAttribute("aria-disabled") !== "true"
@@ -71,7 +72,7 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
             });
 
             const historical = (text) => {
-                if (/昨天|昨日|前天|历史|上次|上月|yesterday|previous|last\\s+(?:day|week|month)/i.test(text)) return true;
+                if (/昨天|昨日|前天|历史|上次|上月|累计|累計|统计|統計|天数|天數|本月|本周|连续|連續|记录|記錄|total|streak|history|statistics|yesterday|previous|last\\s+(?:day|week|month)/i.test(text)) return true;
                 const date = text.match(/(20\\d{2})[-/.年](\\d{1,2})[-/.月](\\d{1,2})/);
                 if (!date) return false;
                 const today = new Date();
@@ -83,7 +84,14 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
                 let current = element;
                 for (let depth = 0; current && depth < 4; depth++, current = current.parentElement) {
                     if (current === document.body || current === document.documentElement) break;
-                    if (historical(textOf(current))) return true;
+                    const text = textOf(current);
+                    // History rows carry their own date/status. A surrounding
+                    // dashboard may also contain unrelated statistics or links.
+                    const tag = String(current.tagName || current.tag || '').toLowerCase();
+                    const context = current.getAttribute?.('class') || '';
+                    const historicalRow = /^(li|tr)$/.test(tag) || /history|record|statistic|streak|checkin-log/i.test(context);
+                    if ((current === element || historicalRow) && historical(text)) return true;
+                    if (current !== element && /(?:累计|累計|连续|連續|本月|本周|total|streak)[^\\n。]{0,12}(?:已签到|签到成功)|(?:已签到|签到成功)[：:\\s]*\\d+\\s*(?:天|次|days)/i.test(text)) return true;
                     if (current.getAttribute && historical(current.getAttribute('data-date') || '')) return true;
                 }
                 return false;
@@ -93,7 +101,7 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
                 '[role="status"], [aria-live], .toast, .alert, button, a, [role="button"], p, span, div, li, td, strong'
             ).some((element) => {
                 const text = textOf(element);
-                return text.length <= 160 && isVisible(element) && completionWords.test(text)
+                return text.length <= 160 && isVisible(element) && (rule.completionSelector || completionWords.test(text))
                     && !hasHistoricalContext(element) && !/未签到|未完成|签到失败/i.test(text);
             });
 
@@ -101,7 +109,7 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
                 '[role="status"], [aria-live], .toast, .alert, p, span, div'
             ).some((element) => isVisible(element) && textOf(element).length <= 160
                 && !hasHistoricalContext(element)
-                && /签到失败|签到出错|check[\\s-]?in\\s+(?:failed|error)/i.test(textOf(element)));
+                && (rule.failureSelector || /签到失败|签到出错|check[\\s-]?in\\s+(?:failed|error)/i.test(textOf(element))));
 
             const finish = () => {
                 hasCompleted = true;
@@ -115,9 +123,20 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
 
             const detect = () => {
                 if (hasCompleted || api.isPaused()) return;
+                try {
+                    for (const key of ['checkInContainerSelector', 'actionSelector', 'completionSelector', 'failureSelector', 'captchaSelector']) {
+                        if (rule[key]) document.querySelectorAll(rule[key]);
+                    }
+                } catch (_) {
+                    clearTimeout(noButtonTimer);
+                    api.error("网站选择器无效，请检查网站规则");
+                    return;
+                }
 
-                if (captchaSelectors.some((selector) => [...document.querySelectorAll(selector)]
-                    .some(isVisible))) {
+                if ((rule.captchaSelector ? [rule.captchaSelector] : captchaSelectors).some((selector) => {
+                    try { return [...document.querySelectorAll(selector)].some(isVisible); }
+                    catch (_) { api.error("验证码选择器无效，请检查网站规则"); return false; }
+                })) {
                     api.captchaDetected("检测到验证码，请手动完成");
                     return;
                 }
@@ -211,6 +230,7 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
         let digest = SHA256.hash(data: Data(normalized.utf8))
             .map { String(format: "%02x", $0) }.joined()
         let bundledFingerprints: Set<String> = [
+            "0471f26f7d022c72130828a52976c180468d2711d041c60c8473dbf83ab7ebd5",
             "0a086ed37b237890a33ca9c3a5cd601f866d4a1940742d14c3ba38d94709d41a",
             "6b022d4272cb410163ce49c802c932c45a9920c6e685839eed538872eb72c43c",
             "34c285f8ce439f24819a6b013f52824e3d5cefb10073403d809dd3a0a9c8a554"

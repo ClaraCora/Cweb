@@ -180,14 +180,15 @@ struct AutomationScriptTests {
             fileURL: directory.appending(path: "profiles.json", directoryHint: .notDirectory)
         )
         defer { try? FileManager.default.removeItem(at: directory) }
-        try profileRepository.save([])
+        let profile = BrowserProfile(name: "Daily record")
+        try profileRepository.save([profile])
 
         let model = AppModel(
             profileRepository: profileRepository,
             credentialVault: CredentialVault(inMemory: true),
             userDefaults: defaults
         )
-        let profileID = UUID()
+        let profileID = profile.id
         let today = Date()
         let yesterday = try #require(Calendar.current.date(byAdding: .day, value: -1, to: today))
 

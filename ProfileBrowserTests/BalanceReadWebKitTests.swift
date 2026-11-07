@@ -179,6 +179,64 @@ struct BalanceReadWebKitTests {
         #expect(successes == 1) // Reload must not run the check-in script again.
     }
 
+    @Test
+    func documentObserverAndBridgeRejectStaleMessagesAcrossNavigation() async throws {
+        let server = try BalanceHTTPFixture(dashboardStyle: false)
+        let url = try await server.start()
+        defer { server.stop() }
+        let session = BrowserSession(profile: BrowserProfile(name: "Document lifecycle", homePage: url))
+        let host = try BalanceWebKitHost(page: session.page)
+        defer { session.close(); host.close() }
+        var messages: [String] = []
+        session.configureAutomation(settings: GlobalScriptSettings(enabled: true, source: "// Wait for test events", updatedAt: .now),
+            shouldRunToday: true, completionKey: UUID().uuidString) { messages.append($0.message) }
+        session.start()
+        try await waitUntil { session.balanceRefreshRequest > 0 }
+        let initialRequest = session.balanceRefreshRequest
+        _ = try await session.page.callJavaScript("document.querySelector('[data-account-balance]').textContent = '$22.00'; true")
+        try await waitUntil { session.balanceRefreshRequest > initialRequest }
+        #expect(try await session.readAccountBalance() == "$22.00")
+        let beforeBusyChange = session.balanceRefreshRequest
+        _ = try await session.page.callJavaScript("document.querySelector('[data-account-balance]').parentElement.setAttribute('aria-busy', 'true'); true")
+        try await waitUntil { session.balanceRefreshRequest > beforeBusyChange }
+
+        // Capture a genuine payload while retaining the actual WK message path.
+        let payload = try #require(try await session.page.callJavaScript("""
+        const handler = window.webkit.messageHandlers.cwebAutomation;
+        const post = handler.postMessage.bind(handler);
+        handler.postMessage = payload => { window.__capturedMessage = payload; post(payload); };
+        window.CwebCheckIn.noButton('current document');
+        return window.__capturedMessage;
+        """) as? [String: Any])
+        try await waitUntil { messages == ["current document"] }
+        let oldDocument = try #require(payload["documentID"] as? String)
+        let token = try #require(payload["runToken"] as? String)
+        session.goHome()
+        try await waitUntil {
+            guard let id = try? await session.page.callJavaScript("return window.__cwebDocumentID || ''; ") as? String else { return false }
+            return !id.isEmpty && id != oldDocument
+        }
+        let newDocument = try #require(try await session.page.callJavaScript("return window.__cwebDocumentID;") as? String)
+        #expect(newDocument != oldDocument)
+        await session.receiveDocumentMessage(type: "error", message: "stale document", runToken: token, documentID: oldDocument, frameURL: url)
+        await session.receiveDocumentMessage(type: "error", message: "wrong session", runToken: UUID().uuidString, documentID: newDocument, frameURL: url)
+        await session.receiveDocumentMessage(type: "error", message: "wrong origin", runToken: token, documentID: newDocument, frameURL: URL(string: "https://other.example.invalid"))
+        #expect(messages == ["current document"])
+        _ = try await session.page.callJavaScript("window.CwebCheckIn.error('new document'); true")
+        try await waitUntil { messages == ["current document", "new document"] }
+        session.close()
+        await session.receiveDocumentMessage(type: "error", message: "closed", runToken: token, documentID: newDocument, frameURL: url)
+        #expect(messages.count == 2)
+    }
+
+    private func waitUntil(_ condition: @MainActor () async -> Bool) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while !(await condition()) {
+            guard ContinuousClock.now < deadline else { throw BrowserSessionDiagnosticError(message: "WebKit fixture timed out") }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+    }
+
     private func load(_ body: String, in session: BrowserSession) async throws {
         for try await _ in session.page.load(html: "<html><body>" + body + "</body></html>") { }
     }

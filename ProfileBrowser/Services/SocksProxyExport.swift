@@ -5,8 +5,13 @@ import UniformTypeIdentifiers
 enum SocksProxyExport {
     /// Keep export separate from displayAddress, which intentionally redacts
     /// passwords. Encode reserved characters so each line can be re-imported.
-    static func text(for proxies: [SocksProxy]) throws -> String {
-        try proxies.map { proxy in
+    static func text(for proxies: [SocksProxy], includeCredentials: Bool = true) throws -> String {
+        let values = proxies.map { proxy in
+            var value = proxy
+            if !includeCredentials { value.username = nil; value.password = nil }
+            return value
+        }
+        return try values.map { proxy in
             var components = URLComponents()
             components.scheme = proxy.scheme.rawValue
             let host = SocksProxy.normalizeHost(proxy.host)

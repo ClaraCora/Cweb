@@ -6,6 +6,7 @@ struct BrowserView: View {
     @Environment(AppModel.self) private var model
     private let automationSettings: GlobalScriptSettings?
     private let automationIsPaused: Bool
+    private let automaticallyRefreshesBalance: Bool
     private let onAutomationEvent: (@MainActor (UUID, AutomationEvent) -> Void)?
     private let browserChromePresentation: Binding<Bool>?
 
@@ -14,11 +15,15 @@ struct BrowserView: View {
     @State private var showsDiagnostics = false
     @State private var showsBrowserChrome = false
     @State private var showsFillUnavailable = false
+    @State private var showsWebsiteRules = false
+    @State private var balanceFeedback: String?
+    @Environment(\.scenePhase) private var scenePhase
 
     init(profile: BrowserProfile, socksProxy: SocksProxy? = nil) {
         _session = State(initialValue: BrowserSession(profile: profile, socksProxy: socksProxy))
         automationSettings = nil
         automationIsPaused = false
+        automaticallyRefreshesBalance = true
         onAutomationEvent = nil
         browserChromePresentation = nil
     }
@@ -27,12 +32,14 @@ struct BrowserView: View {
         session: BrowserSession,
         automationSettings: GlobalScriptSettings,
         automationIsPaused: Bool = false,
+        automaticallyRefreshesBalance: Bool = true,
         browserChromePresentation: Binding<Bool>? = nil,
         onAutomationEvent: @escaping @MainActor (UUID, AutomationEvent) -> Void
     ) {
         _session = State(initialValue: session)
         self.automationSettings = automationSettings
         self.automationIsPaused = automationIsPaused
+        self.automaticallyRefreshesBalance = automaticallyRefreshesBalance
         self.browserChromePresentation = browserChromePresentation
         self.onAutomationEvent = onAutomationEvent
     }
@@ -125,6 +132,20 @@ struct BrowserView: View {
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
+                Menu("更多", systemImage: "ellipsis.circle") {
+                    if let profile = model.profiles.first(where: { $0.id == session.profile.id }) {
+                        Text(model.balanceStatus(for: profile) ?? "尚未读取余额")
+                    }
+                    Button("重新读取余额", systemImage: "arrow.clockwise") {
+                        Task { balanceFeedback = await model.refreshBalance(for: session).message }
+                    }
+                    .disabled(!automaticallyRefreshesBalance)
+                    Button("网站识别规则", systemImage: "slider.horizontal.3") { showsWebsiteRules = true }
+                        .accessibilityIdentifier("browser.websiteRules")
+                }
+                .accessibilityIdentifier("browser.more")
+            }
+            ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     if session.currentOrigin?.isSecure == true {
                         showsCredentials = true
@@ -141,6 +162,18 @@ struct BrowserView: View {
         .toolbarVisibility(.hidden, for: .tabBar)
         .onChange(of: session.page.url) { _, newURL in
             session.syncAddressBar(with: newURL)
+            session.requestBalanceRead()
+        }
+        .onChange(of: session.page.isLoading) { _, loading in
+            if !loading { session.requestBalanceRead() }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { session.requestBalanceRead() }
+        }
+        .task(id: session.balanceRefreshRequest) {
+            guard automaticallyRefreshesBalance else { return }
+            do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
+            await model.refreshBalance(for: session)
         }
         .task {
             let currentSession = session
@@ -153,6 +186,7 @@ struct BrowserView: View {
                 completionKey: model.automationCompletionKey(for: session.profile.id)
             ) { [weak currentSession] event in
                 guard let currentSession else { return }
+                guard appModel.profiles.first(where: { $0.id == currentSession.profile.id })?.accountScopeKey == currentSession.profile.accountScopeKey else { return }
                 appModel.handleAutomationEvent(event, for: currentSession.profile.id)
                 eventObserver?(currentSession.profile.id, event)
                 if event.kind == .success, eventObserver == nil {
@@ -160,8 +194,14 @@ struct BrowserView: View {
                 }
             }
             session.start()
-            await model.refreshBalance(for: session)
+            session.requestBalanceRead()
         }
+        .sheet(isPresented: $showsWebsiteRules) {
+            NavigationStack { WebsiteRulesView(session: session) }
+        }
+        .alert("余额读取结果", isPresented: Binding(get: { balanceFeedback != nil }, set: { if !$0 { balanceFeedback = nil } })) {
+            Button("好", role: .cancel) { balanceFeedback = nil }
+        } message: { Text(balanceFeedback ?? "") }
         .sheet(isPresented: $showsCredentials) {
             if let origin = session.currentOrigin, origin.isSecure {
                 CredentialListView(

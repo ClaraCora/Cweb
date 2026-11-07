@@ -11,6 +11,10 @@ struct SocksProxyExportView: View {
     @State private var document = SocksProxyExportDocument()
     @State private var presentedError: PresentedError?
     @State private var exported = false
+    @State private var includeCredentials = false
+    @State private var isExporting = false
+    @State private var exportTask: Task<Void, Never>?
+    @Environment(\.scenePhase) private var scenePhase
 
     init(rankings: [SocksProxyRanking]) {
         _selectedIDs = State(initialValue: Set(rankings.map(\.id)))
@@ -19,6 +23,11 @@ struct SocksProxyExportView: View {
     var body: some View {
         NavigationStack {
             List(selection: $selectedIDs) {
+                Section {
+                    Toggle("包含账号和密码", isOn: $includeCredentials)
+                    Text(includeCredentials ? "导出前需要验证设备身份。文件包含明文凭据。" : "默认仅导出代理地址，不包含账号或密码。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
                 Section {
                     ForEach(rankings) { ranking in
                         VStack(alignment: .leading, spacing: 4) {
@@ -44,12 +53,13 @@ struct SocksProxyExportView: View {
                 } header: {
                     Text("已选择 \(selectedIDs.count) / \(rankings.count) 个")
                 } footer: {
-                    Text("导出为 TXT，每行一个 SOCKS 链接。文件包含所选代理的账号和密码，请妥善保存。")
+                    Text(includeCredentials ? "导出为 TXT，每行一个含账号密码的 SOCKS 链接，请妥善保存。" : "导出为 TXT，每行一个不含账号密码的 SOCKS 链接。")
                 }
             }
             .readableListMargins()
             .environment(\.editMode, .constant(.active))
             .onChange(of: rankings.map(\.id)) { _, ids in selectedIDs.formIntersection(Set(ids)) }
+            .onDisappear { exportTask?.cancel() }
             .navigationTitle("批量导出")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -66,8 +76,8 @@ struct SocksProxyExportView: View {
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("导出") { export() }
-                        .disabled(selectedIDs.isEmpty)
+                    Button(isExporting ? "正在验证" : "导出") { export() }
+                        .disabled(selectedIDs.isEmpty || isExporting)
                 }
             }
             .fileExporter(
@@ -96,13 +106,20 @@ struct SocksProxyExportView: View {
     }
 
     private func export() {
-        do {
-            document = SocksProxyExportDocument(text: try SocksProxyExport.text(
-                for: rankings.filter { selectedIDs.contains($0.id) }.map(\.proxy)
-            ))
-            showsExporter = true
-        } catch {
-            presentedError = PresentedError(message: error.localizedDescription)
+        guard !isExporting else { return }
+        isExporting = true
+        let includesSecrets = includeCredentials
+        exportTask = Task {
+            defer { isExporting = false; exportTask = nil }
+            do {
+                if includesSecrets { try await AuthenticationService().authenticate(reason: "导出代理账号和密码") }
+                try Task.checkCancellation()
+                guard scenePhase != .background else { throw CancellationError() }
+                document = SocksProxyExportDocument(text: try SocksProxyExport.text(
+                    for: rankings.filter { selectedIDs.contains($0.id) }.map(\.proxy), includeCredentials: includesSecrets))
+                showsExporter = true
+            } catch is CancellationError { }
+            catch { presentedError = PresentedError(message: error.localizedDescription) }
         }
     }
 }

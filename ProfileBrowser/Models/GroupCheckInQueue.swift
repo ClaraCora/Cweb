@@ -7,6 +7,8 @@ struct GroupCheckInQueue: Codable, Sendable {
         case completed
         case alreadyCompleted
         case skipped
+        case failed
+        case balanceUpdated
     }
 
     let profileIDs: [UUID]
@@ -25,7 +27,8 @@ struct GroupCheckInQueue: Codable, Sendable {
     }
 
     var isFinished: Bool { index == profileIDs.count }
-    var completedCount: Int { outcomes.values.filter { $0 != .skipped }.count }
+    var completedCount: Int { outcomes.values.filter { $0 == .completed || $0 == .alreadyCompleted || $0 == .balanceUpdated }.count }
+    var failedCount: Int { outcomes.values.filter { $0 == .failed }.count }
     var skippedCount: Int { outcomes.values.filter { $0 == .skipped }.count }
 
     @discardableResult
@@ -46,4 +49,43 @@ struct GroupRunRecord: Codable, Identifiable, Sendable {
     var queue: GroupCheckInQueue
     var updatedAt: Date
     var statuses: [UUID: String]
+    var details: [UUID: GroupEnvironmentResult]? = nil
+    var mode: GroupRunMode? = nil
+    var excludedProfileIDs: Set<UUID>? = nil
+}
+
+enum GroupRunMode: String, Codable, Sendable { case checkIn, balanceOnly }
+
+struct GroupEnvironmentResult: Codable, Sendable {
+    var name: String
+    var balance: BalanceRefreshResult?
+    var message: String
+    var duration: TimeInterval
+}
+
+extension GroupRunRecord {
+    var retryProfileIDs: [UUID] {
+        queue.profileIDs.filter { id in
+            queue.outcomes[id] == .failed || queue.outcomes[id] == .skipped || queue.outcomes[id] == nil
+        }
+    }
+    var balanceRetryProfileIDs: [UUID] {
+        queue.profileIDs.filter { id in
+            if case .updated = details?[id]?.balance { return false }
+            return true
+        }
+    }
+}
+
+
+extension GroupCheckInQueue.Outcome {
+    var title: String {
+        switch self {
+        case .completed: "签到完成"
+        case .alreadyCompleted: "今天已完成"
+        case .skipped: "已跳过"
+        case .failed: "待处理"
+        case .balanceUpdated: "余额已更新"
+        }
+    }
 }

@@ -221,6 +221,7 @@ struct RepairRegressionTests {
         try fixture.model.addImportedProfiles([BrowserProfile(name: "一", groupName: "测试"), BrowserProfile(name: "二", groupName: "测试")])
         let group = try #require(fixture.model.profileGroups.first)
         let run = fixture.model.groupRun(for: group)
+        for profile in fixture.model.profiles { fixture.model.confirmEntry(for: profile) }
         run.start(); run.skip(); run.pause()
         #expect(throws: ProfileError.taskInProgress) { try fixture.model.updateProfile(fixture.model.profiles[1]) }
         await fixture.model.deleteProfile(fixture.model.profiles[1])

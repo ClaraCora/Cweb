@@ -20,6 +20,7 @@ struct ProfileListView: View {
     @State private var ipDetectionProfile: BrowserProfile?
     @State private var activeProfile: BrowserProfile?
     @State private var showsGroupCheckIn = false
+    @State private var pendingAccountReset: BrowserProfile?
     @State private var checkInController: GroupCheckInController?
     @State private var editMode: EditMode = .inactive
     @State private var isTestingProxies = false
@@ -65,8 +66,15 @@ struct ProfileListView: View {
                     }
                     Menu {
                         Picker("今日签到", selection: $todayFilter) {
-                            Text("全部环境").tag(0); Text("今天待签到").tag(1); Text("今天已完成").tag(2)
+                            Text("全部环境").tag(0); Text("今天待签到").tag(1); Text("今天已完成").tag(2); Text("需要处理").tag(3)
                         }
+                        Button("更新本组余额", systemImage: "arrow.clockwise") {
+                            guard let group = currentGroup else { return }
+                            checkInController = GroupCheckInController(groupName: group.name, profiles: group.profiles,
+                                model: model, groupID: group.id, mode: .balanceOnly)
+                            checkInController?.start()
+                            showsGroupCheckIn = true
+                        }.disabled(isGroupLocked)
                         if let currentGroup {
                             Button("编辑分组", systemImage: "pencil") { groupEditor = currentGroup }
                                 .disabled(isGroupLocked)
@@ -94,7 +102,7 @@ struct ProfileListView: View {
                         : nil
                 ) { submission in
                     switch submission {
-                    case .create(let name, let groupName, let homePage, let userAgent, let color, let socksProxyNumber, let autofillUsername, let autofillPassword):
+                    case .create(let name, let groupName, let homePage, let userAgent, let color, let socksProxyNumber, let fixedProxyID, let autofillUsername, let autofillPassword):
                         try model.addProfile(
                             name: name,
                             groupName: groupName,
@@ -102,6 +110,7 @@ struct ProfileListView: View {
                             userAgent: userAgent,
                             color: color,
                             socksProxyNumber: socksProxyNumber,
+                            fixedProxyID: fixedProxyID,
                             autofillUsername: autofillUsername,
                             autofillPassword: autofillPassword
                         )
@@ -184,6 +193,15 @@ struct ProfileListView: View {
             } message: { profile in
                 Text(entryConfirmationMessage(for: profile))
             }
+            .alert("重置账号识别状态？", isPresented: Binding(get: { pendingAccountReset != nil }, set: { if !$0 { pendingAccountReset = nil } })) {
+                Button("重置") {
+                    if let profile = pendingAccountReset {
+                        do { try model.resetAccountState(for: profile) } catch { model.present(error) }
+                    }
+                    pendingAccountReset = nil
+                }
+                Button("取消", role: .cancel) { pendingAccountReset = nil }
+            } message: { Text("清除缓存金额和今日签到标记；保留登录数据及凭据。切换网站账号后可使用此操作。") }
             .alert(item: $model.presentedError) { error in
                 Alert(
                     title: Text("操作失败"),
@@ -287,7 +305,7 @@ struct ProfileListView: View {
             checkInController = model.groupRun(for: group)
         }
         checkInController?.start()
-        showsGroupCheckIn = checkInController?.hasStarted == true
+        showsGroupCheckIn = checkInController != nil
     }
 
     @ViewBuilder
@@ -358,7 +376,7 @@ struct ProfileListView: View {
     }
 
     private var profileCount: some View {
-        Text(todayFilter == 0 ? "\(visibleProfiles.count) 个环境" : "\(todayFilter == 1 ? "待签到" : "已完成") · \(visibleProfiles.count) 个环境")
+        Text(todayFilter == 0 ? "\(visibleProfiles.count) 个环境" : "\(todayFilter == 1 ? "待签到" : todayFilter == 2 ? "已完成" : "需处理") · \(visibleProfiles.count) 个环境")
             .font(.footnote)
             .foregroundStyle(AppUI.secondaryText)
     }
@@ -417,7 +435,9 @@ struct ProfileListView: View {
             let pending = model.shouldRunAutomation(for: profile.id)
             let matches = searchText.isEmpty || (profile.name + " " + profile.homePageHost + " " + proxySummary(for: profile))
                 .localizedStandardContains(searchText)
-            return matches && (todayFilter == 0 || (todayFilter == 1 ? pending : !pending))
+            let needsAttention = profile.balanceReadError != nil || (profile.cachedBalance != nil && profile.balanceSourceVerified != true)
+                || model.entryPreflightIssue(for: profile) != nil
+            return matches && (todayFilter == 0 || (todayFilter == 1 && pending) || (todayFilter == 2 && !pending) || (todayFilter == 3 && needsAttention))
         }
     }
 
@@ -439,7 +459,7 @@ struct ProfileListView: View {
         if profile.unresolvedProxyNumber != nil {
             return "此环境需要重新选择代理。请先编辑环境，明确选择代理或不使用代理；处理前不会联网。"
         }
-        guard let proxyNumber = profile.socksProxyNumber else {
+        guard let proxyNumber = model.proxyNumber(for: profile) else {
             return "\(environment)\n\n代理：未选择，将使用设备当前网络。"
         }
         guard let proxy = model.socksProxy(for: profile) else {
@@ -456,7 +476,7 @@ struct ProfileListView: View {
             guard !model.reservedProfileIDs.contains(profile.id) else {
                 model.present(ProfileError.taskInProgress); return
             }
-            if profile.unresolvedProxyNumber != nil || (profile.socksProxyNumber != nil && model.socksProxy(for: profile) == nil) {
+            if model.entryPreflightIssue(for: profile) != nil {
                 editorMode = .edit(profile)
             } else if model.needsEntryConfirmation(for: profile) { pendingEntry = profile }
             else { activeProfile = profile }
@@ -512,6 +532,12 @@ struct ProfileListView: View {
             Button("IP 检测", systemImage: "network") {
                 ipDetectionProfile = profile
             }
+            Button("重新读取余额", systemImage: "arrow.clockwise") {
+                checkInController = GroupCheckInController(groupName: profile.displayGroupName, profiles: [profile], model: model, mode: .balanceOnly)
+                checkInController?.start()
+                showsGroupCheckIn = true
+            }
+            Button("重置账号识别状态", systemImage: "person.crop.circle.badge.arrow.trianglehead.counterclockwise") { pendingAccountReset = profile }
             Button("清除缓存金额", systemImage: "dollarsign.arrow.trianglehead.counterclockwise") {
                 do {
                     try model.resetCachedBalance(for: profile)
@@ -539,14 +565,15 @@ struct ProfileListView: View {
 
     private func proxySummary(for profile: BrowserProfile) -> String {
         if profile.unresolvedProxyNumber != nil { return "代理待选择 · 已阻止联网" }
-        guard let number = profile.socksProxyNumber else { return "设备网络" }
+        if profile.fixedProxyID != nil, model.socksProxy(for: profile) == nil { return "固定代理缺失 · 已阻止联网" }
+        guard let number = model.proxyNumber(for: profile) else { return "设备网络" }
         guard let proxy = model.socksProxy(for: profile) else { return "第 \(number) 号代理（缺失）" }
-        return "第 \(number) 号代理\(proxy.displayCode.map { " · \($0)" } ?? "")"
+        return "\(profile.fixedProxyID != nil ? "固定代理" : "第 \(number) 号代理")\(proxy.displayCode.map { " · \($0)" } ?? "")"
     }
 
     private func proxyLatency(for profile: BrowserProfile) -> ProfileProxyLatency {
         if profile.unresolvedProxyNumber != nil { return .missing }
-        guard profile.socksProxyNumber != nil else { return .direct }
+        guard profile.socksProxyNumber != nil || profile.fixedProxyID != nil else { return .direct }
         guard let proxy = model.socksProxy(for: profile) else { return .missing }
         let status = proxy.latestStatus
         let latency = proxy.latestLatency

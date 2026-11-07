@@ -32,13 +32,13 @@ final class AppModel {
     private let socksProxyImportService: SocksProxyImportService
     private let socksProxyValidationServiceOverride: SocksProxyValidationService?
     private let userDefaults: UserDefaults
-    private var checkInDaysByProfileID: [String: String]
+    private let completionStore: AutomationCompletionStore
     var canUndoProxyDeletion: Bool {
         guard let snapshot = proxyDeletionSnapshot else { return false }
         return socksProxies == snapshot.after && profiles == snapshot.profilesAfter
     }
     @ObservationIgnored private var proxyDeletionSnapshot: (before: [SocksProxy], after: [SocksProxy], profilesBefore: [BrowserProfile], profilesAfter: [BrowserProfile])?
-    private var balanceRefreshes: [UUID: (token: UUID, afterCheckIn: Bool)] = [:]
+    private let balanceRefreshes = BalanceRefreshCoordinator()
 
     init(
         profileRepository: ProfileRepository = ProfileRepository(),
@@ -57,7 +57,7 @@ final class AppModel {
         self.socksProxyValidationServiceOverride = socksProxyValidationService
         self.userDefaults = userDefaults
         self.globalScriptSettings = Self.loadGlobalScriptSettings(from: userDefaults)
-        self.checkInDaysByProfileID = Self.loadCheckInRecords(from: userDefaults)
+        self.completionStore = AutomationCompletionStore(defaults: userDefaults)
         self.lastAutomationResult = Self.loadLastAutomationResult(from: userDefaults)
         if let data = userDefaults.data(forKey: "app.pendingGroupRun") {
             pendingGroupRun = try? JSONDecoder().decode(GroupRunRecord.self, from: data)
@@ -67,12 +67,11 @@ final class AppModel {
         }
         reloadProfiles()
         if isProfileStoreAvailable {
-            if migrateGroupMetadataIfNeeded() {
-                repairDuplicateSocksAssignmentsIfNeeded()
-            }
+            _ = migrateGroupMetadataIfNeeded()
         }
         reloadSocksProxyValidationSettings()
         reloadSocksProxies()
+        if isProfileStoreAvailable { repairDuplicateSocksAssignmentsIfNeeded() }
         if var expired = pendingGroupRun, !Calendar.current.isDateInToday(expired.updatedAt) {
             expired.queue.stop()
             saveGroupRun(expired)
@@ -111,6 +110,13 @@ final class AppModel {
             groupID: group.id, restoring: record)
     }
 
+    func retryGroupRun(_ record: GroupRunRecord, balanceOnly: Bool) -> GroupCheckInController {
+        let ids = Set(balanceOnly ? record.balanceRetryProfileIDs : record.retryProfileIDs)
+        return GroupCheckInController(groupName: record.groupName,
+            profiles: profiles.filter { ids.contains($0.id) }, model: self,
+            mode: balanceOnly ? .balanceOnly : (record.mode ?? .checkIn))
+    }
+
     func saveGroupRun(_ record: GroupRunRecord) {
         do {
             if record.queue.isFinished || record.queue.isStopped {
@@ -141,7 +147,7 @@ final class AppModel {
     private func entryPath(for profile: BrowserProfile) -> String {
         let proxy = socksProxy(for: profile)
         return [profile.homePage.absoluteString, profile.userAgent, profile.websiteDataStoreID.uuidString,
-            profile.unresolvedProxyNumber.map(String.init) ?? "", profile.socksProxyNumber.map(String.init) ?? "", proxy?.id.uuidString ?? "direct",
+            profile.unresolvedProxyNumber.map(String.init) ?? "", profile.fixedProxyID == nil ? profile.socksProxyNumber.map(String.init) ?? "" : "fixed", proxy?.id.uuidString ?? "direct",
             proxy?.displayAddress ?? "", proxy?.scheme.rawValue ?? ""].joined(separator: "|")
     }
 
@@ -206,8 +212,10 @@ final class AppModel {
         var blocked = 0
         var usedByGroup: [String: Set<Int>] = [:]
         for profile in profiles {
-            guard let number = profile.socksProxyNumber,
-                  rankedSocksProxies.first(where: { $0.number == number })?.id == ranking.first(where: { $0.number == number })?.id else { continue }
+            guard profile.unresolvedProxyNumber == nil,
+                  let number = ProxyBindingResolver.number(profile, rankings: ranking),
+                  let oldProxy = socksProxy(for: profile),
+                  oldProxy.id == ProxyBindingResolver.resolve(profile, rankings: ranking)?.id else { continue }
             usedByGroup[profile.displayGroupName, default: []].insert(number)
         }
         var conflicts = 0
@@ -216,16 +224,19 @@ final class AppModel {
             if let oldID = bindings[profile.id], let newID = proxyIDMap[oldID],
                let number = ranking.first(where: { $0.proxy.id == newID })?.number {
                 copy.socksProxyNumber = number
+                if copy.fixedProxyID != nil { copy.fixedProxyID = newID }
                 copy.unresolvedProxyNumber = nil
-            } else if let number = copy.socksProxyNumber {
-                copy.unresolvedProxyNumber = number
+            } else if copy.fixedProxyID != nil || copy.socksProxyNumber != nil {
+                copy.unresolvedProxyNumber = copy.socksProxyNumber ?? 1
                 copy.socksProxyNumber = nil
+                copy.fixedProxyID = nil
                 blocked += 1
             }
             if let number = copy.socksProxyNumber {
                 if usedByGroup[copy.displayGroupName, default: []].contains(number) {
                     copy.unresolvedProxyNumber = number
                     copy.socksProxyNumber = nil
+                    copy.fixedProxyID = nil
                     conflicts += 1
                 } else { usedByGroup[copy.displayGroupName, default: []].insert(number) }
             }
@@ -241,6 +252,7 @@ final class AppModel {
         if archive.scriptSettings != nil { warnings.append("可选恢复全局脚本与网站规则；仅恢复你信任的备份脚本。") }
         if archive.proxySettings != nil { warnings.append("可选恢复测速设置；排序改变可能影响现有环境使用的代理编号。") }
         let shifted = profiles.filter { profile in
+            guard profile.fixedProxyID == nil else { return false }
             guard let number = profile.socksProxyNumber else { return false }
             return rankedSocksProxies.first(where: { $0.number == number })?.id != ranking.first(where: { $0.number == number })?.id
         }.count
@@ -277,6 +289,7 @@ final class AppModel {
         let beforeRanking = rankedSocksProxies
         var protectedProfiles = profiles
         for index in protectedProfiles.indices {
+            if protectedProfiles[index].fixedProxyID != nil { continue }
             guard let number = protectedProfiles[index].socksProxyNumber else { continue }
             if beforeRanking.first(where: { $0.number == number })?.id != finalRanking.first(where: { $0.number == number })?.id {
                 protectedProfiles[index].unresolvedProxyNumber = number
@@ -346,6 +359,15 @@ final class AppModel {
                 throw WebsiteRuleError.invalidHost
             }
             normalized[index].host = host
+            normalized[index].checkInContainerSelector = normalized[index].checkInContainerSelector.trimmingCharacters(in: .whitespacesAndNewlines)
+            normalized[index].actionSelector = normalized[index].actionSelector.trimmingCharacters(in: .whitespacesAndNewlines)
+            normalized[index].completionSelector = normalized[index].completionSelector.trimmingCharacters(in: .whitespacesAndNewlines)
+            normalized[index].failureSelector = normalized[index].failureSelector.trimmingCharacters(in: .whitespacesAndNewlines)
+            normalized[index].balanceSelector = normalized[index].balanceSelector.trimmingCharacters(in: .whitespacesAndNewlines)
+            normalized[index].balanceReadySelector = normalized[index].balanceReadySelector.trimmingCharacters(in: .whitespacesAndNewlines)
+            normalized[index].captchaSelector = normalized[index].captchaSelector?.trimmingCharacters(in: .whitespacesAndNewlines)
+            normalized[index].environmentTimeoutSeconds = min(300, max(15, normalized[index].environmentTimeoutSeconds ?? 60))
+            for (field, selector) in normalized[index].selectors { try WebsiteRuleValidator.validateDelimiters(selector, field: field) }
             normalized[index].submissionTimeoutSeconds = min(120, max(5, normalized[index].submissionTimeoutSeconds))
         }
         var settings = globalScriptSettings
@@ -357,19 +379,28 @@ final class AppModel {
     }
 
     func shouldRunAutomation(for profileID: UUID, now: Date = .now) -> Bool {
-        checkInDaysByProfileID[profileID.uuidString] != Self.localDayKey(for: now)
+        guard let profile = profiles.first(where: { $0.id == profileID }) else { return true }
+        return !completionStore.isCompleted(profile, now: now)
     }
 
     func automationCompletionKey(for profileID: UUID, now: Date = .now) -> String {
-        "cweb.checkIn.\(profileID.uuidString).\(Self.localDayKey(for: now))"
+        let scope = profiles.first(where: { $0.id == profileID })?.accountScopeKey ?? profileID.uuidString
+        return "cweb.checkIn.\(scope).\(AutomationCompletionStore.dayKey(now))"
     }
 
     func recordAutomationSuccess(for profileID: UUID, now: Date = .now) {
-        var records = checkInDaysByProfileID
-        records[profileID.uuidString] = Self.localDayKey(for: now)
-        guard let data = try? JSONEncoder().encode(records) else { return }
-        userDefaults.set(data, forKey: AppSettings.checkInRecordsKey)
-        checkInDaysByProfileID = records
+        guard let profile = profiles.first(where: { $0.id == profileID }) else { return }
+        completionStore.record(profile, now: now)
+    }
+
+    func resetAccountState(for profile: BrowserProfile) throws {
+        try assertProfilesEditable([profile.id])
+        guard let index = profiles.firstIndex(where: { $0.id == profile.id }) else { throw ProfileError.notFound }
+        var updated = profiles
+        updated[index].invalidateAccountState()
+        try profileRepository.save(updated)
+        profiles = updated
+        balanceRefreshes.invalidate(profile.id)
     }
 
     func handleAutomationEvent(_ event: AutomationEvent, for profileID: UUID) {
@@ -482,6 +513,7 @@ final class AppModel {
         userAgent: String,
         color: ProfileColor,
         socksProxyNumber: Int? = nil,
+        fixedProxyID: UUID? = nil,
         autofillUsername: String? = nil,
         autofillPassword: String? = nil
     ) throws {
@@ -497,7 +529,7 @@ final class AppModel {
             userAgent: userAgent.trimmingCharacters(in: .whitespacesAndNewlines),
             homePage: homePage,
             color: color,
-            socksProxyNumber: normalizedProxyNumber(socksProxyNumber)
+            socksProxyNumber: normalizedProxyNumber(socksProxyNumber), fixedProxyID: fixedProxyID
         )
         try validateSocksProxyAssignment(for: profile)
         try commitProfilesWithCredentials(profiles + [profile], affectedIDs: [profile.id]) {
@@ -583,6 +615,7 @@ final class AppModel {
             if socksProxyAssignmentConflict(for: value, excludingProfileID: nil, among: (existing ?? profiles) + values) != nil {
                 value.unresolvedProxyNumber = value.socksProxyNumber
                 value.socksProxyNumber = nil
+                value.fixedProxyID = nil
             }
             values.append(value)
         }
@@ -613,7 +646,7 @@ final class AppModel {
             userAgent: profile.userAgent,
             homePage: profile.homePage,
             color: profile.color,
-            cachedBalance: profile.cachedBalance,
+            cachedBalance: nil,
             socksProxyNumber: nil,
             unresolvedProxyNumber: profile.socksProxyNumber ?? profile.unresolvedProxyNumber
         )
@@ -642,12 +675,14 @@ final class AppModel {
         updated[index].balanceUpdatedAt = nil
         updated[index].balanceReadError = nil
         updated[index].balanceSourceVerified = nil
+        updated[index].balanceOrigin = nil
+        balanceRefreshes.invalidate(profile.id)
         try profileRepository.save(updated)
         profiles = updated
     }
 
     func balanceStatus(for profile: BrowserProfile, now: Date = .now) -> String? {
-        if balanceRefreshes[profile.id] != nil { return "正在更新余额" }
+        if balanceRefreshes.isRefreshing(profile.id) { return "正在更新余额" }
         if let error = profile.balanceReadError { return error }
         guard profile.cachedBalance != nil else { return nil }
         guard let date = profile.balanceUpdatedAt else { return "历史缓存，尚未更新" }
@@ -656,36 +691,45 @@ final class AppModel {
         return "更新于 " + date.formatted(date: .omitted, time: .shortened)
     }
 
-    func refreshBalance(for session: BrowserSession, afterCheckIn: Bool = false) async {
+    @discardableResult
+    func refreshBalance(for session: BrowserSession, afterCheckIn: Bool = false) async -> BalanceRefreshResult {
         let profileID = session.profile.id
-        guard balanceRefreshes[profileID]?.afterCheckIn != true else { return }
-        let token = UUID()
-        balanceRefreshes[profileID] = (token, afterCheckIn)
-        defer {
-            if balanceRefreshes[profileID]?.token == token { balanceRefreshes.removeValue(forKey: profileID) }
+        guard let ticket = balanceRefreshes.begin(profileID, afterCheckIn: afterCheckIn) else { return .cancelled }
+        defer { balanceRefreshes.end(ticket, for: profileID) }
+        let scope = session.profile.accountScopeKey
+        func isCurrent() -> Bool {
+            !session.isClosed && balanceRefreshes.contains(ticket, for: profileID)
+                && profiles.first(where: { $0.id == profileID })?.accountScopeKey == scope
         }
-        let host = session.currentOrigin?.host.lowercased() ?? session.profile.homePageHost.lowercased()
-        let rule = globalScriptSettings.siteRules?.first { $0.normalizedHost == host }
         do {
             let reading = try await AccountBalanceReader.readResult(
                 afterCheckIn: afterCheckIn,
                 reloadPage: {
-                    guard !session.isClosed, self.balanceRefreshes[profileID]?.token == token else { throw CancellationError() }
+                    guard isCurrent() else { throw CancellationError() }
                     try await session.reloadForBalanceRefresh()
                 },
                 readValue: {
-                    guard !session.isClosed, self.balanceRefreshes[profileID]?.token == token else { throw CancellationError() }
+                    guard isCurrent() else { throw CancellationError() }
+                    // A login redirect or unrelated site must not replace the account's balance.
+                    guard session.currentOrigin == WebOrigin(url: session.profile.homePage) else { return nil as AccountBalanceReading? }
+                    let host = session.currentOrigin?.host ?? ""
+                    let rule = self.globalScriptSettings.siteRules?.first { $0.normalizedHost == host }
                     return try await session.readAccountBalanceResult(rule: rule)
                 }
             )
             try Task.checkCancellation()
-            guard !session.isClosed, balanceRefreshes[profileID]?.token == token else { return }
+            guard isCurrent() else { return .cancelled }
+            let error = reading == nil ? "未读取到余额，请确认登录状态或检查网站规则" : nil
             saveBalanceState(reading?.value, for: profileID, verified: reading?.sourceVerified == true,
-                error: reading == nil ? "余额读取超时，显示历史缓存" : nil)
-        } catch is CancellationError { }
+                error: error, origin: session.currentOrigin)
+            if let reading { return .updated(reading.value) }
+            return .failed(error!)
+        } catch is CancellationError { return .cancelled }
         catch {
-            guard balanceRefreshes[profileID]?.token == token else { return }
-            saveBalanceState(nil, for: profileID, verified: false, error: "余额更新失败：" + error.localizedDescription)
+            guard isCurrent() else { return .cancelled }
+            let message = "余额更新失败：" + error.localizedDescription
+            saveBalanceState(nil, for: profileID, verified: false, error: message)
+            return .failed(message)
         }
     }
 
@@ -776,6 +820,9 @@ final class AppModel {
         )
         value.socksProxyNumber = normalizedProxyNumber(value.socksProxyNumber)
         try validateSocksProxyAssignment(for: value, excludingProfileID: value.id)
+        if WebOrigin(url: previousProfile.homePage) != WebOrigin(url: value.homePage) {
+            value.invalidateAccountState()
+        }
         value.updatedAt = .now
         var updatedProfiles = profiles
         updatedProfiles[index] = value
@@ -798,12 +845,27 @@ final class AppModel {
         ranked(socksProxies, using: socksProxyValidationSettings.sortMode)
     }
 
-    /// Returns the proxy currently occupying a profile's volatile display
-    /// number. A profile deliberately stores the number, not this record's ID.
+    /// Fixed bindings resolve by identity; legacy ranked bindings follow the display number.
     func socksProxy(for profile: BrowserProfile) -> SocksProxy? {
-        guard profile.unresolvedProxyNumber == nil else { return nil }
-        guard let number = profile.socksProxyNumber else { return nil }
-        return socksProxy(forDisplayNumber: number)
+        ProxyBindingResolver.resolve(profile, rankings: rankedSocksProxies)
+    }
+
+    func proxyNumber(for profile: BrowserProfile) -> Int? {
+        ProxyBindingResolver.number(profile, rankings: rankedSocksProxies)
+    }
+
+    func entryPreflightIssues(for profiles: [BrowserProfile]) -> [String] {
+        profiles.compactMap { entryPreflightIssue(for: $0) }
+    }
+
+    func entryPreflightIssue(for profile: BrowserProfile) -> String? {
+        if profile.unresolvedProxyNumber != nil || ((profile.socksProxyNumber != nil || profile.fixedProxyID != nil) && socksProxy(for: profile) == nil) {
+            return "\(profile.name)：代理缺失或待选择，请先编辑环境。"
+        }
+        if let conflict = socksProxyAssignmentConflict(for: profile, excludingProfileID: profile.id, among: self.profiles) {
+            return "\(profile.name)：与同组的“\(conflict.name)”指向相同代理，请重新选择。"
+        }
+        return nil
     }
 
     func socksProxy(forDisplayNumber number: Int) -> SocksProxy? {
@@ -890,7 +952,11 @@ final class AppModel {
         let after = ranked(retained, using: socksProxyValidationSettings.sortMode)
         var updatedProfiles = profiles
         for index in updatedProfiles.indices {
-            guard let number = updatedProfiles[index].socksProxyNumber else { continue }
+            guard let number = proxyNumber(for: updatedProfiles[index]) else { continue }
+            if let fixedID = updatedProfiles[index].fixedProxyID {
+                if !deletableIDs.contains(fixedID) { continue }
+                updatedProfiles[index].fixedProxyID = nil
+            }
             if before.first(where: { $0.number == number })?.id != after.first(where: { $0.number == number })?.id {
                 updatedProfiles[index].unresolvedProxyNumber = number
                 updatedProfiles[index].socksProxyNumber = nil
@@ -909,6 +975,7 @@ final class AppModel {
         let after = ranked(socksProxies.filter { !ids.contains($0.id) || $0.isLocked }, using: socksProxyValidationSettings.sortMode)
         let before = rankedSocksProxies
         let impacted = profiles.filter { profile in
+            if let fixedID = profile.fixedProxyID { return ids.contains(fixedID) && !socksProxies.contains(where: { $0.id == fixedID && $0.isLocked }) }
             guard let number = profile.socksProxyNumber else { return false }
             return before.first(where: { $0.number == number })?.id != after.first(where: { $0.number == number })?.id
         }
@@ -1192,6 +1259,7 @@ final class AppModel {
 
         busyProfileID = profile.id
         defer { busyProfileID = nil }
+        do { try resetAccountState(for: profile) } catch { present(error); return }
         await websiteDataStores.clearWebsiteData(for: profile)
     }
 
@@ -1385,7 +1453,7 @@ final class AppModel {
 
         return profiles.first { candidate in
             guard candidate.id != excludingProfileID,
-                  normalizedProxyNumber(candidate.socksProxyNumber) == number
+                  proxyNumber(for: candidate) == number
             else {
                 return false
             }
@@ -1409,10 +1477,10 @@ final class AppModel {
 
         let originalProfiles = profiles
         var repairedProfiles = profiles
-        var assignedNumbers = Set<SocksProxyAssignmentKey>()
+        var assignedNumbers: [SocksProxyAssignmentKey: Bool] = [:]
 
         for index in repairedProfiles.indices {
-            let normalizedNumber = normalizedProxyNumber(repairedProfiles[index].socksProxyNumber)
+            let normalizedNumber = normalizedProxyNumber(proxyNumber(for: repairedProfiles[index]))
             repairedProfiles[index].socksProxyNumber = normalizedNumber
             guard let normalizedNumber else { continue }
 
@@ -1420,11 +1488,16 @@ final class AppModel {
                 groupIdentity: socksProxyGroupIdentity(for: repairedProfiles[index]),
                 proxyNumber: normalizedNumber
             )
-            guard assignedNumbers.insert(key).inserted else {
+            if let previousIsFixed = assignedNumbers[key] {
+                // Sorting can make a ranked binding collide with an explicit
+                // fixed binding. Keep both visible for preflight/editor repair.
+                if previousIsFixed || repairedProfiles[index].fixedProxyID != nil { continue }
                 repairedProfiles[index].unresolvedProxyNumber = normalizedNumber
                 repairedProfiles[index].socksProxyNumber = nil
+                repairedProfiles[index].fixedProxyID = nil
                 continue
             }
+            assignedNumbers[key] = repairedProfiles[index].fixedProxyID != nil
         }
 
         guard repairedProfiles != originalProfiles else { return }
@@ -1441,7 +1514,7 @@ final class AppModel {
         for profile: BrowserProfile,
         excludingProfileID: UUID? = nil
     ) throws {
-        guard let number = normalizedProxyNumber(profile.socksProxyNumber),
+        guard let number = proxyNumber(for: profile),
               let conflictingProfile = socksProxyAssignmentConflict(
                 for: profile,
                 excludingProfileID: excludingProfileID,
@@ -1463,13 +1536,15 @@ final class AppModel {
         excludingProfileID: UUID?,
         among candidates: [BrowserProfile]
     ) -> BrowserProfile? {
-        guard let number = normalizedProxyNumber(profile.socksProxyNumber) else {
+        guard let number = proxyNumber(for: profile) else {
             return nil
         }
 
         return candidates.first { candidate in
             candidate.id != excludingProfileID
-                && normalizedProxyNumber(candidate.socksProxyNumber) == number
+                && candidate.unresolvedProxyNumber == nil
+                && profile.unresolvedProxyNumber == nil
+                && proxyNumber(for: candidate) == number
                 && profilesBelongToSameGroup(candidate, profile)
         }
     }
@@ -1645,24 +1720,11 @@ final class AppModel {
         return upgraded
     }
 
-    private static func loadCheckInRecords(from userDefaults: UserDefaults) -> [String: String] {
-        guard let data = userDefaults.data(forKey: AppSettings.checkInRecordsKey),
-              let value = try? JSONDecoder().decode([String: String].self, from: data) else {
-            return [:]
-        }
-        return value
-    }
-
     private static func loadLastAutomationResult(from userDefaults: UserDefaults) -> AutomationRunRecord? {
         guard let data = userDefaults.data(forKey: AppSettings.lastAutomationResultKey) else {
             return nil
         }
         return try? JSONDecoder().decode(AutomationRunRecord.self, from: data)
-    }
-
-    private static func localDayKey(for date: Date) -> String {
-        let components = Calendar.current.dateComponents([.year, .month, .day], from: date)
-        return String(format: "%04d-%02d-%02d", components.year ?? 0, components.month ?? 0, components.day ?? 0)
     }
 
     private func persist() throws {
@@ -1727,13 +1789,14 @@ final class AppModel {
         return "\(baseName) \(suffix)"
     }
 
-    private func saveBalanceState(_ balance: String?, for profileID: UUID, verified: Bool, error: String?) {
+    private func saveBalanceState(_ balance: String?, for profileID: UUID, verified: Bool, error: String?, origin: WebOrigin? = nil) {
         guard let index = profiles.firstIndex(where: { $0.id == profileID }) else { return }
         var updated = profiles
         if let balance {
             updated[index].cachedBalance = balance
             updated[index].balanceUpdatedAt = .now
             updated[index].balanceSourceVerified = verified
+            updated[index].balanceOrigin = origin
         }
         updated[index].balanceReadError = error
         do { try profileRepository.save(updated); profiles = updated }

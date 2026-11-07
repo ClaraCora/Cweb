@@ -25,6 +25,11 @@ final class BrowserSession {
     private let userContentController: WKUserContentController
     private var automationMessageHandler: AutomationMessageHandler?
     private var automationUserScript: WKUserScript?
+    private let scriptRunToken = UUID().uuidString
+    private var automationMatches: [String] = []
+    private var automationRuleHosts: Set<String> = []
+    private(set) var balanceRefreshRequest = 0
+    private var baseRules: [WebsiteRule] = []
     private var automationConfigured = false
     private var automationPaused = false
     private var automationManuallyPaused = false
@@ -59,6 +64,8 @@ final class BrowserSession {
             dataStore.proxyConfigurations = []
             if socksProxy != nil {
                 proxyConfigurationError = "SOCKS 代理地址无效，无法打开环境。"
+            } else if profile.fixedProxyID != nil {
+                proxyConfigurationError = "固定绑定的 SOCKS 代理已缺失，请重新选择后打开环境。"
             } else if let proxyNumber = profile.socksProxyNumber {
                 // A profile that explicitly selected a proxy must never
                 // silently fall back to a direct connection when that volatile
@@ -86,6 +93,10 @@ final class BrowserSession {
         self.page = page
         self.proxyConfigurationError = proxyConfigurationError
         self.userContentController = userContentController
+        let handler = AutomationMessageHandler(session: self)
+        userContentController.add(handler, name: AutomationBridge.messageName)
+        automationMessageHandler = handler
+        installBaseScripts()
     }
 
     private static func endpoint(for proxy: SocksProxy) -> NWEndpoint? {
@@ -116,6 +127,8 @@ final class BrowserSession {
         guard !automationConfigured else { return }
         automationConfigured = true
         automationEventHandler = onEvent
+        baseRules = settings.siteRules ?? []
+        installBaseScripts()
 
         guard settings.enabled else {
             automationState = .inactive
@@ -135,15 +148,14 @@ final class BrowserSession {
             return
         }
 
-        let handler = AutomationMessageHandler(session: self)
-        userContentController.add(handler, name: AutomationBridge.messageName)
-        automationMessageHandler = handler
-
+        automationMatches = parsed.matches
+        automationRuleHosts = Set((settings.siteRules ?? []).map(\.normalizedHost))
         let source = AutomationScriptBuilder.build(
             code: parsed.source,
             matches: parsed.matches,
             completionKey: completionKey,
-            siteRules: settings.siteRules ?? []
+            siteRules: settings.siteRules ?? [], runToken: scriptRunToken,
+            homeOrigin: WebOrigin(url: profile.homePage)?.displayString
         )
         let injectionTime: WKUserScriptInjectionTime = parsed.runsAtDocumentStart
             ? .atDocumentStart
@@ -160,6 +172,7 @@ final class BrowserSession {
     private func installAutomationScripts() {
         guard !automationHasCompleted, let automationUserScript else { return }
         userContentController.removeAllUserScripts()
+        installBaseScripts()
         // Apply a manual pause before the userscript even on a redirect or a
         // newly loaded origin. Pausing only the current document is not enough.
         userContentController.addUserScript(WKUserScript(
@@ -230,6 +243,38 @@ final class BrowserSession {
         }
     }
 
+    func requestBalanceRead() { balanceRefreshRequest += 1 }
+
+    private func installBaseScripts() {
+        userContentController.removeAllUserScripts()
+        userContentController.addUserScript(WKUserScript(source: BrowserDocumentScript.identity,
+            injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        userContentController.addUserScript(WKUserScript(source: BrowserDocumentScript.observer(runToken: scriptRunToken, rules: baseRules),
+            injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+    }
+
+    func receiveDocumentMessage(type: String, message: String, runToken: String, documentID: String, frameURL: URL?) async {
+        guard !isClosed, runToken == scriptRunToken, !documentID.isEmpty,
+              let frameURL, let origin = WebOrigin(url: frameURL), origin == currentOrigin else { return }
+        let currentID = try? await page.callJavaScript("return window.__cwebDocumentID || '';", arguments: [:], in: nil, contentWorld: .page) as? String
+        guard !isClosed, currentID == documentID, origin == currentOrigin else { return }
+        if type == "balanceChanged" { requestBalanceRead(); return }
+        guard automationConfigured, automationOriginAllowed(frameURL) else { return }
+        receiveAutomationMessage(type: type, message: message)
+    }
+
+    private func automationOriginAllowed(_ url: URL) -> Bool {
+        let explicitMatches = automationMatches.filter { $0 != "*://*/*" && $0 != "<all_urls>" }
+        if explicitMatches.isEmpty {
+            return WebOrigin(url: url) == WebOrigin(url: profile.homePage)
+                || automationRuleHosts.contains(url.host?.lowercased() ?? "")
+        }
+        return explicitMatches.contains { pattern in
+            let expression = "^" + pattern.components(separatedBy: "*").map(NSRegularExpression.escapedPattern(for:)).joined(separator: ".*") + "$"
+            return url.absoluteString.range(of: expression, options: [.regularExpression, .caseInsensitive]) != nil
+        }
+    }
+
     func receiveAutomationMessage(type: String, message: String) {
         guard !isClosed, !automationHasCompleted, let kind = AutomationEventKind(rawValue: type) else { return }
         let event = AutomationEvent(kind: kind, message: message)
@@ -266,7 +311,7 @@ final class BrowserSession {
             guard !hasStarted, !isClosed else { return }
             hasStarted = true
             startNavigation { [profile] page in
-                page.load(html: "<html><head><meta name='viewport' content='width=device-width'></head><body><h1>本地测试页面</h1><p>请处理验证码后继续</p><form><input autocomplete='username'><input type='password' autocomplete='current-password'></form></body></html>", baseURL: profile.homePage)
+                page.load(html: "<html><head><meta name='viewport' content='width=device-width'></head><body><h1>本地测试页面</h1><p>请处理验证码后继续</p><div data-account-balance>$42.00</div><form><input autocomplete='username'><input type='password' autocomplete='current-password'></form></body></html>", baseURL: profile.homePage)
             }
             return
         }
@@ -382,7 +427,7 @@ final class BrowserSession {
     private func finishAutomationForBalanceRefresh() {
         automationHasCompleted = true
         automationUserScript = nil
-        userContentController.removeAllUserScripts()
+        installBaseScripts()
     }
 
     /// Starts a WebPage navigation and observes the sequence it returns.
@@ -484,13 +529,15 @@ final class BrowserSession {
     }
 
     func readAccountBalanceResult(rule: WebsiteRule? = nil) async throws -> AccountBalanceReading? {
+        let origin = currentOrigin
         let value = try await page.callJavaScript(
             BalanceReadScript.source,
             arguments: ["balanceSelector": rule?.balanceSelector ?? "", "readySelector": rule?.balanceReadySelector ?? ""],
             in: nil, contentWorld: .page
         )
-        guard !isClosed, let result = value as? [String: Any],
-              let balance = result["value"] as? String,
+        guard !isClosed, currentOrigin == origin, let result = value as? [String: Any] else { return nil }
+        if let error = result["selectorError"] as? String { throw WebsiteRuleError.invalidSelector(error) }
+        guard let balance = result["value"] as? String,
               let verified = result["verified"] as? Bool else { return nil }
         return AccountBalanceReading(value: balance, sourceVerified: verified)
     }

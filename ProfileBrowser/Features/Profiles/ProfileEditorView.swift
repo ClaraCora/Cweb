@@ -19,6 +19,8 @@ struct ProfileEditorView: View {
     @State private var autofillPassword: String
     @State private var socksProxyNumber: Int?
     @State private var hasSelectedProxy = false
+    @State private var usesFixedProxy: Bool
+    @State private var loadedProxy = false
     @State private var color: ProfileColor
     @State private var localError: PresentedError?
     @State private var showsGroupSelection = false
@@ -44,6 +46,7 @@ struct ProfileEditorView: View {
         _autofillUsername = State(initialValue: "")
         _autofillPassword = State(initialValue: "")
         _socksProxyNumber = State(initialValue: profile?.socksProxyNumber)
+        _usesFixedProxy = State(initialValue: profile?.fixedProxyID != nil)
         _color = State(initialValue: profile?.color ?? .indigo)
     }
 
@@ -55,6 +58,11 @@ struct ProfileEditorView: View {
                 autofillSection
                 userAgentSection
                 colorSection
+            }
+            .task {
+                guard !loadedProxy else { return }
+                loadedProxy = true
+                if let originalProfile, originalProfile.fixedProxyID != nil { socksProxyNumber = model.proxyNumber(for: originalProfile) }
             }
             .navigationTitle(originalProfile == nil ? "新建环境" : "编辑环境")
             .navigationBarTitleDisplayMode(.inline)
@@ -144,6 +152,11 @@ struct ProfileEditorView: View {
                 InlineValidationMessage(message: "原代理选择发生冲突或来自复制，请明确选择代理或不使用代理；处理前不会联网。")
             }
 
+            if socksProxyNumber != nil {
+                Toggle("固定当前代理", isOn: $usesFixedProxy)
+                Text(usesFixedProxy ? "测速和排序不会改变该环境的代理。" : "按显示编号绑定，重新排序后可能使用另一条代理。")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
             if let socksProxyNumber {
                 if let occupant = proxyOccupant(for: socksProxyNumber) {
                     InlineValidationMessage(message: "第 \(socksProxyNumber) 号已由“\(occupant.name)”使用，请选择其他编号。")
@@ -278,7 +291,8 @@ struct ProfileEditorView: View {
             || homePageText != (originalProfile?.homePage.absoluteString ?? BrowserProfile.defaultHomePage.absoluteString)
             || userAgent != (originalProfile?.userAgent ?? BrowserProfile.defaultUserAgent)
             || color != (originalProfile?.color ?? .indigo)
-            || socksProxyNumber != originalProfile?.socksProxyNumber
+            || socksProxyNumber != originalProfile.flatMap { model.proxyNumber(for: $0) }
+            || usesFixedProxy != (originalProfile?.fixedProxyID != nil)
             || hasSelectedProxy
             || !autofillUsername.isEmpty || !autofillPassword.isEmpty
     }
@@ -314,6 +328,7 @@ struct ProfileEditorView: View {
                 profile.userAgent = userAgent.trimmingCharacters(in: .whitespacesAndNewlines)
                 profile.color = color
                 profile.socksProxyNumber = socksProxyNumber
+                profile.fixedProxyID = usesFixedProxy ? socksProxyNumber.flatMap { model.socksProxy(forDisplayNumber: $0)?.id } : nil
                 if hasSelectedProxy { profile.unresolvedProxyNumber = nil }
                 try onSave(.update(
                     profile,
@@ -328,6 +343,7 @@ struct ProfileEditorView: View {
                     userAgent: userAgent,
                     color: color,
                     socksProxyNumber: socksProxyNumber,
+                    fixedProxyID: usesFixedProxy ? socksProxyNumber.flatMap { model.socksProxy(forDisplayNumber: $0)?.id } : nil,
                     autofillUsername: autofillUsername,
                     autofillPassword: autofillPassword
                 ))
@@ -400,6 +416,7 @@ enum ProfileEditorSubmission {
         userAgent: String,
         color: ProfileColor,
         socksProxyNumber: Int?,
+        fixedProxyID: UUID?,
         autofillUsername: String,
         autofillPassword: String
     )

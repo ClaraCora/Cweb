@@ -3,6 +3,7 @@ import SwiftUI
 struct GroupRunHistoryView: View {
     @Environment(AppModel.self) private var model
     @State private var confirmsDiscard = false
+    @State private var retryController: GroupCheckInController?
     var body: some View {
         List {
             if let pending = model.pendingGroupRun {
@@ -17,19 +18,29 @@ struct GroupRunHistoryView: View {
                 Section {
                     Text(record.groupName).font(.headline)
                     Text(record.updatedAt, format: .dateTime.year().month().day().hour().minute())
-                    Text("完成 \(record.queue.completedCount) · 跳过 \(record.queue.skippedCount) · 未处理 \(record.queue.profileIDs.count - record.queue.index)")
+                    Text("完成 \(record.queue.completedCount) · 待处理 \(record.queue.failedCount) · 跳过 \(record.queue.skippedCount) · 未处理 \(record.queue.profileIDs.count - record.queue.index)")
                     ForEach(record.queue.profileIDs, id: \.self) { id in
-                        LabeledContent(model.profiles.first(where: { $0.id == id })?.name ?? "已删除环境", value: record.queue.outcomes[id].map {
-                            switch $0 { case .completed: "完成"; case .alreadyCompleted: "今日已完成"; case .skipped: "跳过" }
-                        } ?? record.statuses[id] ?? "未处理")
+                        GroupRunResultRow(name: record.details?[id]?.name ?? model.profiles.first(where: { $0.id == id })?.name ?? "已删除环境",
+                            outcome: record.queue.outcomes[id], detail: record.details?[id])
                     }
+                    Button("重试未完成项") { retry(record, balanceOnly: false) }
+                        .disabled(record.retryProfileIDs.isEmpty)
+                    Button("仅重试余额") { retry(record, balanceOnly: true) }
+                        .disabled(record.balanceRetryProfileIDs.isEmpty)
                 }
             }
             if model.groupRunHistory.isEmpty && model.pendingGroupRun == nil { ContentUnavailableView("暂无任务记录", systemImage: "clock") }
         }
+        .sheet(item: $retryController) { GroupCheckInView(controller: $0) }
         .navigationTitle("签到记录").navigationBarTitleDisplayMode(.inline)
         .confirmationDialog("停止并归档剩余任务？", isPresented: $confirmsDiscard, titleVisibility: .visible) {
             Button("停止任务", role: .destructive) { model.discardPendingGroupRun() }
         }
     }
+    private func retry(_ record: GroupRunRecord, balanceOnly: Bool) {
+        let next = model.retryGroupRun(record, balanceOnly: balanceOnly)
+        next.start()
+        retryController = next
+    }
+
 }

@@ -5,15 +5,20 @@ import WebKit
 struct IPDetectionView: View {
     @Environment(\.dismiss) private var dismiss
 
+    private let socksProxy: SocksProxy?
     private let profile: BrowserProfile
     @State private var session: BrowserSession
     @State private var ipv4: IPProbeState = .idle
     @State private var ipv6: IPProbeState = .idle
     @State private var webRTC: IPProbeState = .idle
     @State private var isRunning = false
+    @State private var detectionTask: Task<Void, Never>?
+    @State private var runID = UUID()
+    @Environment(\.scenePhase) private var scenePhase
 
     init(profile: BrowserProfile, socksProxy: SocksProxy?) {
         self.profile = profile
+        self.socksProxy = socksProxy
         _session = State(initialValue: BrowserSession(profile: profile, socksProxy: socksProxy))
     }
 
@@ -37,7 +42,7 @@ struct IPDetectionView: View {
 
                 Section {
                     Button {
-                        Task { await runDetection() }
+                        detectionTask = Task { await runDetection() }
                     } label: {
                         HStack {
                             Spacer()
@@ -53,6 +58,7 @@ struct IPDetectionView: View {
                         .frame(minHeight: 44)
                     }
                     .disabled(isRunning)
+                    if isRunning { Button("取消检测", role: .cancel) { cancelDetection() } }
                 }
             }
             .listStyle(.insetGrouped)
@@ -60,11 +66,11 @@ struct IPDetectionView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("关闭") { dismiss() }
-                        .disabled(isRunning)
+                    Button("关闭") { cancelDetection(); dismiss() }
                 }
             }
-            .interactiveDismissDisabled(isRunning)
+            .onDisappear { cancelDetection() }
+            .onChange(of: scenePhase) { _, phase in if phase == .background { cancelDetection() } }
             .background {
                 WebView(session.page)
                     .frame(width: 1, height: 1)
@@ -81,6 +87,9 @@ struct IPDetectionView: View {
 
     private var networkPathDescription: String {
         if profile.unresolvedProxyNumber != nil { return "代理待选择 · 已阻止联网" }
+        if profile.fixedProxyID != nil {
+            return session.socksProxy.map { "固定代理 · \($0.displayCode ?? $0.displayAddress)" } ?? "固定代理缺失 · 已阻止联网"
+        }
         if let number = profile.socksProxyNumber {
             if let proxy = session.socksProxy {
                 return "SOCKS 第 \(number) 号 · \(proxy.displayCode ?? proxy.displayAddress)"
@@ -90,32 +99,44 @@ struct IPDetectionView: View {
         return "设备网络"
     }
 
+    private func cancelDetection() {
+        runID = UUID()
+        detectionTask?.cancel()
+        detectionTask = nil
+        session.close()
+        isRunning = false
+        if ipv4 == .testing { ipv4 = .idle }
+        if ipv6 == .testing { ipv6 = .idle }
+        if webRTC == .testing { webRTC = .idle }
+    }
+
     private func runDetection() async {
         guard !isRunning else { return }
+        if session.isClosed { session = BrowserSession(profile: profile, socksProxy: socksProxy) }
+        let token = UUID()
+        runID = token
         isRunning = true
-        ipv4 = .testing
-        ipv6 = .testing
-        webRTC = .testing
-        defer { isRunning = false }
-
+        ipv4 = .testing; ipv6 = .testing; webRTC = .testing
+        defer { if runID == token { isRunning = false; detectionTask = nil } }
         let service = IPDetectionService(session: session)
         do {
-            try await service.prepare()
+            let results = try await BoundedOperation.run(timeout: .seconds(20)) {
+                try await service.prepare()
+                async let v4 = probeAddress { try await service.detectIPv4() }
+                async let v6 = probeAddress { try await service.detectIPv6() }
+                async let rtc = probeWebRTC { try await service.detectWebRTC() }
+                return await (v4, v6, rtc)
+            }
+            try Task.checkCancellation()
+            guard runID == token else { return }
+            ipv4 = results.0; ipv6 = results.1; webRTC = results.2
         } catch {
-            let message = error.localizedDescription
-            ipv4 = .failed(message)
-            ipv6 = .failed(message)
-            webRTC = .failed(message)
-            return
+            guard runID == token else { return }
+            ipv4 = .failed(error.localizedDescription)
+            ipv6 = .failed(error.localizedDescription)
+            webRTC = .failed(error.localizedDescription)
+            session.close()
         }
-
-        async let ipv4Result = probeAddress { try await service.detectIPv4() }
-        async let ipv6Result = probeAddress { try await service.detectIPv6() }
-        async let webRTCResult = probeWebRTC { try await service.detectWebRTC() }
-        let results = await (ipv4Result, ipv6Result, webRTCResult)
-        ipv4 = results.0
-        ipv6 = results.1
-        webRTC = results.2
     }
 
     private func probeAddress(

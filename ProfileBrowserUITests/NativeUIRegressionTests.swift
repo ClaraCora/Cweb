@@ -159,6 +159,8 @@ final class NativeUIRegressionTests: XCTestCase {
         var app = launch()
         app.buttons[groupID].tap()
         taskButton("start", in: app).tap()
+        XCTAssertTrue(app.buttons["groupCheckIn.startAvailable"].waitForExistence(timeout: 5))
+        app.buttons["groupCheckIn.startAvailable"].tap()
         let fill = app.buttons["browser.fill"]
         XCTAssertTrue(fill.waitForExistence(timeout: 10))
         let web = app.webViews.firstMatch
@@ -177,5 +179,25 @@ final class NativeUIRegressionTests: XCTestCase {
         taskButton("stop", in: app).tap()
         XCTAssertTrue(app.staticTexts["本组签到已停止"].waitForExistence(timeout: 5))
         capture("task-stopped")
+    }
+
+    func testWebsiteRulePreviewAndSaveFromBrowser() {
+        let app = launch()
+        app.buttons[groupID].tap()
+        app.buttons[profileID].tap()
+        XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 10))
+        app.buttons["browser.more"].tap()
+        app.buttons["browser.websiteRules"].tap()
+        XCTAssertTrue(app.navigationBars["网站识别规则"].waitForExistence(timeout: 5))
+        let preview = app.buttons["测试当前页面（不执行签到）"]
+        for _ in 0..<8 where !preview.isHittable { app.swipeUp() }
+        XCTAssertTrue(preview.isHittable)
+        preview.tap()
+        XCTAssertTrue(app.staticTexts["读取金额：$42.00"].waitForExistence(timeout: 5))
+        app.buttons["保存"].tap()
+        let feedback = app.staticTexts["已保存，下次进入环境或新任务生效。"]
+        for _ in 0..<3 where !feedback.isHittable { app.swipeUp() }
+        XCTAssertTrue(feedback.waitForExistence(timeout: 5))
+        capture("website-rules-preview-saved")
     }
 }

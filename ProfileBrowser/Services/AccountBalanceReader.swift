@@ -71,6 +71,8 @@ enum AccountBalanceReader {
                 value = try await readValue()
             } catch is CancellationError {
                 throw CancellationError()
+            } catch let error as WebsiteRuleError {
+                throw error
             } catch {
                 value = nil
             }

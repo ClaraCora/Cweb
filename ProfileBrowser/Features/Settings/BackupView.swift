@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct BackupView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @State private var exportPassword = ""
     @State private var confirmPassword = ""
     @State private var importPassword = ""
@@ -164,6 +165,9 @@ struct BackupView: View {
 
     private func exportBackup() {
         start("正在加密备份…") {
+            try await AuthenticationService().authenticate(reason: "导出包含网站账号和代理密码的完整备份")
+            try Task.checkCancellation()
+            guard scenePhase != .background else { throw CancellationError() }
             let snapshot = try model.backupSnapshot()
             let password = exportPassword
             let data = try await BackupService.background { try BackupService.encrypt(snapshot, password: password) }

@@ -6,7 +6,9 @@ enum AutomationBridge {
 }
 
 enum AutomationScriptBuilder {
-    static func build(code: String, matches: [String], completionKey: String? = nil, siteRules: [WebsiteRule] = []) -> String {
+    static func build(code: String, matches: [String], completionKey: String? = nil, siteRules: [WebsiteRule] = [], runToken: String? = nil, homeOrigin: String? = nil) -> String {
+        let runTokenJSON = encodeString(runToken)
+        let homeOriginJSON = encodeString(homeOrigin)
         let matchJSON = encodeMatches(matches)
         let completionKeyJSON = encodeString(completionKey)
         let rulesJSON = String(data: (try? JSONEncoder().encode(siteRules)) ?? Data("[]".utf8), encoding: .utf8) ?? "[]"
@@ -51,8 +53,14 @@ enum AutomationScriptBuilder {
                 }
             };
 
-            if (__cwebMatches.length > 0
-                && !__cwebMatches.some(__cwebMatchesPage)) {
+            const __cwebHomeOrigin = \(homeOriginJSON);
+            const __cwebExplicitMatches = __cwebMatches.filter(p => p !== '*://*/*' && p !== '<all_urls>');
+            const __cwebAllowed = __cwebExplicitMatches.length > 0
+                ? __cwebExplicitMatches.some(__cwebMatchesPage)
+                : !__cwebHomeOrigin || window.location.origin === __cwebHomeOrigin
+                    || __cwebRules.some(r => r.host.trim().toLowerCase() === window.location.hostname.toLowerCase());
+            if (!__cwebAllowed || (__cwebMatches.length > 0
+                && !__cwebMatches.some(__cwebMatchesPage))) {
                 return;
             }
 
@@ -64,7 +72,7 @@ enum AutomationScriptBuilder {
                 }
                 if (type !== "resume") __cwebSent.add(type);
                 window.webkit?.messageHandlers?.\(AutomationBridge.messageName)?.postMessage({
-                    type,
+                    type, runToken: \(runTokenJSON), documentID: window.__cwebDocumentID,
                     message: String(message || "")
                 });
             };
@@ -169,10 +177,14 @@ final class AutomationMessageHandler: NSObject, WKScriptMessageHandler {
               let type = payload["type"] as? String else {
             return
         }
+        guard let runToken = payload["runToken"] as? String,
+              let documentID = payload["documentID"] as? String else { return }
         let messageText = payload["message"] as? String ?? ""
+        let frameURL = message.frameInfo.request.url
         let session = self.session
         Task { @MainActor in
-            session?.receiveAutomationMessage(type: type, message: messageText)
+            await session?.receiveDocumentMessage(type: type, message: messageText,
+                runToken: runToken, documentID: documentID, frameURL: frameURL)
         }
     }
 }

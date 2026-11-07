@@ -26,9 +26,13 @@ struct BrowserProfile: Identifiable, Codable, Hashable, Sendable {
     var balanceUpdatedAt: Date?
     var balanceReadError: String?
     var balanceSourceVerified: Bool?
-    /// The currently selected SOCKS display number. This intentionally points
-    /// to the volatile ranked position rather than a proxy record ID: feed
-    /// refreshes can replace the endpoint behind the same number.
+    var balanceOrigin: WebOrigin?
+    /// Changes when the user changes accounts or clears website data. Optional
+    /// fields keep existing profiles and backups decodable.
+    var accountRevision: Int?
+    var fixedProxyID: UUID?
+    /// Ranked binding when fixedProxyID is absent; otherwise a display hint.
+    /// Legacy ranked bindings continue to follow the current sorted position.
     var socksProxyNumber: Int?
     /// A copied or conflicting binding requires an explicit choice before any
     /// network request. It must never be confused with intentional direct use.
@@ -52,6 +56,7 @@ struct BrowserProfile: Identifiable, Codable, Hashable, Sendable {
         color: ProfileColor = .indigo,
         cachedBalance: String? = nil,
         socksProxyNumber: Int? = nil,
+        fixedProxyID: UUID? = nil,
         unresolvedProxyNumber: Int? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now,
@@ -71,6 +76,7 @@ struct BrowserProfile: Identifiable, Codable, Hashable, Sendable {
         self.color = color
         self.cachedBalance = cachedBalance
         self.socksProxyNumber = socksProxyNumber
+        self.fixedProxyID = fixedProxyID
         self.unresolvedProxyNumber = unresolvedProxyNumber
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -79,6 +85,19 @@ struct BrowserProfile: Identifiable, Codable, Hashable, Sendable {
 
     var homePageHost: String {
         homePage.host(percentEncoded: false) ?? homePage.absoluteString
+    }
+
+    var accountScopeKey: String {
+        "\(id.uuidString)|\(WebOrigin(url: homePage)?.displayString ?? homePage.absoluteString)|\(accountRevision ?? 0)"
+    }
+
+    mutating func invalidateAccountState() {
+        cachedBalance = nil
+        balanceUpdatedAt = nil
+        balanceReadError = nil
+        balanceSourceVerified = nil
+        balanceOrigin = nil
+        accountRevision = (accountRevision ?? 0) + 1
     }
 
     var displayGroupName: String {

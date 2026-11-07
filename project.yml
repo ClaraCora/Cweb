@@ -39,7 +39,7 @@ targets:
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
-        NSFaceIDUsageDescription: 用于在填充已保存的账号密码前确认身份。
+        NSFaceIDUsageDescription: 用于在查看、填充或导出账号密码前确认身份。
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.personal.profilebrowser

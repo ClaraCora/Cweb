@@ -101,6 +101,10 @@ struct DiagnosticsView: View {
     }
 
     private var networkPathDescription: String {
+        if session.profile.unresolvedProxyNumber != nil { return "代理待选择 · 已阻止联网" }
+        if session.profile.fixedProxyID != nil {
+            return session.socksProxy.map { "固定代理 · \($0.displayCode ?? $0.displayAddress)" } ?? "固定代理缺失 · 已阻止联网"
+        }
         if let number = session.profile.socksProxyNumber {
             guard let proxy = session.socksProxy else {
                 return "第 \(number) 号代理（缺失）"
