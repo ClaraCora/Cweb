@@ -46,40 +46,58 @@ extension View {
 }
 
 struct AppSettingsRow: View {
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let title: String
     let detail: String?
     let icon: String
+    let tint: Color
+    let status: String?
 
-    init(_ title: String, detail: String? = nil, icon: String) {
+    init(_ title: String, detail: String? = nil, icon: String, tint: Color = .accentColor, status: String? = nil) {
         self.title = title
         self.detail = detail
         self.icon = icon
+        self.tint = tint
+        self.status = status
     }
 
     var body: some View {
         HStack(spacing: AppUI.Spacing.row) {
-            if !dynamicTypeSize.isAccessibilitySize {
-                Image(systemName: icon)
-                    .font(.body)
-                    .foregroundStyle(Color.accentColor)
-                    .frame(width: 24)
-                    .accessibilityHidden(true)
-            }
+            Image(systemName: icon)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(tint)
+                .frame(width: 36, height: 36)
+                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: AppUI.Spacing.tight) {
-                Text(title).foregroundStyle(Color.primary)
+                Text(title)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(.primary)
                 if let detail {
                     Text(detail)
-                        .font(.caption)
+                        .font(.footnote)
                         .foregroundStyle(AppUI.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            if let status {
+                Text(status)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(AppUI.secondaryText)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(Color(.tertiarySystemFill), in: Capsule())
+            }
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
         }
-        .padding(.vertical, AppUI.Spacing.tight)
-        .frame(minHeight: AppUI.minimumTarget)
+        .padding(.horizontal, AppUI.Spacing.page)
+        .padding(.vertical, AppUI.Spacing.row)
+        .frame(minHeight: 68)
         .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 }
 

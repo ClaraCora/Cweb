@@ -29,9 +29,10 @@ extension AppModel {
             BrowserProfile(id: UUID(uuidString: "20000000-0000-0000-0000-000000000005")!, name: "等待选择代理", groupName: "示例分组", groupID: groupID,
                 homePage: URL(string: "https://example.test")!, socksProxyNumber: 6),
             BrowserProfile(id: UUID(uuidString: "20000000-0000-0000-0000-000000000006")!, name: "其他环境", groupName: "用于验证较长名称和代号的分组", groupID: UUID(uuidString: "10000000-0000-0000-0000-000000000002")!,
+                groupCode: "WORK-02", groupEmoji: "🌐",
                 homePage: URL(string: "https://example.test")!)
         ]
-        try repository.save(profiles)
+        try repository.save(ProcessInfo.processInfo.arguments.contains("-ui-test-empty-groups") ? [] : profiles)
         let proxies = [SocksProxy(code: "东京", host: "127.0.0.1", port: 1080, latencyMilliseconds: 480, status: .available, lastCheckedAt: .now),
                        SocksProxy(code: "香港", host: "127.0.0.2", port: 1080, latencyMilliseconds: 1250, status: .available, lastCheckedAt: .now),
                        SocksProxy(code: "新加坡", host: "127.0.0.3", port: 1080, latencyMilliseconds: 2500, status: .available, lastCheckedAt: .now),

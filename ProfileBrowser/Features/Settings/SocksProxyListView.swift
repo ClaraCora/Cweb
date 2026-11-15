@@ -20,6 +20,8 @@ struct SocksProxyListView: View {
     @State private var completedCount = 0
     @State private var totalCount = 0
     @State private var searchText = ""
+    @State private var statusFilter: ProxyStatusFilter = .all
+    @State private var showsRules = false
 
     var body: some View {
         @Bindable var model = model
@@ -27,7 +29,9 @@ struct SocksProxyListView: View {
         List {
             Section {
                 proxySummary
-                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                    .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 16, trailing: 20))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
             }
             .disabled(isValidating)
             if let activity {
@@ -53,6 +57,9 @@ struct SocksProxyListView: View {
                     .frame(minHeight: 44)
                     .accessibilityElement(children: .combine)
                 }
+                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 16, trailing: 20))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             } else if let statusMessage {
                 Section {
                     HStack(spacing: 8) {
@@ -69,6 +76,17 @@ struct SocksProxyListView: View {
                         .accessibilityIdentifier("proxy.dismissResult")
                     }
                 }
+                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 16, trailing: 20))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            }
+            if !model.socksProxies.isEmpty {
+                Section {
+                    proxyFilters
+                        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 12, trailing: 20))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
             }
             proxySection
                 .disabled(isValidating)
@@ -77,24 +95,27 @@ struct SocksProxyListView: View {
         }
         .listStyle(.plain)
         .listSectionSpacing(0)
+        .scrollContentBackground(.hidden)
+        .background(Color(.systemGroupedBackground))
         .scrollDismissesKeyboard(.interactively)
         .environment(\.defaultMinListRowHeight, 44)
-        .readableListMargins(minimum: 0)
+        .accessibilityIdentifier("proxy.list")
         .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "编号、代号或地址")
         .navigationTitle("代理")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
-                Button("测速", systemImage: "bolt.horizontal") {
-                    validateProxies()
+                Button {
+                    editorMode = .create
+                } label: {
+                    Image(systemName: "plus")
+                        .frame(minWidth: 44, minHeight: 44)
                 }
-                .labelStyle(.titleOnly)
-                .disabled(model.socksProxies.isEmpty || isValidating)
-                .accessibilityIdentifier("proxy.validateAll")
+                .accessibilityLabel("添加代理")
+                .disabled(isValidating)
+                .accessibilityIdentifier("proxy.add")
 
                 Menu {
-                    Button("导入代理", systemImage: "link.badge.plus") { showsImport = true }
-                    Button("添加代理", systemImage: "plus") { editorMode = .create }
                     Button("批量导出", systemImage: "square.and.arrow.up") { showsExport = true }
                         .disabled(model.socksProxies.isEmpty)
                     Divider()
@@ -125,10 +146,14 @@ struct SocksProxyListView: View {
                 } label: {
                     Label("更多代理操作", systemImage: "ellipsis")
                         .labelStyle(.iconOnly)
+                        .frame(minWidth: 44, minHeight: 44)
                 }
                 .disabled(isValidating)
                 .accessibilityIdentifier("proxy.more")
             }
+        }
+        .navigationDestination(isPresented: $showsRules) {
+            SocksProxySettingsView(settings: model.socksProxyValidationSettings)
         }
         .sheet(item: $editorMode) { mode in
             SocksProxyEditorView(proxy: mode.proxy, isCopy: mode.isCopy) { proxy in
@@ -195,44 +220,103 @@ struct SocksProxyListView: View {
     }
 
     private var proxySummary: some View {
-        NavigationLink {
-            SocksProxySettingsView(settings: model.socksProxyValidationSettings)
-        } label: {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) {
-                    proxyCount
-                        .fixedSize(horizontal: true, vertical: false)
-                    Spacer(minLength: 8)
-                    validationMethod
-                        .fixedSize(horizontal: true, vertical: false)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
+                Image(systemName: "network")
+                    .font(.title2.weight(.medium))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 48, height: 48)
+                    .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("代理管理")
+                        .font(.title3.weight(.semibold))
+                    Text(searchText.isEmpty
+                         ? "共 \(model.socksProxies.count) 条 · \(model.socksProxies.filter(\.isAvailable).count) 条可用"
+                         : "匹配 \(rankedProxies.count) / \(model.socksProxies.count) 条")
+                        .font(.footnote)
+                        .foregroundStyle(AppUI.secondaryText)
                 }
-                VStack(alignment: .leading, spacing: 4) {
-                    proxyCount
-                    validationMethod
+                Spacer(minLength: 8)
+                Button {
+                    showsRules = true
+                } label: {
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Label("测速规则", systemImage: "slider.horizontal.3")
+                            .font(.subheadline.weight(.medium))
+                        Text(model.socksProxyValidationSettings.verifiesTLS ? "TLS 握手" : "SOCKS 连接")
+                            .font(.caption)
+                            .foregroundStyle(AppUI.secondaryText)
+                    }
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+                .accessibilityHint("查看或修改测速方式和结果保留规则")
+                .accessibilityIdentifier("proxy.rules")
             }
-            .font(.subheadline)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+
+            HStack(spacing: 12) {
+                Button {
+                    validateProxies()
+                } label: {
+                    Label("批量测速", systemImage: "bolt.horizontal.fill")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .foregroundStyle(Color(.systemBackground))
+                        .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 12))
+                }
+                .disabled(model.socksProxies.isEmpty || isValidating)
+                .opacity(model.socksProxies.isEmpty || isValidating ? 0.45 : 1)
+                .accessibilityIdentifier("proxy.validateAll")
+
+                Button {
+                    showsImport = true
+                } label: {
+                    Label("导入代理", systemImage: "arrow.down.to.line")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .foregroundStyle(Color.accentColor)
+                        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+                }
+                .disabled(isValidating)
+                .opacity(isValidating ? 0.45 : 1)
+                .accessibilityIdentifier("proxy.import")
+            }
+            .font(.subheadline.weight(.semibold))
+            .buttonStyle(.plain)
         }
-        .accessibilityLabel("共 \(model.socksProxies.count) 条代理，\(model.socksProxies.filter(\.isAvailable).count) 条可用，测速与保留规则")
-        .accessibilityHint("查看或修改测速方式和结果保留规则")
     }
 
-    private var proxyCount: some View {
-        Text(searchText.isEmpty
-             ? "共 \(model.socksProxies.count) 条 · \(model.socksProxies.filter(\.isAvailable).count) 可用"
-             : "匹配 \(rankedProxies.count) / \(model.socksProxies.count) 条")
-            .foregroundStyle(AppUI.secondaryText)
-            .monospacedDigit()
-    }
-
-    private var validationMethod: some View {
-        Text(model.socksProxyValidationSettings.verifiesTLS ? "TLS 握手" : "SOCKS 连接")
-            .foregroundStyle(Color.accentColor)
+    private var proxyFilters: some View {
+        HStack(spacing: 8) {
+            ForEach(ProxyStatusFilter.allCases) { filter in
+                Button {
+                    statusFilter = filter
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(filter.title)
+                        Text("\(model.socksProxies.filter { filter.includes($0) }.count)")
+                            .monospacedDigit()
+                    }
+                    .font(.subheadline.weight(statusFilter == filter ? .semibold : .regular))
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .foregroundStyle(statusFilter == filter ? Color(.systemBackground) : AppUI.secondaryText)
+                    .background(statusFilter == filter ? Color.accentColor : Color(.secondarySystemGroupedBackground), in: Capsule())
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(filter.title)
+                .accessibilityValue(statusFilter == filter ? "已选择" : "未选择")
+                .accessibilityAddTraits(statusFilter == filter ? .isSelected : [])
+                .accessibilityIdentifier("proxy.filter." + filter.rawValue)
+            }
+        }
+        .disabled(isValidating)
     }
 
     @ViewBuilder
     private var proxySection: some View {
+        let visibleProxies = rankedProxies
         Section {
             if model.socksProxies.isEmpty {
                 ContentUnavailableView {
@@ -245,12 +329,35 @@ struct SocksProxyListView: View {
                     }
                     .buttonStyle(.borderedProminent)
                 }
-            } else if rankedProxies.isEmpty {
-                ContentUnavailableView.search(text: searchText)
+            } else if visibleProxies.isEmpty {
+                if !searchText.isEmpty {
+                    ContentUnavailableView.search(text: searchText)
+                } else {
+                    ContentUnavailableView {
+                        Label("暂无\(statusFilter.title)代理", systemImage: "network")
+                    } actions: {
+                        Button("查看全部代理") { statusFilter = .all }
+                            .buttonStyle(.bordered)
+                    }
+                }
             } else {
-                ForEach(rankedProxies) { ranking in
+                ForEach(visibleProxies) { ranking in
                     SocksProxyRow(ranking: ranking, isTesting: activity?.proxyID == ranking.proxy.id) {
                         editorMode = .edit(ranking.proxy)
+                    }
+                    .background {
+                        UnevenRoundedRectangle(
+                            topLeadingRadius: ranking.id == visibleProxies.first?.id ? 16 : 0,
+                            bottomLeadingRadius: ranking.id == visibleProxies.last?.id ? 16 : 0,
+                            bottomTrailingRadius: ranking.id == visibleProxies.last?.id ? 16 : 0,
+                            topTrailingRadius: ranking.id == visibleProxies.first?.id ? 16 : 0
+                        )
+                        .fill(Color(.secondarySystemGroupedBackground))
+                    }
+                    .overlay(alignment: .bottom) {
+                        if ranking.id != visibleProxies.last?.id {
+                            Divider().padding(.leading, 64).padding(.trailing, 16)
+                        }
                     }
                     .swipeActions(edge: .leading, allowsFullSwipe: false) {
                         Button(
@@ -278,6 +385,9 @@ struct SocksProxyListView: View {
                         .tint(.indigo)
                     }
                     .contextMenu {
+                        if let measurement = ranking.proxy.latestMeasurement {
+                            Label("测速于 \(measurement.checkedAt.formatted(date: .abbreviated, time: .shortened))", systemImage: "clock")
+                        }
                         Button(
                             ranking.proxy.isLocked ? "取消锁定" : "锁定代理",
                             systemImage: ranking.proxy.isLocked ? "lock.open" : "lock"
@@ -303,13 +413,15 @@ struct SocksProxyListView: View {
                 }
             }
         }
-        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
     }
 
     @ViewBuilder
     private var presetSection: some View {
         Section {
-            DisclosureGroup("预设链接（\(model.proxyPresets.count)）", isExpanded: $presetsExpanded) {
+            DisclosureGroup(isExpanded: $presetsExpanded) {
                 if model.proxyPresets.isEmpty {
                     Button("添加预设链接", systemImage: "plus") {
                         showsPresets = true
@@ -340,15 +452,43 @@ struct SocksProxyListView: View {
                     }
                 }
                 Button("管理预设链接", systemImage: "slider.horizontal.3") { showsPresets = true }
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "link")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(Color.indigo)
+                        .frame(width: 36, height: 36)
+                        .background(Color.indigo.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("预设链接")
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(.primary)
+                        Text("从常用订阅快速拉取")
+                            .font(.footnote)
+                            .foregroundStyle(AppUI.secondaryText)
+                    }
+                    Spacer(minLength: 8)
+                    Text("\(model.proxyPresets.count)")
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(AppUI.secondaryText)
+                }
+                .frame(minHeight: 44)
             }
             .font(.subheadline)
+            .padding(16)
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+            .accessibilityIdentifier("proxy.presets")
         }
+        .listRowInsets(EdgeInsets(top: 16, leading: 20, bottom: 20, trailing: 20))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
     }
 
     private var rankedProxies: [SocksProxyRanking] {
         model.rankedSocksProxies.filter { ranking in
-            searchText.isEmpty || "\(ranking.number) \(ranking.proxy.displayCode ?? "") \(ranking.proxy.displayAddress)"
-                .localizedCaseInsensitiveContains(searchText)
+            statusFilter.includes(ranking.proxy) && (searchText.isEmpty || "\(ranking.number) \(ranking.proxy.displayCode ?? "") \(ranking.proxy.displayAddress)"
+                .localizedCaseInsensitiveContains(searchText))
         }
     }
 
@@ -434,6 +574,30 @@ struct SocksProxyListView: View {
     }
 }
 
+private enum ProxyStatusFilter: String, CaseIterable, Identifiable {
+    case all, available, untested, unavailable
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: "全部"
+        case .available: "可用"
+        case .untested: "未测速"
+        case .unavailable: "不可用"
+        }
+    }
+
+    func includes(_ proxy: SocksProxy) -> Bool {
+        switch self {
+        case .all: true
+        case .available: proxy.latestStatus == .available
+        case .untested: proxy.latestStatus == .untested
+        case .unavailable: proxy.latestStatus == .unavailable
+        }
+    }
+}
+
 private enum ProxyActivity {
     case batchValidation
     case singleValidation(UUID, String)
@@ -461,12 +625,14 @@ private struct SocksProxyRow: View {
 
     var body: some View {
         Button(action: onTap) {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(spacing: 12) {
                 Text("\(ranking.number)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(AppUI.secondaryText)
-                    .frame(minWidth: 24, alignment: .leading)
-                    .padding(.top, 2)
+                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(Color.accentColor)
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
+                    .frame(width: 36, height: 36)
+                    .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
 
                 if dynamicTypeSize.isAccessibilitySize {
                     VStack(alignment: .leading, spacing: 8) {
@@ -480,12 +646,13 @@ private struct SocksProxyRow: View {
                         .fixedSize(horizontal: true, vertical: false)
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("proxy.row.\(ranking.number)")
-        .accessibilityElement(children: .ignore)
         .accessibilityLabel("第 \(ranking.number) 号，\(accessibilityName)，\(statusText)\(lockStatusText)")
         .accessibilityValue(accessibilityResult)
         .accessibilityHint("轻点编辑，侧滑或长按进行测试、锁定等操作")
@@ -495,7 +662,7 @@ private struct SocksProxyRow: View {
         VStack(alignment: .leading, spacing: AppUI.Spacing.tight) {
             HStack(spacing: 6) {
                 Text(ranking.proxy.displayCode ?? endpoint)
-                    .font(.subheadline.weight(.medium))
+                    .font(.body.weight(.medium))
                     .foregroundStyle(.primary)
                 if ranking.proxy.isLocked {
                     Image(systemName: "lock.fill")
@@ -505,7 +672,7 @@ private struct SocksProxyRow: View {
                 }
             }
             Text(ranking.proxy.displayCode == nil ? ranking.proxy.scheme.rawValue.uppercased() : endpoint)
-                .font(.caption)
+                .font(.footnote)
                 .foregroundStyle(AppUI.secondaryText)
         }
         .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
@@ -533,17 +700,26 @@ private struct SocksProxyRow: View {
                         Text("\(latency) ms")
                             .font(.subheadline.weight(.medium).monospacedDigit())
                             .foregroundStyle(AppUI.latencyColor(latency))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(AppUI.latencyColor(latency).opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
                     }
                     resultMetadata("可用", icon: "checkmark.circle")
                 case .unavailable:
                     Text("不可用")
-                        .font(.subheadline)
+                        .font(.subheadline.weight(.medium))
                         .foregroundStyle(AppUI.danger)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(AppUI.danger.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
                     resultMetadata("连接失败", icon: "exclamationmark.circle")
                 case .untested:
                     Text("未测速")
                         .font(.subheadline)
                         .foregroundStyle(AppUI.secondaryText)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 8))
                 }
             }
         }
@@ -552,27 +728,27 @@ private struct SocksProxyRow: View {
     private func resultMetadata(_ title: String, icon: String) -> some View {
         HStack(spacing: AppUI.Spacing.tight) {
             Image(systemName: icon).accessibilityHidden(true)
-            Text(title + checkedAtSuffix)
+            Text(title)
         }
         .font(.caption)
         .foregroundStyle(AppUI.secondaryText)
         .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
     }
 
-    private var checkedAtSuffix: String {
+    private var checkedAtDescription: String {
         guard let date = ranking.proxy.latestMeasurement?.checkedAt else { return "" }
         let display = Calendar.current.isDateInToday(date)
             ? date.formatted(date: .omitted, time: .shortened)
             : date.formatted(date: .abbreviated, time: .shortened)
-        return " · " + display
+        return "，测速于 " + display
     }
 
     private var accessibilityResult: String {
         if isTesting { return "正在测速" }
         if let latency = ranking.proxy.latestLatency, ranking.proxy.isAvailable {
-            return "延迟 \(latency) 毫秒"
+            return "延迟 \(latency) 毫秒" + checkedAtDescription
         }
-        return ranking.proxy.latestMeasurement?.message ?? ""
+        return (ranking.proxy.latestMeasurement?.message ?? "") + checkedAtDescription
     }
 
     private var accessibilityName: String {
