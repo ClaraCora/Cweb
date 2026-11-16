@@ -29,6 +29,8 @@ final class BrowserSession {
     private var automationMatches: [String] = []
     private var automationRuleHosts: Set<String> = []
     private(set) var balanceRefreshRequest = 0
+    private(set) var captchaChallenge: CaptchaChallenge?
+    private(set) var captchaRecognitionState: CaptchaRecognitionState = .idle
     private var baseRules: [WebsiteRule] = []
     private var automationConfigured = false
     private var automationPaused = false
@@ -36,6 +38,8 @@ final class BrowserSession {
     private var automationHasCompleted = false
     private(set) var isClosed = false
     private var automationEventHandler: (@MainActor (AutomationEvent) -> Void)?
+    private let captchaOCRService = CaptchaOCRService()
+    @ObservationIgnored private var captchaRecognitionTask: Task<Void, Never>?
 
     init(profile: BrowserProfile, socksProxy: SocksProxy? = nil) {
         self.profile = profile
@@ -190,6 +194,8 @@ final class BrowserSession {
         automationPaused = false
         automationState = .running
         automationMessage = nil
+        captchaChallenge = nil
+        if captchaRecognitionState != .idle { captchaRecognitionState = .idle }
         _ = try? await page.callJavaScript(
             "window.CwebCheckIn && window.CwebCheckIn.resume && window.CwebCheckIn.resume(); true",
             arguments: [:],
@@ -229,6 +235,10 @@ final class BrowserSession {
         automationEventHandler = nil
         automationMessageHandler = nil
         automationUserScript = nil
+        captchaRecognitionTask?.cancel()
+        captchaRecognitionTask = nil
+        captchaChallenge = nil
+        captchaRecognitionState = .idle
         userContentController.removeScriptMessageHandler(forName: AutomationBridge.messageName)
         userContentController.removeAllUserScripts()
         navigationGeneration += 1
@@ -253,14 +263,14 @@ final class BrowserSession {
             injectionTime: .atDocumentEnd, forMainFrameOnly: true))
     }
 
-    func receiveDocumentMessage(type: String, message: String, runToken: String, documentID: String, frameURL: URL?) async {
+    func receiveDocumentMessage(type: String, message: String, runToken: String, documentID: String, frameURL: URL?, captcha: CaptchaChallenge? = nil) async {
         guard !isClosed, runToken == scriptRunToken, !documentID.isEmpty,
               let frameURL, let origin = WebOrigin(url: frameURL), origin == currentOrigin else { return }
         let currentID = try? await page.callJavaScript("return window.__cwebDocumentID || '';", arguments: [:], in: nil, contentWorld: .page) as? String
         guard !isClosed, currentID == documentID, origin == currentOrigin else { return }
         if type == "balanceChanged" { requestBalanceRead(); return }
         guard automationConfigured, automationOriginAllowed(frameURL) else { return }
-        receiveAutomationMessage(type: type, message: message)
+        receiveAutomationMessage(type: type, message: message, captcha: captcha)
     }
 
     private func automationOriginAllowed(_ url: URL) -> Bool {
@@ -275,9 +285,9 @@ final class BrowserSession {
         }
     }
 
-    func receiveAutomationMessage(type: String, message: String) {
+    func receiveAutomationMessage(type: String, message: String, captcha: CaptchaChallenge? = nil) {
         guard !isClosed, !automationHasCompleted, let kind = AutomationEventKind(rawValue: type) else { return }
-        let event = AutomationEvent(kind: kind, message: message)
+        let event = AutomationEvent(kind: kind, message: message, captcha: captcha)
 
         switch kind {
         case .success:
@@ -288,7 +298,16 @@ final class BrowserSession {
         case .captcha:
             automationPaused = true
             automationState = .captcha
-            automationMessage = message.isEmpty ? "检测到验证码，请手动完成。" : message
+            captchaChallenge = captcha
+            if let captcha, shouldAutomaticallyRecognize(captcha) {
+                automationMessage = "正在识别验证码…"
+                beginCaptchaRecognition(captcha)
+            } else {
+                captchaRecognitionTask?.cancel()
+                captchaRecognitionTask = nil
+                captchaRecognitionState = .needsManual
+                automationMessage = message.isEmpty ? "检测到验证码，请手动完成。" : message
+            }
         case .noButton:
             automationState = .noButton
             automationMessage = message.isEmpty ? "未找到签到入口。" : message
@@ -300,6 +319,8 @@ final class BrowserSession {
             automationPaused = false
             automationState = .running
             automationMessage = nil
+            captchaChallenge = nil
+            captchaRecognitionState = .idle
         }
 
         automationEventHandler?(event)
@@ -438,6 +459,10 @@ final class BrowserSession {
     private func startNavigation<S: AsyncSequence>(
         _ makeSequence: @escaping @MainActor (WebPage) -> S
     ) where S.Element == WebPage.NavigationEvent {
+        captchaRecognitionTask?.cancel()
+        captchaRecognitionTask = nil
+        captchaChallenge = nil
+        captchaRecognitionState = .idle
         let previousTask = navigationTask
         previousTask?.cancel()
         navigationGeneration += 1
@@ -466,6 +491,66 @@ final class BrowserSession {
             guard self.navigationGeneration == generation else { return }
             self.navigationTask = nil
         }
+    }
+
+    func retryCaptchaRecognition() {
+        guard let captchaChallenge else { return }
+        beginCaptchaRecognition(captchaChallenge)
+    }
+
+    private func shouldAutomaticallyRecognize(_ captcha: CaptchaChallenge) -> Bool {
+        guard captcha.mode == .imageDigits,
+              let host = currentOrigin?.host.lowercased(),
+              let rule = baseRules.first(where: { $0.normalizedHost == host }),
+              rule.captchaAutoFillEnabled,
+              captcha.imageData != nil else { return false }
+        return true
+    }
+
+    private func beginCaptchaRecognition(_ captcha: CaptchaChallenge) {
+        captchaRecognitionTask?.cancel()
+        captchaRecognitionState = .recognizing
+        automationMessage = "正在识别验证码…"
+        guard let imageData = captcha.imageData else {
+            captchaRecognitionState = .needsManual
+            automationMessage = "无法读取验证码图片，请手动输入。"
+            return
+        }
+        let documentID = captcha.documentID
+        captchaRecognitionTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let result = await captchaOCRService.recognize(
+                imageData: imageData,
+                expectedLength: captcha.expectedLength
+            )
+            guard !Task.isCancelled, !self.isClosed,
+                  self.captchaChallenge?.documentID == documentID else { return }
+            switch result {
+            case .recognized(let code, _):
+                guard await self.fillCaptcha(code: code, documentID: documentID) else {
+                    self.captchaRecognitionState = .needsManual
+                    self.automationMessage = "无法填入验证码，请手动输入。"
+                    return
+                }
+                self.captchaRecognitionState = .filled
+                await self.resumeAutomation()
+                if self.automationState == .running {
+                    self.automationMessage = "验证码已填入，正在继续检测。"
+                }
+            case .unavailable:
+                self.captchaRecognitionState = .needsManual
+                self.automationMessage = "无法可靠识别，请手动输入验证码。"
+            }
+        }
+    }
+
+    private func fillCaptcha(code: String, documentID: String) async -> Bool {
+        guard !isClosed, captchaChallenge?.documentID == documentID else { return false }
+        let result = try? await page.callJavaScript(
+            "window.CwebCheckIn?.fillCaptcha?.(arguments.code) === true",
+            arguments: ["code": code], in: nil, contentWorld: .page
+        )
+        return (result as? Bool) == true
     }
 
     private static func navigationErrorMessage(_ error: Error) -> String {

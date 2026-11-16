@@ -366,6 +366,12 @@ final class AppModel {
             normalized[index].balanceSelector = normalized[index].balanceSelector.trimmingCharacters(in: .whitespacesAndNewlines)
             normalized[index].balanceReadySelector = normalized[index].balanceReadySelector.trimmingCharacters(in: .whitespacesAndNewlines)
             normalized[index].captchaSelector = normalized[index].captchaSelector?.trimmingCharacters(in: .whitespacesAndNewlines)
+            normalized[index].captchaImageSelector = normalized[index].captchaImageSelector?.trimmingCharacters(in: .whitespacesAndNewlines)
+            normalized[index].captchaInputSelector = normalized[index].captchaInputSelector?.trimmingCharacters(in: .whitespacesAndNewlines)
+            normalized[index].captchaSubmitSelector = normalized[index].captchaSubmitSelector?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let length = normalized[index].captchaExpectedLength {
+                normalized[index].captchaExpectedLength = min(8, max(4, length))
+            }
             normalized[index].environmentTimeoutSeconds = min(300, max(15, normalized[index].environmentTimeoutSeconds ?? 60))
             for (field, selector) in normalized[index].selectors { try WebsiteRuleValidator.validateDelimiters(selector, field: field) }
             normalized[index].submissionTimeoutSeconds = min(120, max(5, normalized[index].submissionTimeoutSeconds))

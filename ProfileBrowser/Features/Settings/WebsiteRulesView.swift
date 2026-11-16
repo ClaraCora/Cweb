@@ -30,6 +30,21 @@ struct WebsiteRulesView: View {
                     selector("余额元素", text: $rule.balanceSelector)
                     selector("余额已加载标记", text: $rule.balanceReadySelector)
                     selector("验证码区域", text: Binding(get: { rule.captchaSelector ?? "" }, set: { rule.captchaSelector = $0 }))
+                    Toggle("启用数字验证码自动识别", isOn: $rule.captchaAutoFillEnabled)
+                    Text("仅处理普通数字图片验证码。reCAPTCHA、hCaptcha、Turnstile、滑块和点选验证仍需手动完成。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    selector("验证码图片", text: Binding(get: { rule.captchaImageSelector ?? "" }, set: { rule.captchaImageSelector = $0 }))
+                    selector("验证码输入框", text: Binding(get: { rule.captchaInputSelector ?? "" }, set: { rule.captchaInputSelector = $0 }))
+                    selector("验证码提交控件（可选）", text: Binding(get: { rule.captchaSubmitSelector ?? "" }, set: { rule.captchaSubmitSelector = $0 }))
+                    Stepper {
+                        Text("验证码长度：\(rule.captchaExpectedLength.map(String.init) ?? "自动")")
+                    } onIncrement: {
+                        rule.captchaExpectedLength = min(8, (rule.captchaExpectedLength ?? 3) + 1)
+                    } onDecrement: {
+                        guard let length = rule.captchaExpectedLength else { return }
+                        rule.captchaExpectedLength = length <= 4 ? nil : length - 1
+                    }
                     Stepper("环境等待上限：\(rule.environmentTimeoutSeconds ?? 60) 秒", value: Binding(
                         get: { rule.environmentTimeoutSeconds ?? 60 }, set: { rule.environmentTimeoutSeconds = $0 }), in: 15...300, step: 15)
                     if let session, session.currentOrigin?.host == rule.normalizedHost {

@@ -1,5 +1,9 @@
 import Foundation
+import CoreGraphics
+import CoreText
+import ImageIO
 import Testing
+import UniformTypeIdentifiers
 @testable import ProfileBrowser
 
 struct AutomationScriptTests {
@@ -33,6 +37,104 @@ struct AutomationScriptTests {
         #expect(source.contains("cweb.checkIn.test"))
         #expect(source.contains("localStorage.setItem"))
         #expect(source.contains("window.CwebCheckIn.success"))
+    }
+
+    @Test
+    func builderIncludesCaptchaFillBridge() {
+        let source = AutomationScriptBuilder.build(
+            code: "window.CwebCheckIn.captchaDetected('captcha');",
+            matches: ["https://example.com/*"]
+        )
+
+        #expect(source.contains("fillCaptcha"))
+        #expect(source.contains("details = null"))
+        #expect(source.contains("payload.captcha"))
+    }
+
+    @Test
+    func builderDetectsAccessibleCaptchaLabels() {
+        let source = GlobalScriptSettings.default.source
+
+        #expect(source.contains("[alt*=\"验证码\" i]"))
+        #expect(source.contains("[placeholder*=\"验证码\" i]"))
+        #expect(source.contains("[aria-label*=\"captcha\" i]"))
+    }
+
+    @Test
+    func websiteRuleDecodesOldSavedDataWithCaptchaDefaults() throws {
+        let data = Data("{\"host\":\"example.com\",\"balanceSelector\":\"#balance\"}".utf8)
+        let rule = try JSONDecoder().decode(WebsiteRule.self, from: data)
+
+        #expect(rule.host == "example.com")
+        #expect(rule.balanceSelector == "#balance")
+        #expect(!rule.captchaAutoFillEnabled)
+        #expect(rule.captchaImageSelector == nil)
+        #expect(rule.captchaInputSelector == nil)
+    }
+
+    @Test
+    func captchaOCRRejectsInvalidImageWithoutNetworkFallback() async {
+        let result = await CaptchaOCRService().recognize(imageData: Data(), expectedLength: 4)
+        #expect(result == .unavailable("无法读取验证码图片"))
+    }
+
+    @Test
+    func captchaOCRRecognizesClearNumericImageLocally() async throws {
+        let imageData = try #require(Self.syntheticCaptchaImage())
+        let result = await CaptchaOCRService().recognize(imageData: imageData, expectedLength: 4)
+
+        guard case let .recognized(code, confidence) = result else {
+            Issue.record("清晰数字验证码未被本地 Vision 识别：\(result)")
+            return
+        }
+        #expect(code == "2746")
+        #expect(confidence >= 0.80)
+    }
+
+    private static func syntheticCaptchaImage() -> Data? {
+        let width = 240
+        let height = 80
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        var pixels = [UInt8](repeating: 255, count: width * height * 4)
+        guard let context = CGContext(
+            data: &pixels,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+
+        context.setFillColor(CGColor(gray: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+
+        let font = CTFontCreateWithName("Helvetica-Bold" as CFString, 56, nil)
+        let attributes: [NSAttributedString.Key: Any] = [
+            NSAttributedString.Key(kCTFontAttributeName as String): font,
+            NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(gray: 0, alpha: 1)
+        ]
+        let line = CTLineCreateWithAttributedString(
+            NSAttributedString(string: "2746", attributes: attributes)
+        )
+        let bounds = CTLineGetBoundsWithOptions(line, [])
+        context.textPosition = CGPoint(
+            x: (CGFloat(width) - bounds.width) / 2,
+            y: 10
+        )
+        CTLineDraw(line, context)
+
+        guard let image = context.makeImage() else { return nil }
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            output as CFMutableData,
+            UTType.png.identifier as CFString,
+            1,
+            nil
+        ) else { return nil }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return output as Data
     }
 
     @Test

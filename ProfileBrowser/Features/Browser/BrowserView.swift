@@ -75,6 +75,9 @@ struct BrowserView: View {
                 AutomationStatusBanner(
                     state: session.automationState,
                     message: automationMessage,
+                    recognitionState: session.captchaRecognitionState,
+                    canRetryRecognition: session.captchaChallenge?.imageData != nil,
+                    retryRecognition: { session.retryCaptchaRecognition() },
                     resume: {
                         Task { await session.resumeAutomation() }
                     }
@@ -245,6 +248,9 @@ struct BrowserView: View {
 private struct AutomationStatusBanner: View {
     let state: AutomationState
     let message: String
+    let recognitionState: CaptchaRecognitionState
+    let canRetryRecognition: Bool
+    let retryRecognition: () -> Void
     let resume: () -> Void
 
     var body: some View {
@@ -262,6 +268,12 @@ private struct AutomationStatusBanner: View {
             Spacer(minLength: 4)
 
             if state == .captcha {
+                if recognitionState == .needsManual && canRetryRecognition {
+                    Button("重新识别", systemImage: "arrow.clockwise", action: retryRecognition)
+                        .font(.footnote.weight(.semibold))
+                        .buttonStyle(.borderless)
+                        .frame(minHeight: AppUI.minimumTarget)
+                }
                 Button("继续检测", action: resume)
                     .font(.footnote.weight(.semibold))
                     .buttonStyle(.bordered)
@@ -276,7 +288,14 @@ private struct AutomationStatusBanner: View {
             Divider()
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(message)
+        .accessibilityLabel(accessibilityMessage)
+    }
+
+    private var accessibilityMessage: String {
+        if let stateMessage = recognitionState.message, state == .captcha {
+            return "\(message)，\(stateMessage)"
+        }
+        return message
     }
 
     private var iconName: String {

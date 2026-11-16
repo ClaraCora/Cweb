@@ -34,6 +34,12 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
             const captchaSelectors = [
                 '[class*="captcha" i]',
                 '[id*="captcha" i]',
+                '[aria-label*="captcha" i]',
+                '[aria-label*="验证码" i]',
+                '[alt*="captcha" i]',
+                '[alt*="验证码" i]',
+                '[placeholder*="captcha" i]',
+                '[placeholder*="验证码" i]',
                 'iframe[src*="captcha" i]',
                 'iframe[src*="challenges.cloudflare.com" i]',
                 '.g-recaptcha', '.h-captcha', '.cf-turnstile'
@@ -46,6 +52,7 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
             let hasClicked = false;
             let hasCompleted = false;
             let submissionFailed = false;
+            var captchaCaptureInFlight = false;
 
             const textOf = (element) =>
                 (typeof element?.innerText === "string"
@@ -55,6 +62,104 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
                 if (!element.getClientRects().length) return false;
                 const visibility = window.getComputedStyle(element).visibility;
                 return visibility !== "hidden" && visibility !== "collapse";
+            };
+
+            const queryVisible = (root, selector) => {
+                try {
+                    return [...(root?.querySelectorAll?.(selector) || [])].find(isVisible) || null;
+                } catch (_) {
+                    return null;
+                }
+            };
+
+            const captchaRoot = () => {
+                if (rule.captchaSelector) {
+                    try {
+                        return [...document.querySelectorAll(rule.captchaSelector)].find(isVisible) || null;
+                    } catch (_) {
+                        return null;
+                    }
+                }
+                return captchaSelectors.map((selector) => queryVisible(document, selector)).find(Boolean) || null;
+            };
+
+            const captchaInput = (root) => {
+                const selector = rule.captchaInputSelector ||
+                    'input:not([type="hidden"]):not([type="password"]):not([type="checkbox"]):not([type="radio"])';
+                const candidates = [];
+                if (root?.matches?.(selector)) candidates.push(root);
+                candidates.push(...(root?.querySelectorAll?.(selector) || []));
+                if (root !== document) candidates.push(...(document.querySelectorAll(selector) || []));
+                return candidates.find((element) => {
+                    if (!isVisible(element)) return false;
+                    if (rule.captchaInputSelector) return true;
+                    const metadata = [element.name, element.id, element.placeholder,
+                        element.autocomplete, element.getAttribute('aria-label')].filter(Boolean).join(' ');
+                    return /captcha|verify|verification|验证码|校验|code/i.test(metadata)
+                        || (element.maxLength >= 4 && element.maxLength <= 8);
+                }) || null;
+            };
+
+            const captchaImage = (root) => {
+                const selector = rule.captchaImageSelector || 'img, canvas';
+                const candidates = [];
+                if (root?.matches?.(selector)) candidates.push(root);
+                candidates.push(...(root?.querySelectorAll?.(selector) || []));
+                if (root !== document) candidates.push(...(document.querySelectorAll(selector) || []));
+                return candidates.find((element) => {
+                    if (!isVisible(element)) return false;
+                    if (rule.captchaImageSelector) return true;
+                    const metadata = [element.id, element.className, element.alt,
+                        element.getAttribute('aria-label')].filter((value) => typeof value === 'string').join(' ');
+                    return element.tagName === 'CANVAS'
+                        || /captcha|verify|验证码|校验/i.test(metadata)
+                        || (element.tagName === 'IMG' && element.naturalWidth > 0);
+                }) || null;
+            };
+
+            const extractCaptchaImage = async (element) => {
+                if (!element) return null;
+                if (element.tagName === 'CANVAS') {
+                    try { return element.toDataURL('image/png'); } catch (_) { return null; }
+                }
+                if (element.tagName !== 'IMG' || !element.complete || !element.naturalWidth) return null;
+                if (element.currentSrc?.startsWith('data:')) return element.currentSrc;
+                try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = element.naturalWidth;
+                    canvas.height = element.naturalHeight;
+                    const context = canvas.getContext('2d');
+                    if (!context) return null;
+                    context.drawImage(element, 0, 0);
+                    return canvas.toDataURL('image/png');
+                } catch (_) {
+                    return null;
+                }
+            };
+
+            const prepareCaptcha = async () => {
+                if (!rule.captchaAutoFillEnabled
+                    || !rule.captchaImageSelector
+                    || !rule.captchaInputSelector) return null;
+                const root = captchaRoot();
+                const input = captchaInput(root);
+                const image = captchaImage(root);
+                if (!input || !image) return null;
+                input.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                input.focus({ preventScroll: true });
+                const imageData = await extractCaptchaImage(image);
+                if (!imageData) return null;
+                __cwebCaptchaInput = input;
+                __cwebCaptchaSubmit = rule.captchaSubmitSelector
+                    ? (queryVisible(root || document, rule.captchaSubmitSelector)
+                        || queryVisible(document, rule.captchaSubmitSelector))
+                    : null;
+                return {
+                    mode: 'imageDigits',
+                    imageData,
+                    expectedLength: Number.isInteger(rule.captchaExpectedLength)
+                        ? rule.captchaExpectedLength : null
+                };
             };
 
             const findSignButton = () => select(rule.actionSelector ||
@@ -121,10 +226,11 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
                 api.success("页面显示已完成签到");
             };
 
-            const detect = () => {
+            const detect = async () => {
                 if (hasCompleted || api.isPaused()) return;
                 try {
-                    for (const key of ['checkInContainerSelector', 'actionSelector', 'completionSelector', 'failureSelector', 'captchaSelector']) {
+                    for (const key of ['checkInContainerSelector', 'actionSelector', 'completionSelector', 'failureSelector',
+                        'captchaSelector', 'captchaImageSelector', 'captchaInputSelector', 'captchaSubmitSelector']) {
                         if (rule[key]) document.querySelectorAll(rule[key]);
                     }
                 } catch (_) {
@@ -137,6 +243,16 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
                     try { return [...document.querySelectorAll(selector)].some(isVisible); }
                     catch (_) { api.error("验证码选择器无效，请检查网站规则"); return false; }
                 })) {
+                    if (captchaCaptureInFlight) return;
+                    if (!captchaCaptureInFlight && rule.captchaAutoFillEnabled) {
+                        captchaCaptureInFlight = true;
+                        const challenge = await prepareCaptcha();
+                        captchaCaptureInFlight = false;
+                        if (challenge) {
+                            api.captchaDetected("检测到数字图片验证码，正在识别。", challenge);
+                            return;
+                        }
+                    }
                     api.captchaDetected("检测到验证码，请手动完成");
                     return;
                 }
@@ -169,13 +285,13 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
 
                 // Reuse the same checks so a newly displayed CAPTCHA always
                 // pauses automation before any success is reported.
-                successTimer = setTimeout(detect, 1200);
+                successTimer = setTimeout(() => { void detect(); }, 1200);
             };
 
             const schedule = () => {
                 if (hasCompleted) return;
                 clearTimeout(debounceTimer);
-                debounceTimer = setTimeout(detect, 250);
+                debounceTimer = setTimeout(() => { void detect(); }, 250);
             };
 
             const root = document.documentElement || document;
@@ -216,7 +332,7 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
 
             armNoButtonTimer();
 
-            detect();
+            void detect();
         })();
         """,
         updatedAt: .now
@@ -253,9 +369,27 @@ enum AutomationEventKind: String, Codable, Sendable {
     case resume
 }
 
+enum CaptchaChallengeMode: String, Sendable {
+    case imageDigits
+}
+
+struct CaptchaChallenge: Equatable, Sendable {
+    let mode: CaptchaChallengeMode
+    let documentID: String
+    let imageData: Data?
+    let expectedLength: Int?
+}
+
 struct AutomationEvent: Equatable, Sendable {
     let kind: AutomationEventKind
     let message: String
+    let captcha: CaptchaChallenge?
+
+    init(kind: AutomationEventKind, message: String, captcha: CaptchaChallenge? = nil) {
+        self.kind = kind
+        self.message = message
+        self.captcha = captcha
+    }
 }
 
 struct AutomationRunRecord: Codable, Equatable, Sendable {
