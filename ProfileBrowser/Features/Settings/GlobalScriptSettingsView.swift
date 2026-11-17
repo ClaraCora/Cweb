@@ -59,7 +59,7 @@ struct GlobalScriptSettingsView: View {
             } header: {
                 Text("全局签到脚本")
             } footer: {
-                Text("分组顶部的“开始”会为本次任务启用脚本，不受上方开关影响。脚本可读取当前网页，通过 window.CwebCheckIn.success(...) 或 captchaDetected(...) 上报结果。启用数字验证码识别后，本机识别并填入一次即暂停，点击“继续检测”才恢复；无法可靠识别时可手动完成。“识别后自动提交”默认关闭，可在网站规则中单独开启。修改保存后，新任务才会使用最新脚本。")
+                Text("分组顶部的“开始”会为本次任务启用脚本，不受上方开关影响。脚本可读取当前网页，通过 window.CwebCheckIn.success(...) 或 captchaDetected(...) 上报结果。检测到验证码时暂停当前环境，请在网页中手动输入并完成验证，再点击“继续检测”；等待期间不会跳过当前环境。修改保存后，新任务才会使用最新脚本。")
             }
             .textCase(nil)
         }

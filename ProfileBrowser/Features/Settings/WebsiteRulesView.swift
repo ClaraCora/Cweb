@@ -30,32 +30,12 @@ struct WebsiteRulesView: View {
                     selector("余额元素", text: $rule.balanceSelector)
                     selector("余额已加载标记", text: $rule.balanceReadySelector)
                     selector("验证码区域", text: Binding(get: { rule.captchaSelector ?? "" }, set: { rule.captchaSelector = $0 }))
-                    Toggle("启用数字验证码自动识别", isOn: $rule.captchaAutoFillEnabled)
-                    Text("仅处理普通数字图片验证码。成功填入一次后暂停，点击“继续检测”才恢复。其他验证仍需手动完成。")
+                    Text("检测到验证码时暂停签到，请在网页中手动完成后点击“继续检测”。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                    selector("验证码图片", text: Binding(get: { rule.captchaImageSelector ?? "" }, set: { rule.captchaImageSelector = $0 }))
-                    selector("验证码输入框", text: Binding(get: { rule.captchaInputSelector ?? "" }, set: { rule.captchaInputSelector = $0 }))
-                    Toggle("识别后自动提交", isOn: $rule.captchaAutoSubmitEnabled)
-                        .disabled(!rule.captchaAutoFillEnabled)
-                        .accessibilityIdentifier("captcha.autoSubmit")
-                    selector("验证码提交控件（可选）", text: Binding(get: { rule.captchaSubmitSelector ?? "" }, set: { rule.captchaSubmitSelector = $0 }))
-                    Text(rule.captchaAutoSubmitEnabled
-                         ? "仅点击指定提交控件一次，随后暂停。请填写提交控件的 CSS 选择器。"
-                         : "默认只填入验证码，由你在网页中提交。开启后需指定提交控件。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    Stepper {
-                        Text("验证码长度：\(rule.captchaExpectedLength.map(String.init) ?? "自动")")
-                    } onIncrement: {
-                        rule.captchaExpectedLength = min(8, (rule.captchaExpectedLength ?? 3) + 1)
-                    } onDecrement: {
-                        guard let length = rule.captchaExpectedLength else { return }
-                        rule.captchaExpectedLength = length <= 4 ? nil : length - 1
-                    }
                     Stepper("环境等待上限：\(rule.environmentTimeoutSeconds ?? 60) 秒", value: Binding(
                         get: { rule.environmentTimeoutSeconds ?? 60 }, set: { rule.environmentTimeoutSeconds = $0 }), in: 15...300, step: 15)
-                    if let session, session.currentOrigin?.host == rule.normalizedHost {
+                    if let session, rule.matches(host: session.currentOrigin?.host ?? "") {
                         Button("测试当前页面（不执行签到）") {
                             let snapshot = rule
                             Task { await test(snapshot, in: session) }

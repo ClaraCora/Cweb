@@ -5,6 +5,99 @@ import Testing
 @MainActor
 struct AccountBalanceReaderTests {
     @Test
+    func overlappingReadsAreCoalescedAndCheckInRefreshTakesPriority() throws {
+        let coordinator = BalanceRefreshCoordinator()
+        let id = UUID()
+        let ordinary = try #require(coordinator.begin(id, afterCheckIn: false))
+        #expect(coordinator.begin(id, afterCheckIn: false) == nil)
+        let checkIn = try #require(coordinator.begin(id, afterCheckIn: true))
+        #expect(!coordinator.contains(ordinary, for: id))
+        #expect(coordinator.begin(id, afterCheckIn: false) == nil)
+        #expect(coordinator.begin(id, afterCheckIn: true) == nil)
+        coordinator.end(ordinary, for: id)
+        #expect(coordinator.isRefreshing(id))
+        coordinator.end(checkIn, for: id)
+        #expect(!coordinator.isRefreshing(id))
+        #expect(coordinator.begin(id, afterCheckIn: false) != nil)
+    }
+
+    @Test
+    func burstOfBalanceRequestsKeepsOnlyOnePendingRead() async throws {
+        let session = BrowserSession(profile: BrowserProfile(name: "合并读取"))
+        defer { session.close() }
+        var iterator = session.balanceReadRequests().makeAsyncIterator()
+        for _ in 0..<100 { session.requestBalanceRead() }
+        #expect(await iterator.next() != nil)
+        session.close()
+        #expect(await iterator.next() == nil)
+        session.requestBalanceRead()
+        #expect(await iterator.next() == nil)
+    }
+
+    @Test
+    func returningToAGroupCanSubscribeAfterThePreviousViewWasCancelled() async {
+        let session = BrowserSession(profile: BrowserProfile(name: "恢复分组"))
+        defer { session.close() }
+        var started = false
+        let previousView = Task {
+            for await _ in session.balanceReadRequests() { started = true }
+        }
+        while !started { await Task.yield() }
+        previousView.cancel()
+        await previousView.value
+        var iterator = session.balanceReadRequests().makeAsyncIterator()
+        #expect(await iterator.next() != nil)
+        session.requestBalanceRead()
+        #expect(await iterator.next() != nil)
+        session.close()
+        #expect(await iterator.next() == nil)
+    }
+
+    @Test
+    func aNewSessionReplacesAnOrdinaryReadFromThePreviousBrowser() throws {
+        let coordinator = BalanceRefreshCoordinator()
+        let id = UUID()
+        let previous = NSObject()
+        let next = NSObject()
+        let old = try #require(coordinator.begin(id, afterCheckIn: false, sessionID: ObjectIdentifier(previous)))
+        let current = try #require(coordinator.begin(id, afterCheckIn: false, sessionID: ObjectIdentifier(next)))
+        #expect(!coordinator.contains(old, for: id))
+        coordinator.end(old, for: id)
+        #expect(coordinator.contains(current, for: id))
+    }
+
+    @Test
+    func balanceRedirectRequiresAnExplicitRuleAndSecureSameSiteOrigin() {
+        let home = WebOrigin(url: URL(string: "https://cf.sheapi.cc/profile")!)
+        let rules = [WebsiteRule(host: "cf.sheapi.cc")]
+        let destination = WebOrigin(url: URL(string: "https://www.sheapi.cc/profile")!)
+        #expect(AccountBalanceReader.permitsRead(from: home, home: home, rules: []))
+        #expect(AccountBalanceReader.permitsRead(from: destination, home: home, rules: rules))
+        #expect(!AccountBalanceReader.permitsRead(from: destination, home: home, rules: []))
+        for address in ["http://www.sheapi.cc", "https://www.sheapi.cc:8443", "https://sheapi.cc.evil.invalid", "https://elsewhere.invalid"] {
+            #expect(!AccountBalanceReader.permitsRead(from: WebOrigin(url: URL(string: address)!), home: home, rules: rules))
+        }
+        #expect(!AccountBalanceReader.permitsRead(from: destination, home: home, rules: [WebsiteRule(host: "other.invalid")]))
+    }
+
+    @Test
+    func untrustedRedirectEndsReadImmediatelyInsteadOfPollingUntilTimeout() async throws {
+        var reads = 0
+        var waits = 0
+        do {
+            _ = try await AccountBalanceReader.readResult(afterCheckIn: false, reloadPage: {}, readValue: { () -> String? in
+                reads += 1
+                throw BalanceReadError.untrustedOrigin
+            }, wait: { waits += 1 })
+            Issue.record("Untrusted origin accepted")
+        } catch {
+            #expect(error is BalanceReadError)
+        }
+        #expect(reads == 1)
+        #expect(waits == 0)
+    }
+
+    @Test
     func sourceVerificationMustAlsoBeStableBeforePublishingAReading() async throws {
         var reads = 0
         let result = try await AccountBalanceReader.readResult(afterCheckIn: true, reloadPage: {}, readValue: {

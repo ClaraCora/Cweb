@@ -12,12 +12,6 @@ struct WebsiteRule: Codable, Equatable, Identifiable, Sendable {
     var balanceSelector = ""
     var balanceReadySelector = ""
     var captchaSelector: String?
-    var captchaAutoFillEnabled = false
-    var captchaAutoSubmitEnabled = false
-    var captchaImageSelector: String?
-    var captchaInputSelector: String?
-    var captchaSubmitSelector: String?
-    var captchaExpectedLength: Int?
     var environmentTimeoutSeconds: Int?
     var submissionTimeoutSeconds = 30
 
@@ -85,9 +79,7 @@ extension WebsiteRule {
     private enum CodingKeys: String, CodingKey {
         case id, host, checkInContainerSelector, actionSelector, completionSelector
         case failureSelector, balanceSelector, balanceReadySelector, captchaSelector
-        case captchaAutoFillEnabled, captchaAutoSubmitEnabled, captchaImageSelector, captchaInputSelector
-        case captchaSubmitSelector, captchaExpectedLength, environmentTimeoutSeconds
-        case submissionTimeoutSeconds
+        case environmentTimeoutSeconds, submissionTimeoutSeconds
     }
 
     init(from decoder: Decoder) throws {
@@ -101,12 +93,6 @@ extension WebsiteRule {
         balanceSelector = try container.decodeIfPresent(String.self, forKey: .balanceSelector) ?? ""
         balanceReadySelector = try container.decodeIfPresent(String.self, forKey: .balanceReadySelector) ?? ""
         captchaSelector = try container.decodeIfPresent(String.self, forKey: .captchaSelector)
-        captchaAutoFillEnabled = try container.decodeIfPresent(Bool.self, forKey: .captchaAutoFillEnabled) ?? false
-        captchaAutoSubmitEnabled = try container.decodeIfPresent(Bool.self, forKey: .captchaAutoSubmitEnabled) ?? false
-        captchaImageSelector = try container.decodeIfPresent(String.self, forKey: .captchaImageSelector)
-        captchaInputSelector = try container.decodeIfPresent(String.self, forKey: .captchaInputSelector)
-        captchaSubmitSelector = try container.decodeIfPresent(String.self, forKey: .captchaSubmitSelector)
-        captchaExpectedLength = try container.decodeIfPresent(Int.self, forKey: .captchaExpectedLength)
         environmentTimeoutSeconds = try container.decodeIfPresent(Int.self, forKey: .environmentTimeoutSeconds)
         submissionTimeoutSeconds = try container.decodeIfPresent(Int.self, forKey: .submissionTimeoutSeconds) ?? 30
     }
@@ -115,9 +101,6 @@ extension WebsiteRule {
         [("签到区域", checkInContainerSelector), ("签到按钮", actionSelector),
          ("完成状态", completionSelector), ("失败状态", failureSelector),
          ("余额元素", balanceSelector), ("余额已加载标记", balanceReadySelector),
-         ("验证码区域", captchaSelector ?? ""),
-         ("验证码图片", captchaImageSelector ?? ""),
-         ("验证码输入框", captchaInputSelector ?? ""),
-         ("验证码提交控件", captchaSubmitSelector ?? "")]
+         ("验证码区域", captchaSelector ?? "")]
     }
 }

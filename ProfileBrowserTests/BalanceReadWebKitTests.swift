@@ -229,6 +229,41 @@ struct BalanceReadWebKitTests {
         #expect(messages.count == 2)
     }
 
+    @Test
+    func configuredLoginRedirectReadsBalanceAndUnrelatedOriginKeepsCache() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let suite = "Cweb.BalanceRedirectTests." + UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let home = URL(string: "https://cf.example.invalid/profile")!
+        let destination = URL(string: "https://www.example.invalid/profile")!
+        let profile = BrowserProfile(name: "可信子域跳转", homePage: home, cachedBalance: "$1.00")
+        let repository = ProfileRepository(fileURL: directory.appending(path: "profiles.json"))
+        try repository.save([profile])
+        let model = AppModel(profileRepository: repository, credentialVault: CredentialVault(inMemory: true),
+            socksProxyRepository: SocksProxyRepository(fileURL: directory.appending(path: "proxies.json"),
+                credentialStore: SocksProxyCredentialStore(inMemory: true)), userDefaults: defaults)
+        try model.updateWebsiteRules([WebsiteRule(host: "cf.example.invalid", balanceSelector: "#balance")])
+        let session = BrowserSession(profile: profile)
+        let host = try BalanceWebKitHost(page: session.page)
+        defer { session.close(); host.close() }
+        for try await _ in session.page.load(html: "<html><body><div id='balance'>$22.50</div></body></html>", baseURL: destination) { }
+        #expect(await model.refreshBalance(for: session) == .updated("$22.50"))
+        #expect(model.profiles.first?.balanceOrigin == WebOrigin(url: destination))
+        #expect(try repository.load().first?.cachedBalance == "$22.50")
+        let updatedAt = model.profiles.first?.balanceUpdatedAt
+        for try await _ in session.page.load(html: "<html><body><div id='balance'>$999.00</div></body></html>",
+            baseURL: URL(string: "https://unrelated.invalid/profile")!) { }
+        let result = await model.refreshBalance(for: session)
+        guard case .failed = result else { Issue.record("Unexpected redirect result: \(result)"); return }
+        #expect(model.profiles.first?.cachedBalance == "$22.50")
+        #expect(model.profiles.first?.balanceUpdatedAt == updatedAt)
+        #expect(model.profiles.first?.balanceOrigin == WebOrigin(url: destination))
+    }
+
     private func waitUntil(_ condition: @MainActor () async -> Bool) async throws {
         let deadline = ContinuousClock.now.advanced(by: .seconds(5))
         while !(await condition()) {

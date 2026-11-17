@@ -366,12 +366,6 @@ final class AppModel {
             normalized[index].balanceSelector = normalized[index].balanceSelector.trimmingCharacters(in: .whitespacesAndNewlines)
             normalized[index].balanceReadySelector = normalized[index].balanceReadySelector.trimmingCharacters(in: .whitespacesAndNewlines)
             normalized[index].captchaSelector = normalized[index].captchaSelector?.trimmingCharacters(in: .whitespacesAndNewlines)
-            normalized[index].captchaImageSelector = normalized[index].captchaImageSelector?.trimmingCharacters(in: .whitespacesAndNewlines)
-            normalized[index].captchaInputSelector = normalized[index].captchaInputSelector?.trimmingCharacters(in: .whitespacesAndNewlines)
-            normalized[index].captchaSubmitSelector = normalized[index].captchaSubmitSelector?.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let length = normalized[index].captchaExpectedLength {
-                normalized[index].captchaExpectedLength = min(8, max(4, length))
-            }
             normalized[index].environmentTimeoutSeconds = min(300, max(15, normalized[index].environmentTimeoutSeconds ?? 60))
             for (field, selector) in normalized[index].selectors { try WebsiteRuleValidator.validateDelimiters(selector, field: field) }
             normalized[index].submissionTimeoutSeconds = min(120, max(5, normalized[index].submissionTimeoutSeconds))
@@ -687,6 +681,8 @@ final class AppModel {
         profiles = updated
     }
 
+    func isRefreshingBalance(for profileID: UUID) -> Bool { balanceRefreshes.isRefreshing(profileID) }
+
     func balanceStatus(for profile: BrowserProfile, now: Date = .now) -> String? {
         if balanceRefreshes.isRefreshing(profile.id) { return "正在更新余额" }
         if let error = profile.balanceReadError { return error }
@@ -700,9 +696,10 @@ final class AppModel {
     @discardableResult
     func refreshBalance(for session: BrowserSession, afterCheckIn: Bool = false) async -> BalanceRefreshResult {
         let profileID = session.profile.id
-        guard let ticket = balanceRefreshes.begin(profileID, afterCheckIn: afterCheckIn) else { return .cancelled }
+        guard let ticket = balanceRefreshes.begin(profileID, afterCheckIn: afterCheckIn, sessionID: ObjectIdentifier(session)) else { return .cancelled }
         defer { balanceRefreshes.end(ticket, for: profileID) }
         let scope = session.profile.accountScopeKey
+        var readingOrigin: WebOrigin?
         func isCurrent() -> Bool {
             !session.isClosed && balanceRefreshes.contains(ticket, for: profileID)
                 && profiles.first(where: { $0.id == profileID })?.accountScopeKey == scope
@@ -716,18 +713,25 @@ final class AppModel {
                 },
                 readValue: {
                     guard isCurrent() else { throw CancellationError() }
-                    // A login redirect or unrelated site must not replace the account's balance.
-                    guard session.currentOrigin == WebOrigin(url: session.profile.homePage) else { return nil as AccountBalanceReading? }
-                    let host = session.currentOrigin?.host ?? ""
+                    guard let origin = session.currentOrigin else { return nil as AccountBalanceReading? }
+                    guard AccountBalanceReader.permitsRead(from: origin,
+                        home: WebOrigin(url: session.profile.homePage), rules: self.globalScriptSettings.siteRules ?? []) else {
+                        throw BalanceReadError.untrustedOrigin
+                    }
+                    let host = origin.host
                     let rule = self.globalScriptSettings.siteRules?.first { $0.matches(host: host) }
-                    return try await session.readAccountBalanceResult(rule: rule)
+                    let reading = try await session.readAccountBalanceResult(rule: rule)
+                    guard isCurrent(), session.currentOrigin == origin else { throw CancellationError() }
+                    if reading != nil { readingOrigin = origin }
+                    return reading
                 }
             )
             try Task.checkCancellation()
             guard isCurrent() else { return .cancelled }
+            if reading != nil, session.currentOrigin != readingOrigin { return .cancelled }
             let error = reading == nil ? "未读取到余额，请确认登录状态或检查网站规则" : nil
             saveBalanceState(reading?.value, for: profileID, verified: reading?.sourceVerified == true,
-                error: error, origin: session.currentOrigin)
+                error: error, origin: readingOrigin)
             if let reading { return .updated(reading.value) }
             return .failed(error!)
         } catch is CancellationError { return .cancelled }

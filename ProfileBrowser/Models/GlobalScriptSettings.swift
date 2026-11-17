@@ -52,8 +52,6 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
             let hasClicked = false;
             let hasCompleted = false;
             let submissionFailed = false;
-            var captchaCaptureInFlight = false;
-            let captchaCaptureGeneration = 0;
 
             const textOf = (element) =>
                 (typeof element?.innerText === "string"
@@ -63,122 +61,6 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
                 if (!element.getClientRects().length) return false;
                 const visibility = window.getComputedStyle(element).visibility;
                 return visibility !== "hidden" && visibility !== "collapse";
-            };
-
-            const queryVisible = (root, selector) => {
-                try {
-                    return [...(root?.querySelectorAll?.(selector) || [])].find(isVisible) || null;
-                } catch (_) {
-                    return null;
-                }
-            };
-
-            const captchaRoot = () => {
-                if (rule.captchaSelector) {
-                    try {
-                        return [...document.querySelectorAll(rule.captchaSelector)].find(isVisible) || null;
-                    } catch (_) {
-                        return null;
-                    }
-                }
-                return captchaSelectors.map((selector) => queryVisible(document, selector)).find(Boolean) || null;
-            };
-
-            const captchaInput = (root) => {
-                const selector = rule.captchaInputSelector ||
-                    'input:not([type="hidden"]):not([type="password"]):not([type="checkbox"]):not([type="radio"])';
-                const candidates = [];
-                if (root?.matches?.(selector)) candidates.push(root);
-                candidates.push(...(root?.querySelectorAll?.(selector) || []));
-                if (root !== document) candidates.push(...(document.querySelectorAll(selector) || []));
-                return candidates.find((element) => {
-                    if (!isVisible(element)) return false;
-                    if (rule.captchaInputSelector) return true;
-                    const metadata = [element.name, element.id, element.placeholder,
-                        element.autocomplete, element.getAttribute('aria-label')].filter(Boolean).join(' ');
-                    return /captcha|verify|verification|验证码|校验|code/i.test(metadata)
-                        || (element.maxLength >= 4 && element.maxLength <= 8);
-                }) || null;
-            };
-
-            const captchaImage = (root) => {
-                const selector = rule.captchaImageSelector || 'img, canvas';
-                const candidates = [];
-                if (root?.matches?.(selector)) candidates.push(root);
-                candidates.push(...(root?.querySelectorAll?.(selector) || []));
-                if (root !== document) candidates.push(...(document.querySelectorAll(selector) || []));
-                return candidates.find((element) => {
-                    if (!isVisible(element)) return false;
-                    if (rule.captchaImageSelector) return true;
-                    const metadata = [element.id, element.className, element.alt,
-                        element.getAttribute('aria-label')].filter((value) => typeof value === 'string').join(' ');
-                    return element.tagName === 'CANVAS'
-                        || /captcha|verify|验证码|校验/i.test(metadata)
-                        || (element.tagName === 'IMG' && element.naturalWidth > 0);
-                }) || null;
-            };
-
-            const extractCaptchaImage = async (element) => {
-                if (!element) return null;
-                if (element.tagName === 'CANVAS') {
-                    try { return element.toDataURL('image/png'); } catch (_) { return null; }
-                }
-                if (element.tagName !== 'IMG') return null;
-                if (!element.complete || !element.naturalWidth) {
-                    const loaded = await new Promise((resolve) => {
-                        let settled = false;
-                        const finish = (value) => {
-                            if (settled) return;
-                            settled = true;
-                            clearTimeout(timer);
-                            element.removeEventListener('load', onLoad);
-                            element.removeEventListener('error', onError);
-                            resolve(value);
-                        };
-                        const onLoad = () => finish(Boolean(element.naturalWidth));
-                        const onError = () => finish(false);
-                        const timer = setTimeout(() => finish(false), 1500);
-                        element.addEventListener('load', onLoad, { once: true });
-                        element.addEventListener('error', onError, { once: true });
-                        if (element.complete && element.naturalWidth) finish(true);
-                    });
-                    if (!loaded || !element.naturalWidth) return null;
-                }
-                if (element.currentSrc?.startsWith('data:')) return element.currentSrc;
-                try {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = element.naturalWidth;
-                    canvas.height = element.naturalHeight;
-                    const context = canvas.getContext('2d');
-                    if (!context) return null;
-                    context.drawImage(element, 0, 0);
-                    return canvas.toDataURL('image/png');
-                } catch (_) {
-                    return null;
-                }
-            };
-
-            const prepareCaptcha = async () => {
-                if (!rule.captchaAutoFillEnabled) return null;
-                const root = captchaRoot();
-                const input = captchaInput(root);
-                const image = captchaImage(root);
-                if (!input || !image) return null;
-                input.scrollIntoView({ block: 'center', behavior: 'smooth' });
-                input.focus({ preventScroll: true });
-                const imageData = await extractCaptchaImage(image);
-                if (!imageData) return null;
-                __cwebCaptchaInput = input;
-                __cwebCaptchaSubmit = rule.captchaSubmitSelector
-                    ? (queryVisible(root || document, rule.captchaSubmitSelector)
-                        || queryVisible(document, rule.captchaSubmitSelector))
-                    : null;
-                return {
-                    mode: 'imageDigits',
-                    imageData,
-                    expectedLength: Number.isInteger(rule.captchaExpectedLength)
-                        ? rule.captchaExpectedLength : null
-                };
             };
 
             const findSignButton = () => select(rule.actionSelector ||
@@ -225,15 +107,18 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
                 '[role="status"], [aria-live], .toast, .alert, button, a, [role="button"], p, span, div, li, td, strong'
             ).some((element) => {
                 const text = textOf(element);
-                return text.length <= 160 && isVisible(element) && (rule.completionSelector || completionWords.test(text))
+                return text.length <= 160 && (rule.completionSelector || completionWords.test(text)) && isVisible(element)
                     && !hasHistoricalContext(element) && !/未签到|未完成|签到失败/i.test(text);
             });
 
             const pageShowsFailure = () => select(rule.failureSelector ||
                 '[role="status"], [aria-live], .toast, .alert, p, span, div'
-            ).some((element) => isVisible(element) && textOf(element).length <= 160
-                && !hasHistoricalContext(element)
-                && (rule.failureSelector || /签到失败|签到出错|check[\\s-]?in\\s+(?:failed|error)/i.test(textOf(element))));
+            ).some((element) => {
+                const text = textOf(element);
+                return text.length <= 160
+                    && (rule.failureSelector || /签到失败|签到出错|check[\\s-]?in\\s+(?:failed|error)/i.test(text))
+                    && isVisible(element) && !hasHistoricalContext(element);
+            });
 
             const finish = () => {
                 hasCompleted = true;
@@ -242,63 +127,31 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
             };
 
             const stopDetection = () => {
-                captchaCaptureGeneration++;
-                captchaCaptureInFlight = false;
                 clearTimeout(noButtonTimer);
                 clearTimeout(debounceTimer);
+                debounceTimer = undefined;
                 clearTimeout(successTimer);
                 clearTimeout(submissionTimer);
                 observer.disconnect();
             };
 
-            // This is also the explicit retry entry point. Capture the current
-            // DOM image; never reuse the previous challenge's image bytes.
-            api.captureCaptcha = async () => {
-                if (hasCompleted || captchaCaptureInFlight) return;
-                api.pause();
-                if (api.hasFilledCaptcha?.()) {
-                    api.captchaDetected("验证码已填入，请完成验证后继续检测");
-                    return;
+            try {
+                for (const key of ['checkInContainerSelector', 'actionSelector', 'completionSelector',
+                    'failureSelector', 'captchaSelector']) {
+                    if (rule[key]) document.querySelectorAll(rule[key]);
                 }
-                const generation = ++captchaCaptureGeneration;
-                captchaCaptureInFlight = true;
-                try {
-                    const challenge = await prepareCaptcha();
-                    if (hasCompleted || generation !== captchaCaptureGeneration || !api.isPaused()) return;
-                    api.captchaDetected(challenge
-                        ? "检测到数字图片验证码，正在识别。"
-                        : "无法读取验证码图片，请手动输入。", challenge);
-                } catch (_) {
-                    if (generation === captchaCaptureGeneration && api.isPaused()) {
-                        api.captchaDetected("无法读取验证码图片，请手动输入。");
-                    }
-                } finally {
-                    if (generation === captchaCaptureGeneration) captchaCaptureInFlight = false;
-                }
-            };
+            } catch (_) {
+                api.error("网站选择器无效，请检查网站规则");
+                return;
+            }
 
-            const detect = async () => {
+            const detect = () => {
                 if (hasCompleted || api.isPaused()) return;
-                try {
-                    for (const key of ['checkInContainerSelector', 'actionSelector', 'completionSelector', 'failureSelector',
-                        'captchaSelector', 'captchaImageSelector', 'captchaInputSelector', 'captchaSubmitSelector']) {
-                        if (rule[key]) document.querySelectorAll(rule[key]);
-                    }
-                } catch (_) {
-                    clearTimeout(noButtonTimer);
-                    api.error("网站选择器无效，请检查网站规则");
-                    return;
-                }
 
                 if ((rule.captchaSelector ? [rule.captchaSelector] : captchaSelectors).some((selector) => {
                     try { return [...document.querySelectorAll(selector)].some(isVisible); }
                     catch (_) { api.error("验证码选择器无效，请检查网站规则"); return false; }
                 })) {
-                    if (captchaCaptureInFlight) return;
-                    if (rule.captchaAutoFillEnabled) {
-                        await api.captureCaptcha();
-                        return;
-                    }
                     api.captchaDetected("检测到验证码，请手动完成");
                     return;
                 }
@@ -308,7 +161,7 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
                     return;
                 }
 
-                if (hasClicked && pageShowsFailure()) {
+                if (hasClicked && !submissionFailed && pageShowsFailure()) {
                     clearTimeout(submissionTimer);
                     submissionFailed = true;
                     api.error("签到提交失败，请检查页面后手动重试或跳过");
@@ -331,13 +184,18 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
 
                 // Reuse the same checks so a newly displayed CAPTCHA always
                 // pauses automation before any success is reported.
-                successTimer = setTimeout(() => { void detect(); }, 1200);
+                successTimer = setTimeout(detect, 300);
             };
 
             const schedule = () => {
                 if (hasCompleted || api.isPaused()) return;
-                clearTimeout(debounceTimer);
-                debounceTimer = setTimeout(() => { void detect(); }, 250);
+                // Keep the first deadline: frequent page mutations must not
+                // postpone detecting a result or a CAPTCHA indefinitely.
+                if (debounceTimer) return;
+                debounceTimer = setTimeout(() => {
+                    debounceTimer = undefined;
+                    detect();
+                }, 120);
             };
 
             const root = document.documentElement || document;
@@ -353,8 +211,6 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
 
             window.addEventListener("cwebAutomationResume", () => {
                 if (hasCompleted) return;
-                captchaCaptureGeneration++;
-                captchaCaptureInFlight = false;
                 observe();
                 if (submissionFailed) { hasClicked = false; submissionFailed = false; }
                 clearTimeout(submissionTimer);
@@ -404,7 +260,8 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
             "0a086ed37b237890a33ca9c3a5cd601f866d4a1940742d14c3ba38d94709d41a",
             "6b022d4272cb410163ce49c802c932c45a9920c6e685839eed538872eb72c43c",
             "34c285f8ce439f24819a6b013f52824e3d5cefb10073403d809dd3a0a9c8a554",
-            "7e3e09a0361a8fa7148b861b0bbe7ac44d2f2d6058b6216f2d86f99965abb6b6"
+            "7e3e09a0361a8fa7148b861b0bbe7ac44d2f2d6058b6216f2d86f99965abb6b6",
+            "5f7338d615b9eaaf7007da79fb356a9590d77fa740ec3e06e73d67a8ebfed534"
         ]
         guard bundledFingerprints.contains(digest) else {
             return self
@@ -424,27 +281,9 @@ enum AutomationEventKind: String, Codable, Sendable {
     case resume
 }
 
-enum CaptchaChallengeMode: String, Sendable {
-    case imageDigits
-}
-
-struct CaptchaChallenge: Equatable, Sendable {
-    let mode: CaptchaChallengeMode
-    let documentID: String
-    let imageData: Data?
-    let expectedLength: Int?
-}
-
 struct AutomationEvent: Equatable, Sendable {
     let kind: AutomationEventKind
     let message: String
-    let captcha: CaptchaChallenge?
-
-    init(kind: AutomationEventKind, message: String, captcha: CaptchaChallenge? = nil) {
-        self.kind = kind
-        self.message = message
-        self.captcha = captcha
-    }
 }
 
 struct AutomationRunRecord: Codable, Equatable, Sendable {

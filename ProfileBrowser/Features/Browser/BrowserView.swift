@@ -75,9 +75,6 @@ struct BrowserView: View {
                 AutomationStatusBanner(
                     state: session.automationState,
                     message: automationMessage,
-                    recognitionState: session.captchaRecognitionState,
-                    canRetryRecognition: session.canRetryCaptchaRecognition,
-                    retryRecognition: { session.retryCaptchaRecognition() },
                     resume: {
                         Task { await session.resumeAutomation() }
                     }
@@ -142,7 +139,7 @@ struct BrowserView: View {
                     Button("重新读取余额", systemImage: "arrow.clockwise") {
                         Task { balanceFeedback = await model.refreshBalance(for: session).message }
                     }
-                    .disabled(!automaticallyRefreshesBalance)
+                    .disabled(!automaticallyRefreshesBalance || model.isRefreshingBalance(for: session.profile.id))
                     Button("网站识别规则", systemImage: "slider.horizontal.3") { showsWebsiteRules = true }
                         .accessibilityIdentifier("browser.websiteRules")
                 }
@@ -173,10 +170,12 @@ struct BrowserView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { session.requestBalanceRead() }
         }
-        .task(id: session.balanceRefreshRequest) {
+        .task {
             guard automaticallyRefreshesBalance else { return }
-            do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
-            await model.refreshBalance(for: session)
+            for await _ in session.balanceReadRequests() {
+                guard !Task.isCancelled else { return }
+                await model.refreshBalance(for: session)
+            }
         }
         .task {
             let currentSession = session
@@ -248,21 +247,14 @@ struct BrowserView: View {
 private struct AutomationStatusBanner: View {
     let state: AutomationState
     let message: String
-    let recognitionState: CaptchaRecognitionState
-    let canRetryRecognition: Bool
-    let retryRecognition: () -> Void
     let resume: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .center, spacing: 10) {
-                if recognitionState == .recognizing && state == .captcha {
-                    ProgressView().accessibilityHidden(true)
-                } else {
-                    Image(systemName: iconName)
-                        .foregroundStyle(iconColor)
-                        .accessibilityHidden(true)
-                }
+                Image(systemName: iconName)
+                    .foregroundStyle(iconColor)
+                    .accessibilityHidden(true)
                 Text(message)
                     .font(.footnote)
                     .foregroundStyle(.primary)
@@ -270,18 +262,11 @@ private struct AutomationStatusBanner: View {
             }
             if state == .captcha {
                 HStack(spacing: 12) {
-                    if canRetryRecognition {
-                        Button("重新识别", systemImage: "arrow.clockwise", action: retryRecognition)
-                            .font(.footnote.weight(.semibold))
-                            .buttonStyle(.borderless)
-                            .frame(minHeight: AppUI.minimumTarget)
-                    }
                     Spacer(minLength: 0)
                     Button("继续检测", action: resume)
                         .font(.footnote.weight(.semibold))
                         .buttonStyle(.bordered)
                         .frame(minHeight: AppUI.minimumTarget)
-                        .disabled(recognitionState == .recognizing)
                 }
             }
         }

@@ -466,7 +466,7 @@ final class NativeUIRegressionTests: XCTestCase {
         capture("website-rules-preview-saved")
     }
 
-    func testCaptchaSubmitSwitchDefaultsOffAndCanBeEnabled() {
+    func testWebsiteRulesOfferManualCaptchaWithoutRecognitionControls() {
         for dark in [false, true] {
             let app = launch(dark: dark)
             selectTab("设置", in: app)
@@ -474,21 +474,15 @@ final class NativeUIRegressionTests: XCTestCase {
             app.buttons["网站识别规则"].tap()
             XCTAssertTrue(app.navigationBars["网站识别规则"].waitForExistence(timeout: 5))
             app.buttons["添加网站"].tap()
-            let autoFill = app.switches["启用数字验证码自动识别"]
-            for _ in 0..<8 where !autoFill.isHittable { app.swipeUp() }
-            XCTAssertTrue(autoFill.isHittable)
-            autoFill.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
-            XCTAssertEqual(autoFill.value as? String, "1")
-            let autoSubmit = app.switches["captcha.autoSubmit"]
-            for _ in 0..<3 where !autoSubmit.isHittable { app.swipeUp() }
-            XCTAssertTrue(autoSubmit.isHittable)
-            XCTAssertTrue(autoSubmit.isEnabled)
-            XCTAssertEqual(autoSubmit.value as? String, "0")
-            capture(dark ? "captcha-submit-off-dark" : "captcha-submit-off-light")
-            autoSubmit.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
-            XCTAssertEqual(autoSubmit.value as? String, "1")
-            XCTAssertTrue(app.staticTexts["仅点击指定提交控件一次，随后暂停。请填写提交控件的 CSS 选择器。"].exists)
-            capture(dark ? "captcha-submit-on-dark" : "captcha-submit-on-light")
+            let message = app.staticTexts["检测到验证码时暂停签到，请在网页中手动完成后点击“继续检测”。"]
+            for _ in 0..<8 where !message.isHittable { app.swipeUp() }
+            XCTAssertTrue(message.isHittable)
+            XCTAssertTrue(app.textFields["验证码区域"].exists)
+            XCTAssertFalse(app.switches["启用数字验证码自动识别"].exists)
+            XCTAssertFalse(app.switches["captcha.autoSubmit"].exists)
+            XCTAssertFalse(app.textFields["验证码图片"].exists)
+            XCTAssertFalse(app.textFields["验证码输入框"].exists)
+            capture(dark ? "manual-captcha-rules-dark" : "manual-captcha-rules-light")
             app.terminate()
         }
     }

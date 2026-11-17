@@ -45,7 +45,7 @@ enum BrowserDocumentScript {
             };
             new MutationObserver(() => {
                 if (timer) return;
-                timer = setTimeout(() => { timer = undefined; check(); }, 400);
+                timer = setTimeout(() => { timer = undefined; check(); }, 120);
             })
                 .observe(document.documentElement, {childList:true, subtree:true, characterData:true, attributes:true});
             check();

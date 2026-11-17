@@ -9,6 +9,14 @@ struct AccountBalanceReading: Equatable {
 /// balance to change. The whole operation is bounded, including WebKit calls.
 @MainActor
 enum AccountBalanceReader {
+    static func permitsRead(from origin: WebOrigin?, home: WebOrigin?, rules: [WebsiteRule]) -> Bool {
+        guard let origin, let home else { return false }
+        if origin == home { return true }
+        return origin.isSecure && home.isSecure && origin.port == home.port
+            && WebsiteRule.sameSite(origin.host, home.host)
+            && rules.contains { $0.matches(host: home.host) && $0.matches(host: origin.host) }
+    }
+
     static func read(
         afterCheckIn: Bool,
         reloadPage: @escaping @MainActor () async throws -> Void,
@@ -73,6 +81,8 @@ enum AccountBalanceReader {
                 throw CancellationError()
             } catch let error as WebsiteRuleError {
                 throw error
+            } catch let error as BalanceReadError {
+                throw error
             } catch {
                 value = nil
             }
@@ -96,4 +106,12 @@ enum AccountBalanceReader {
 @MainActor
 private final class BalanceReadCompletion<Value> {
     var result: Result<Value?, Error>?
+}
+
+enum BalanceReadError: LocalizedError {
+    case untrustedOrigin
+
+    var errorDescription: String? {
+        "当前页面不属于主页或已配置的同站点 HTTPS 域名，请返回账户页面后重试。"
+    }
 }

@@ -310,9 +310,11 @@ test("old saved template fingerprint matches the migration, current and edited c
     const legacy = swiftString(tests, 'originalBundledSource = """');
     const hash = source => createHash("sha256").update(source.trim()).digest("hex");
     const previous = swiftString(tests, 'previousBundledSource = """');
+    const retiredOCR = swiftString(tests, 'retiredOCRBundledSource = """');
     const migrationHashes = [...modelSource.matchAll(/"([a-f0-9]{64})"/g)].map(match => match[1]);
     assert.ok(migrationHashes.includes(hash(legacy)));
     assert.ok(migrationHashes.includes(hash(previous)));
+    assert.ok(migrationHashes.includes(hash(retiredOCR)));
     assert.ok(!migrationHashes.includes(hash(script)));
     assert.ok(!migrationHashes.includes(hash(previous + "\n// Custom edit")));
 });
@@ -638,4 +640,38 @@ test("explicit failure selector preserves site-specific error wording", () => {
     const p=page([action,failure],{rule:{failureSelector:'.failed'}});
     p.mutate(()=>{failure.laidOut=true;});p.advance(300);
     assert.deepEqual(p.types(),['error']);assert.equal(action.clicks,1);
+});
+
+
+test("continuous mutations cannot postpone completion detection beyond one batch", () => {
+    const action = element('立即签到');
+    const p = page([action]);
+    p.mutate(() => { action.textContent = '已签到'; action.disabled = true; });
+    for (let i = 0; i < 11; i++) { p.advance(10); p.mutate(); }
+    assert.deepEqual(p.types(), []);
+    p.advance(10);
+    assert.deepEqual(p.types(), ['success']);
+    assert.equal(action.clicks, 1);
+});
+
+test("continuous mutations still pause promptly for a manual CAPTCHA", () => {
+    const nodes = [];
+    const p = page(nodes);
+    p.mutate(() => nodes.push(element('', {tag: 'input', attributes: {placeholder: '验证码'}})));
+    for (let i = 0; i < 20; i++) { p.advance(10); p.mutate(); }
+    assert.deepEqual(p.types(), ['captcha']);
+    p.advance(60000);
+    assert.deepEqual(p.types(), ['captcha']);
+});
+
+
+test("a delayed genuine completion still recovers after a submission timeout", () => {
+    const action = element('立即签到');
+    const p = page([action]);
+    p.advance(31000);
+    assert.deepEqual(p.types(), ['error']);
+    p.mutate(() => { action.textContent = '已签到'; action.disabled = true; });
+    p.advance(120);
+    assert.deepEqual(p.types(), ['error', 'success']);
+    assert.equal(action.clicks, 1);
 });

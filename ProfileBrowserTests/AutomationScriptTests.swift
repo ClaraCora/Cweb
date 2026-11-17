@@ -1,9 +1,5 @@
 import Foundation
-import CoreGraphics
-import CoreText
-import ImageIO
 import Testing
-import UniformTypeIdentifiers
 import WebKit
 @testable import ProfileBrowser
 
@@ -41,100 +37,6 @@ struct AutomationScriptTests {
     }
 
     @Test
-    func builderIncludesCaptchaFillBridge() {
-        let source = AutomationScriptBuilder.build(
-            code: "window.CwebCheckIn.captchaDetected('captcha');",
-            matches: ["https://example.com/*"]
-        )
-
-        #expect(source.contains("fillCaptcha"))
-        #expect(source.contains("__cwebResolveCaptchaInput"))
-        #expect(source.contains("candidates.find(__cwebIsVisible)"))
-        #expect(source.contains("HTMLInputElement.prototype"))
-        #expect(source.contains("input.value !== value"))
-        #expect(source.contains("details = null"))
-        #expect(source.contains("payload.captcha"))
-    }
-
-    @Test
-    @MainActor
-    func captchaFillCallUpdatesTheVisibleFormAndReturnsItsResult() async throws {
-        var configuration = WebPage.Configuration()
-        configuration.websiteDataStore = .nonPersistent()
-        let page = WebPage(configuration: configuration)
-        let fixture = """
-        <html><body>
-        <input hidden id="old" placeholder="请输入验证码">
-        <form><input id="current" placeholder="请输入验证码"><button>确认</button></form>
-        <script>
-        window.fixtureState = { value: '', input: 0, change: 0, submits: 0 };
-        document.addEventListener('input', event => {
-            window.fixtureState.value = event.target.value;
-            window.fixtureState.input++;
-        });
-        document.addEventListener('change', () => window.fixtureState.change++);
-        document.querySelector('form').addEventListener('submit', event => {
-            event.preventDefault(); window.fixtureState.submits++;
-        });
-        </script></body></html>
-        """
-        let fixtureURL = try #require(URL(string: "https://captcha.example.invalid"))
-        for try await _ in page.load(html: fixture, baseURL: fixtureURL) { }
-        let rule = WebsiteRule(host: "captcha.example.invalid", captchaInputSelector: "input[placeholder=\"请输入验证码\"]")
-        _ = try await page.callJavaScript(AutomationScriptBuilder.build(
-            code: "", matches: ["<all_urls>"], siteRules: [rule]
-        ))
-
-        let result = try await page.callJavaScript(
-            AutomationScriptBuilder.captchaFillCall, arguments: ["code": "2746"], contentWorld: .page
-        ) as? Bool
-        #expect(result == true)
-        let state = try #require(try await page.callJavaScript("""
-        return { ...window.fixtureState,
-            current: document.querySelector('#current').value,
-            old: document.querySelector('#old').value };
-        """) as? [String: Any])
-        #expect(state["current"] as? String == "2746")
-        #expect(state["value"] as? String == "2746")
-        #expect(state["old"] as? String == "")
-        #expect(state["input"] as? Int == 1)
-        #expect(state["change"] as? Int == 1)
-        #expect(state["submits"] as? Int == 0)
-
-        _ = try await page.callJavaScript("""
-        const previous = document.querySelector('#current');
-        previous.id = 'replaced'; previous.hidden = true;
-        const input = document.createElement('input');
-        input.id = 'current'; input.placeholder = '请输入验证码';
-        previous.after(input);
-        """)
-        let replacementResult = try await page.callJavaScript(
-            AutomationScriptBuilder.captchaFillCall, arguments: ["code": "5832"], contentWorld: .page
-        ) as? Bool
-        #expect(replacementResult == false)
-        #expect(try await page.callJavaScript("return document.querySelector('#current').value;") as? String == "")
-        _ = try await page.callJavaScript("""
-        window.CwebCheckIn.captureCaptcha = () => {};
-        window.CwebCheckIn.retryCaptcha();
-        """)
-        let retriedResult = try await page.callJavaScript(
-            AutomationScriptBuilder.captchaFillCall, arguments: ["code": "5832"], contentWorld: .page
-        ) as? Bool
-        #expect(retriedResult == true)
-        #expect(try await page.callJavaScript("return document.querySelector('#current').value;") as? String == "5832")
-        #expect(try await page.callJavaScript("return document.querySelector('#replaced').value;") as? String == "2746")
-
-        _ = try await page.callJavaScript("document.querySelector('#current').hidden = true;")
-        let hiddenResult = try await page.callJavaScript(
-            AutomationScriptBuilder.captchaFillCall, arguments: ["code": "9317"], contentWorld: .page
-        ) as? Bool
-        #expect(hiddenResult == false)
-        #expect(try await page.callJavaScript("return document.querySelector('#current').value;") as? String == "5832")
-        #expect(try await page.callJavaScript("return window.fixtureState.submits;") as? Int == 0)
-        page.stopLoading()
-    }
-
-    @Test
     func builderDetectsAccessibleCaptchaLabels() {
         let source = GlobalScriptSettings.default.source
 
@@ -144,367 +46,76 @@ struct AutomationScriptTests {
     }
 
     @Test
-    func websiteRuleDecodesOldSavedDataWithCaptchaDefaults() throws {
-        let data = Data("{\"host\":\"example.com\",\"balanceSelector\":\"#balance\"}".utf8)
+    func websiteRuleIgnoresRetiredCaptchaSettingsAndPreservesSelectors() throws {
+        let data = Data(##"{"host":"example.com","balanceSelector":"#balance","captchaSelector":"#challenge","captchaAutoFillEnabled":true,"captchaAutoSubmitEnabled":true,"captchaImageSelector":"img","captchaInputSelector":"input","captchaSubmitSelector":"button","captchaExpectedLength":4}"##.utf8)
         let rule = try JSONDecoder().decode(WebsiteRule.self, from: data)
-
         #expect(rule.host == "example.com")
         #expect(rule.balanceSelector == "#balance")
-        #expect(!rule.captchaAutoFillEnabled)
-        #expect(!rule.captchaAutoSubmitEnabled)
-        #expect(rule.captchaImageSelector == nil)
-        #expect(rule.captchaInputSelector == nil)
-        let legacySubmitRule = try JSONDecoder().decode(WebsiteRule.self, from: Data(
-            ##"{"host":"example.com","captchaAutoFillEnabled":true,"captchaSubmitSelector":"#submit"}"##.utf8
-        ))
-        #expect(!legacySubmitRule.captchaAutoSubmitEnabled)
-        var enabledRule = legacySubmitRule
-        enabledRule.captchaAutoSubmitEnabled = true
-        #expect(try JSONDecoder().decode(WebsiteRule.self, from: JSONEncoder().encode(enabledRule)) == enabledRule)
+        #expect(rule.captchaSelector == "#challenge")
+        let encoded = try JSONEncoder().encode(rule)
+        let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        #expect(object.keys.filter { $0.hasPrefix("captcha") } == ["captchaSelector"])
+        #expect(try JSONDecoder().decode(WebsiteRule.self, from: encoded) == rule)
     }
 
     @Test
     func websiteRuleMatchesLoginAndRedirectSubdomains() {
-        let rule = WebsiteRule(host: "cf.sheapi.cc", captchaAutoFillEnabled: true)
+        let rule = WebsiteRule(host: "cf.sheapi.cc")
         #expect(rule.matches(host: "cf.sheapi.cc"))
         #expect(rule.matches(host: "www.sheapi.cc"))
         #expect(rule.matches(host: "sheapi.cc"))
         #expect(!rule.matches(host: "example.cc"))
     }
 
-    @Test
-    func captchaOCRRejectsInvalidImageWithoutNetworkFallback() async {
-        let result = await CaptchaOCRService().recognize(imageData: Data(), expectedLength: 4)
-        #expect(result == .unavailable("无法读取验证码图片"))
-    }
-
-    @Test
-    func captchaOCRRecognizesClearNumericImageLocally() async throws {
-        let imageData = try #require(Self.syntheticCaptchaImage())
-        let result = await CaptchaOCRService().recognize(imageData: imageData, expectedLength: 4)
-
-        guard case let .recognized(code, confidence) = result else {
-            Issue.record("清晰数字验证码未被本地 Vision 识别：\(result)")
-            return
-        }
-        #expect(code == "2746")
-        #expect(confidence >= 0.80)
-    }
-
-    @Test
+    @Test(arguments: ["cf.example.invalid", "www.example.invalid"])
     @MainActor
-    func iOSWebKitRecognizesAndFillsCaptchaWithoutExplicitSelectors() async throws {
-        let session = BrowserSession(profile: BrowserProfile(
-            name: "验证码端到端回归",
-            homePage: URL(string: "https://captcha.example.invalid/sign-in")!
-        ))
+    func captchaWaitsForManualInputWithoutFillingOrSubmitting(host: String) async throws {
+        let session = BrowserSession(profile: BrowserProfile(name: "手动验证码", homePage: URL(string: "https://cf.example.invalid/profile")!))
         defer { session.close() }
-
-        let rule = WebsiteRule(host: "captcha.example.invalid", captchaAutoFillEnabled: true)
-        session.configureAutomation(
-            settings: GlobalScriptSettings(
-                enabled: true,
-                source: GlobalScriptSettings.default.source,
-                updatedAt: .now,
-                siteRules: [rule]
-            ),
-            shouldRunToday: true,
-            completionKey: "cweb.captcha.integration.\(UUID().uuidString)"
-        )
-
-        let html = """
-        <html><body>
-        <div class="captcha">
-            <canvas aria-label="Captcha image" width="240" height="80"></canvas>
-            <label for="captcha-code">Captcha</label>
-            <input id="captcha-code" placeholder="Enter captcha" autocomplete="off">
-        </div>
-        <script>
-        const canvas = document.querySelector('canvas');
-        const context = canvas.getContext('2d');
-        context.fillStyle = '#fff';
-        context.fillRect(0, 0, canvas.width, canvas.height);
-        context.fillStyle = '#000';
-        context.font = 'bold 56px Helvetica';
-        context.fillText('2746', 36, 62);
-        document.querySelector('#captcha-code').addEventListener('input', () => {
-            document.querySelector('.captcha').hidden = true;
-        });
-        </script>
-        </body></html>
-        """
-        for try await _ in session.page.load(
-            html: html,
-            baseURL: URL(string: "https://captcha.example.invalid/sign-in")!
-        ) { }
-
-        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
-        var filled = false
-        while ContinuousClock.now < deadline {
-            let value = try? await session.page.callJavaScript(
-                "return document.querySelector('#captcha-code')?.value || '';"
-            ) as? String
-            if value == "2746" {
-                filled = true
-                break
-            }
-            try await Task.sleep(for: .milliseconds(50))
-        }
-
-        #expect(filled)
-        #expect(try await session.page.callJavaScript(
-            "return document.querySelector('.captcha')?.hidden === true;"
-        ) as? Bool == true)
-        #expect(try await session.page.callJavaScript(
-            "return window.__cwebCaptchaSubmitCount || 0;"
-        ) as? Int == 0)
-    }
-
-    @Test
-    @MainActor
-    func iOSWebKitRecognizesAndFillsSheApiStyleDataImageCaptcha() async throws {
-        let session = BrowserSession(profile: BrowserProfile(
-            name: "SheApi 图片验证码端到端回归",
-            homePage: URL(string: "https://cf.sheapi.cc/sign-in")!
-        ))
-        defer { session.close() }
-
-        let imageData = try #require(Self.syntheticCaptchaImage())
-        let imageURI = "data:image/png;base64,\(imageData.base64EncodedString())"
-        let rule = WebsiteRule(
-            host: "cf.sheapi.cc",
-            captchaAutoFillEnabled: true,
-            captchaImageSelector: "img[alt=\"验证码图片\"]",
-            captchaInputSelector: "input[placeholder=\"请输入验证码\"]",
-            captchaExpectedLength: 4
-        )
-        session.configureAutomation(
-            settings: GlobalScriptSettings(
-                enabled: true,
-                source: GlobalScriptSettings.default.source,
-                updatedAt: .now,
-                siteRules: [rule]
-            ),
-            shouldRunToday: true,
-            completionKey: "cweb.captcha.image.integration.\(UUID().uuidString)"
-        )
-
-        let html = """
-        <html><body>
-        <div class="captcha">
-            <img alt="验证码图片" src="\(imageURI)">
-            <input placeholder="请输入验证码" autocomplete="off">
-        </div>
-        <script>
-        window.fixtureState = { value: '', input: 0, change: 0 };
-        const input = document.querySelector('input[placeholder="请输入验证码"]');
-        input.addEventListener('input', () => {
-            window.fixtureState.value = input.value;
-            window.fixtureState.input++;
-        });
-        input.addEventListener('change', () => window.fixtureState.change++);
-        </script>
-        </body></html>
-        """
-        for try await _ in session.page.load(
-            html: html,
-            // The login page uses cf.sheapi.cc, while the authenticated
-            // profile page redirects to www.sheapi.cc.
-            baseURL: URL(string: "https://www.sheapi.cc/profile")!
-        ) { }
-
-        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
-        var value = ""
-        while ContinuousClock.now < deadline {
-            value = (try? await session.page.callJavaScript(
-                "return document.querySelector('input[placeholder=\"请输入验证码\"]')?.value || '';"
-            ) as? String) ?? ""
-            if value == "2746" { break }
-            try await Task.sleep(for: .milliseconds(100))
-        }
-
-        #expect(value == "2746")
-        #expect(try await session.page.callJavaScript("return window.fixtureState.value;") as? String == "2746")
-        #expect(try await session.page.callJavaScript("return window.fixtureState.input;") as? Int == 1)
-        #expect(try await session.page.callJavaScript("return window.fixtureState.change;") as? Int == 1)
-    }
-
-    @Test
-    @MainActor
-    func iOSWebKitRecognizesCaptchaAppearingAfterCheckInClickOnRedirectHost() async throws {
-        let session = BrowserSession(profile: BrowserProfile(
-            name: "SheApi 签到弹窗时序回归",
-            homePage: URL(string: "https://cf.sheapi.cc/sign-in")!
-        ))
-        defer { session.close() }
-
-        let imageData = try #require(Self.syntheticCaptchaImage())
-        let imageURI = "data:image/png;base64,\(imageData.base64EncodedString())"
-        let rule = WebsiteRule(
-            host: "cf.sheapi.cc",
-            captchaAutoFillEnabled: true,
-            captchaImageSelector: "img[alt=\"验证码图片\"]",
-            captchaInputSelector: "input[placeholder=\"请输入验证码\"]",
-            captchaExpectedLength: 4
-        )
-        session.configureAutomation(
-            settings: GlobalScriptSettings(
-                enabled: true,
-                source: GlobalScriptSettings.default.source,
-                updatedAt: .now,
-                siteRules: [rule]
-            ),
-            shouldRunToday: true,
-            completionKey: "cweb.captcha.dynamic.integration.\(UUID().uuidString)"
-        )
-
-        let html = """
-        <html><body>
-        <button id="check-in">立即签到</button>
-        <div id="dialog" role="dialog" hidden>
-            <img alt="验证码图片" src="\(imageURI)">
-            <input placeholder="请输入验证码" autocomplete="off">
-            <button type="button">取消</button>
-        </div>
-        <script>
-        window.fixtureState = { opened: 0, value: '', input: 0 };
-        document.querySelector('#check-in').addEventListener('click', () => {
-            document.querySelector('#dialog').hidden = false;
-            window.fixtureState.opened++;
-        });
-        document.querySelector('#dialog input').addEventListener('input', event => {
-            window.fixtureState.value = event.target.value;
-            window.fixtureState.input++;
-        });
-        </script>
-        </body></html>
-        """
-        for try await _ in session.page.load(
-            html: html,
-            baseURL: URL(string: "https://www.sheapi.cc/profile")!
-        ) { }
-
-        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
-        var value = ""
-        while ContinuousClock.now < deadline {
-            value = (try? await session.page.callJavaScript(
-                "return document.querySelector('#dialog input')?.value || '';"
-            ) as? String) ?? ""
-            if value == "2746" { break }
-            try await Task.sleep(for: .milliseconds(100))
-        }
-
-        #expect(value == "2746")
-        #expect(try await session.page.callJavaScript("return window.fixtureState.opened;") as? Int == 1)
-        #expect(try await session.page.callJavaScript("return window.fixtureState.value;") as? String == "2746")
-        #expect(try await session.page.callJavaScript("return window.fixtureState.input;") as? Int == 1)
-        #expect(try await session.page.callJavaScript("return document.querySelector('#dialog').hidden;") as? Bool == false)
-    }
-
-    @Test(arguments: [false, true])
-    @MainActor
-    func captchaFillsOnceAndWaitsForExplicitRetryOrContinue(autoSubmit: Bool) async throws {
-        let url = URL(string: "https://captcha.example.invalid/profile")!
-        let session = BrowserSession(profile: BrowserProfile(name: "单次验证码回归", homePage: url))
-        defer { session.close() }
-        let image = try #require(Self.syntheticCaptchaImage())
-        let rule = WebsiteRule(host: "captcha.example.invalid", captchaAutoFillEnabled: true,
-            captchaAutoSubmitEnabled: autoSubmit, captchaInputSelector: "#code",
-            captchaSubmitSelector: "#confirm", captchaExpectedLength: 4)
         session.configureAutomation(settings: GlobalScriptSettings(enabled: true,
-            source: GlobalScriptSettings.default.source, updatedAt: .now, siteRules: [rule]),
-            shouldRunToday: true, completionKey: UUID().uuidString)
+            source: GlobalScriptSettings.default.source, updatedAt: .now,
+            siteRules: [WebsiteRule(host: "cf.example.invalid")]), shouldRunToday: true,
+            completionKey: UUID().uuidString)
         let html = """
-        <html><body><div class="captcha">
-            <img alt="验证码图片" src="data:image/png;base64,\(image.base64EncodedString())">
-            <input id="code" placeholder="请输入验证码">
-            <button id="confirm" type="button">确认</button>
-        </div><script>
-        window.fixtureState = { input: 0, submits: 0 };
-        document.querySelector('#code').addEventListener('input', () => window.fixtureState.input++);
-        document.querySelector('#confirm').addEventListener('click', () => window.fixtureState.submits++);
-        </script></body></html>
+        <html><body><div class="captcha"><input placeholder="请输入验证码"><button>确认</button></div>
+        <script>window.submits = 0; document.querySelector('button').onclick = () => window.submits++;</script>
+        </body></html>
         """
-        for try await _ in session.page.load(html: html, baseURL: url) { }
-        await waitForCaptcha(session, state: autoSubmit ? .submitted : .filled)
-        let originalChallenge = try #require(session.captchaChallenge)
-        #expect(session.automationState == .captcha)
-        #expect(try await session.page.callJavaScript("return document.querySelector('#code').value;") as? String == "2746")
-        #expect(try await session.page.callJavaScript("return window.CwebCheckIn.isPaused();") as? Bool == true)
-
-        for _ in 0..<3 { await session.recheckAutomation() }
-        session.receiveAutomationMessage(type: "captcha", message: "重复挑战", captcha: originalChallenge)
-        session.receiveAutomationMessage(type: "error", message: "旧提交计时器")
-        _ = try await session.page.callJavaScript("""
-        document.querySelector('#code').setAttribute('data-change', 'mutation');
-        window.dispatchEvent(new Event('cwebAutomationRecheck'));
-        """)
-        try await Task.sleep(for: .milliseconds(400))
-        let duplicate = try await session.page.callJavaScript(
-            AutomationScriptBuilder.captchaFillCall, arguments: ["code": "9999"]
-        ) as? Bool
-        #expect(duplicate == false)
-        #expect(session.automationState == .captcha)
-        #expect(try await session.page.callJavaScript("return window.fixtureState.input;") as? Int == 1)
-        #expect(try await session.page.callJavaScript("return window.fixtureState.submits;") as? Int == (autoSubmit ? 1 : 0))
-
-        // Even an explicit continue must not recognize the same visible image
-        // again. It pauses for the user to complete verification on the page.
-        await session.resumeAutomation()
-        let pauseDeadline = ContinuousClock.now.advanced(by: .seconds(3))
-        while session.automationState != .captcha, ContinuousClock.now < pauseDeadline {
+        for try await _ in session.page.load(html: html, baseURL: URL(string: "https://\(host)/profile")!) { }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while session.automationState != .captcha && ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(25))
         }
         #expect(session.automationState == .captcha)
-        #expect(try await session.page.callJavaScript("return window.fixtureState.input;") as? Int == 1)
-
-        let refreshedImage = try #require(Self.syntheticCaptchaImage(code: "5832"))
+        await session.recheckAutomation()
+        session.receiveAutomationMessage(type: "error", message: "late timeout")
+        session.receiveAutomationMessage(type: "resume", message: "late resume")
+        #expect(session.automationState == .captcha)
+        let state = try #require(try await session.page.callJavaScript("""
+        return { value: document.querySelector('input').value, submits: window.submits,
+            paused: window.CwebCheckIn.isPaused(), fillType: typeof window.CwebCheckIn.fillCaptcha,
+            captureType: typeof window.CwebCheckIn.captureCaptcha };
+        """) as? [String: Any])
+        #expect(state["value"] as? String == "")
+        #expect(state["submits"] as? Int == 0)
+        #expect(state["paused"] as? Bool == true)
+        #expect(state["fillType"] as? String == "undefined")
+        #expect(state["captureType"] as? String == "undefined")
         _ = try await session.page.callJavaScript("""
-        document.querySelector('img').src = imageURI;
-        document.querySelector('#code').value = '';
-        """, arguments: ["imageURI": "data:image/png;base64,\(refreshedImage.base64EncodedString())"])
-        session.retryCaptchaRecognition()
-        await waitForCaptcha(session, state: autoSubmit ? .submitted : .filled)
-        #expect(try await session.page.callJavaScript("return document.querySelector('#code').value;") as? String == "5832")
-        #expect(try await session.page.callJavaScript("return window.fixtureState.input;") as? Int == 2)
-        #expect(try await session.page.callJavaScript("return window.fixtureState.submits;") as? Int == (autoSubmit ? 2 : 0))
-
-        // Page changes alone do not resume detection. Only the button's native
-        // resume call may accept the completion and advance the queue.
-        _ = try await session.page.callJavaScript("""
-        document.querySelector('.captcha').hidden = true;
-        const result = document.createElement('p'); result.textContent = '今天已完成签到';
-        document.body.append(result);
+        document.querySelector('input').value = '2746';
+        document.querySelector('.captcha').remove();
+        const status = document.createElement('p'); status.textContent = '今天已完成签到';
+        document.body.append(status);
         """)
         await session.recheckAutomation()
         #expect(session.automationState == .captcha)
         await session.resumeAutomation()
-        let successDeadline = ContinuousClock.now.advanced(by: .seconds(3))
-        while session.automationState != .success, ContinuousClock.now < successDeadline {
+        let resumedDeadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while session.automationState != .success && ContinuousClock.now < resumedDeadline {
             try await Task.sleep(for: .milliseconds(25))
         }
         #expect(session.automationState == .success)
-    }
-
-    @Test(arguments: ["", "#missing", "#disabled", "#hidden"])
-    @MainActor
-    func autoSubmitRequiresAnAvailableExplicitControl(selector: String) async throws {
-        var configuration = WebPage.Configuration()
-        configuration.websiteDataStore = .nonPersistent()
-        let page = WebPage(configuration: configuration)
-        let html = """
-        <html><body><input id="code"><button id="disabled" disabled>确认</button>
-        <button id="hidden" hidden>确认</button>
-        <script>window.clicks = 0; document.addEventListener('click', () => window.clicks++);</script>
-        </body></html>
-        """
-        for try await _ in page.load(html: html, baseURL: URL(string: "https://captcha.example.invalid")!) { }
-        let rule = WebsiteRule(host: "captcha.example.invalid", captchaAutoFillEnabled: true,
-            captchaAutoSubmitEnabled: true, captchaInputSelector: "#code", captchaSubmitSelector: selector)
-        _ = try await page.callJavaScript(AutomationScriptBuilder.build(code: "", matches: ["<all_urls>"], siteRules: [rule]))
-        #expect(try await page.callJavaScript(AutomationScriptBuilder.captchaFillCall, arguments: ["code": "2746"]) as? Bool == true)
-        #expect(try await page.callJavaScript("return window.clicks;") as? Int == 0)
-        #expect(try await page.callJavaScript("return window.CwebCheckIn.hasSubmittedCaptcha();") as? Bool == false)
+        #expect(try await session.page.callJavaScript("return window.submits;") as? Int == 0)
     }
 
     @Test
@@ -540,79 +151,9 @@ struct AutomationScriptTests {
     }
 
     @Test
-    @MainActor
-    func staleDocumentCannotReceiveOCRFill() async throws {
-        var configuration = WebPage.Configuration()
-        configuration.websiteDataStore = .nonPersistent()
-        let page = WebPage(configuration: configuration)
-        for try await _ in page.load(html: "<html><body><input id='code'></body></html>", baseURL: URL(string: "https://captcha.example.invalid")!) { }
-        _ = try await page.callJavaScript("window.__cwebDocumentID = 'new-document';")
-        let rule = WebsiteRule(host: "captcha.example.invalid", captchaInputSelector: "#code")
-        _ = try await page.callJavaScript(AutomationScriptBuilder.build(code: "", matches: ["<all_urls>"], siteRules: [rule]))
-        #expect(try await page.callJavaScript(AutomationScriptBuilder.captchaFillCall,
-            arguments: ["code": "2746", "documentID": "old-document"]) as? Bool == false)
-        #expect(try await page.callJavaScript("return document.querySelector('#code').value;") as? String == "")
-    }
-
-    @MainActor
-    private func waitForCaptcha(_ session: BrowserSession, state: CaptchaRecognitionState) async {
-        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
-        while session.captchaRecognitionState != state, ContinuousClock.now < deadline {
-            try? await Task.sleep(for: .milliseconds(25))
-        }
-        #expect(session.captchaRecognitionState == state)
-    }
-
-    private static func syntheticCaptchaImage(code: String = "2746") -> Data? {
-        let width = 240
-        let height = 80
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        var pixels = [UInt8](repeating: 255, count: width * height * 4)
-        guard let context = CGContext(
-            data: &pixels,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: width * 4,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
-
-        context.setFillColor(CGColor(gray: 1, alpha: 1))
-        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
-
-        let font = CTFontCreateWithName("Helvetica-Bold" as CFString, 56, nil)
-        let attributes: [NSAttributedString.Key: Any] = [
-            NSAttributedString.Key(kCTFontAttributeName as String): font,
-            NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(gray: 0, alpha: 1)
-        ]
-        let line = CTLineCreateWithAttributedString(
-            NSAttributedString(string: code, attributes: attributes)
-        )
-        let bounds = CTLineGetBoundsWithOptions(line, [])
-        context.textPosition = CGPoint(
-            x: (CGFloat(width) - bounds.width) / 2,
-            y: 10
-        )
-        CTLineDraw(line, context)
-
-        guard let image = context.makeImage() else { return nil }
-        let output = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(
-            output as CFMutableData,
-            UTType.png.identifier as CFString,
-            1,
-            nil
-        ) else { return nil }
-        CGImageDestinationAddImage(destination, image, nil)
-        guard CGImageDestinationFinalize(destination) else { return nil }
-        return output as Data
-    }
-
-    @Test
     func originalBundledTemplateUpgradesWithoutChangingEnabledState() throws {
         for enabled in [false, true] {
-            for bundledSource in [Self.originalBundledSource, Self.previousBundledSource] {
+            for bundledSource in [Self.originalBundledSource, Self.previousBundledSource, Self.retiredOCRBundledSource] {
                 let saved = GlobalScriptSettings(
                     enabled: enabled,
                     source: bundledSource,
@@ -640,6 +181,387 @@ struct AutomationScriptTests {
             #expect(saved.upgradingBundledTemplate() == saved)
         }
     }
+
+    private static let retiredOCRBundledSource = """
+        // ==UserScript==
+        // @name Cweb 全局签到
+        // @match *://*/*
+        // @run-at document-end
+        // ==/UserScript==
+
+        (() => {
+            const api = window.CwebCheckIn;
+            if (!api) return;
+            const rule = window.CwebSiteRule || {};
+            const select = (selector) => {
+                try {
+                    const root = rule.checkInContainerSelector
+                        ? document.querySelectorAll(rule.checkInContainerSelector)[0] : document;
+                    return root ? [...root.querySelectorAll(selector)] : [];
+                } catch (_) { return []; }
+            };
+
+            const signWords = /^(?:立即签到|每日签到|签到|去签到|check[\\s-]?in|daily\\s*sign(?:[\\s-]?in)?)$/i;
+            // A generic "success" or "已完成" elsewhere is not a check-in result.
+            const completionWords = /已签到|签到成功|已完成签到|(?:今日|今天|本日)签到[：:\\s]*已完成|already\\s+(?:checked[\\s-]?in|signed[\\s-]?in)|checked[\\s-]?in\\s+today|check[\\s-]?in\\s+(?:successful|completed)|successfully\\s+checked[\\s-]?in/i;
+            const captchaSelectors = [
+                '[class*="captcha" i]',
+                '[id*="captcha" i]',
+                '[aria-label*="captcha" i]',
+                '[aria-label*="验证码" i]',
+                '[alt*="captcha" i]',
+                '[alt*="验证码" i]',
+                '[placeholder*="captcha" i]',
+                '[placeholder*="验证码" i]',
+                'iframe[src*="captcha" i]',
+                'iframe[src*="challenges.cloudflare.com" i]',
+                '.g-recaptcha', '.h-captcha', '.cf-turnstile'
+            ];
+
+            let debounceTimer;
+            let noButtonTimer;
+            let successTimer;
+            let submissionTimer;
+            let hasClicked = false;
+            let hasCompleted = false;
+            let submissionFailed = false;
+            var captchaCaptureInFlight = false;
+            let captchaCaptureGeneration = 0;
+
+            const textOf = (element) =>
+                (typeof element?.innerText === "string"
+                    ? element.innerText : element?.textContent || "").trim();
+
+            const isVisible = (element) => {
+                if (!element.getClientRects().length) return false;
+                const visibility = window.getComputedStyle(element).visibility;
+                return visibility !== "hidden" && visibility !== "collapse";
+            };
+
+            const queryVisible = (root, selector) => {
+                try {
+                    return [...(root?.querySelectorAll?.(selector) || [])].find(isVisible) || null;
+                } catch (_) {
+                    return null;
+                }
+            };
+
+            const captchaRoot = () => {
+                if (rule.captchaSelector) {
+                    try {
+                        return [...document.querySelectorAll(rule.captchaSelector)].find(isVisible) || null;
+                    } catch (_) {
+                        return null;
+                    }
+                }
+                return captchaSelectors.map((selector) => queryVisible(document, selector)).find(Boolean) || null;
+            };
+
+            const captchaInput = (root) => {
+                const selector = rule.captchaInputSelector ||
+                    'input:not([type="hidden"]):not([type="password"]):not([type="checkbox"]):not([type="radio"])';
+                const candidates = [];
+                if (root?.matches?.(selector)) candidates.push(root);
+                candidates.push(...(root?.querySelectorAll?.(selector) || []));
+                if (root !== document) candidates.push(...(document.querySelectorAll(selector) || []));
+                return candidates.find((element) => {
+                    if (!isVisible(element)) return false;
+                    if (rule.captchaInputSelector) return true;
+                    const metadata = [element.name, element.id, element.placeholder,
+                        element.autocomplete, element.getAttribute('aria-label')].filter(Boolean).join(' ');
+                    return /captcha|verify|verification|验证码|校验|code/i.test(metadata)
+                        || (element.maxLength >= 4 && element.maxLength <= 8);
+                }) || null;
+            };
+
+            const captchaImage = (root) => {
+                const selector = rule.captchaImageSelector || 'img, canvas';
+                const candidates = [];
+                if (root?.matches?.(selector)) candidates.push(root);
+                candidates.push(...(root?.querySelectorAll?.(selector) || []));
+                if (root !== document) candidates.push(...(document.querySelectorAll(selector) || []));
+                return candidates.find((element) => {
+                    if (!isVisible(element)) return false;
+                    if (rule.captchaImageSelector) return true;
+                    const metadata = [element.id, element.className, element.alt,
+                        element.getAttribute('aria-label')].filter((value) => typeof value === 'string').join(' ');
+                    return element.tagName === 'CANVAS'
+                        || /captcha|verify|验证码|校验/i.test(metadata)
+                        || (element.tagName === 'IMG' && element.naturalWidth > 0);
+                }) || null;
+            };
+
+            const extractCaptchaImage = async (element) => {
+                if (!element) return null;
+                if (element.tagName === 'CANVAS') {
+                    try { return element.toDataURL('image/png'); } catch (_) { return null; }
+                }
+                if (element.tagName !== 'IMG') return null;
+                if (!element.complete || !element.naturalWidth) {
+                    const loaded = await new Promise((resolve) => {
+                        let settled = false;
+                        const finish = (value) => {
+                            if (settled) return;
+                            settled = true;
+                            clearTimeout(timer);
+                            element.removeEventListener('load', onLoad);
+                            element.removeEventListener('error', onError);
+                            resolve(value);
+                        };
+                        const onLoad = () => finish(Boolean(element.naturalWidth));
+                        const onError = () => finish(false);
+                        const timer = setTimeout(() => finish(false), 1500);
+                        element.addEventListener('load', onLoad, { once: true });
+                        element.addEventListener('error', onError, { once: true });
+                        if (element.complete && element.naturalWidth) finish(true);
+                    });
+                    if (!loaded || !element.naturalWidth) return null;
+                }
+                if (element.currentSrc?.startsWith('data:')) return element.currentSrc;
+                try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = element.naturalWidth;
+                    canvas.height = element.naturalHeight;
+                    const context = canvas.getContext('2d');
+                    if (!context) return null;
+                    context.drawImage(element, 0, 0);
+                    return canvas.toDataURL('image/png');
+                } catch (_) {
+                    return null;
+                }
+            };
+
+            const prepareCaptcha = async () => {
+                if (!rule.captchaAutoFillEnabled) return null;
+                const root = captchaRoot();
+                const input = captchaInput(root);
+                const image = captchaImage(root);
+                if (!input || !image) return null;
+                input.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                input.focus({ preventScroll: true });
+                const imageData = await extractCaptchaImage(image);
+                if (!imageData) return null;
+                __cwebCaptchaInput = input;
+                __cwebCaptchaSubmit = rule.captchaSubmitSelector
+                    ? (queryVisible(root || document, rule.captchaSubmitSelector)
+                        || queryVisible(document, rule.captchaSubmitSelector))
+                    : null;
+                return {
+                    mode: 'imageDigits',
+                    imageData,
+                    expectedLength: Number.isInteger(rule.captchaExpectedLength)
+                        ? rule.captchaExpectedLength : null
+                };
+            };
+
+            const findSignButton = () => select(rule.actionSelector ||
+                'button, a, [role="button"]'
+            ).find((element) => {
+                const text = textOf(element);
+                return isVisible(element) && text && (rule.actionSelector || signWords.test(text))
+                    && (rule.actionSelector || !/记录|规则|说明|历史|history|record|rules/i.test(text))
+                    && !/已签到|已完成|不可用|disabled/i.test(text)
+                    && !element.disabled
+                    && element.getAttribute("aria-disabled") !== "true"
+                    // SuperAPI also uses a button for its section heading.
+                    // Only consider action controls when submitting a check-in.
+                    && !element.querySelector("h1, h2, h3, h4, h5, h6");
+            });
+
+            const historical = (text) => {
+                if (/昨天|昨日|前天|历史|上次|上月|累计|累計|统计|統計|天数|天數|本月|本周|连续|連續|记录|記錄|total|streak|history|statistics|yesterday|previous|last\\s+(?:day|week|month)/i.test(text)) return true;
+                const date = text.match(/(20\\d{2})[-/.年](\\d{1,2})[-/.月](\\d{1,2})/);
+                if (!date) return false;
+                const today = new Date();
+                return Number(date[1]) !== today.getFullYear()
+                    || Number(date[2]) !== today.getMonth() + 1 || Number(date[3]) !== today.getDate();
+            };
+
+            const hasHistoricalContext = (element) => {
+                let current = element;
+                for (let depth = 0; current && depth < 4; depth++, current = current.parentElement) {
+                    if (current === document.body || current === document.documentElement) break;
+                    const text = textOf(current);
+                    // History rows carry their own date/status. A surrounding
+                    // dashboard may also contain unrelated statistics or links.
+                    const tag = String(current.tagName || current.tag || '').toLowerCase();
+                    const context = current.getAttribute?.('class') || '';
+                    const historicalRow = /^(li|tr)$/.test(tag) || /history|record|statistic|streak|checkin-log/i.test(context);
+                    if ((current === element || historicalRow) && historical(text)) return true;
+                    if (current !== element && /(?:累计|累計|连续|連續|本月|本周|total|streak)[^\\n。]{0,12}(?:已签到|签到成功)|(?:已签到|签到成功)[：:\\s]*\\d+\\s*(?:天|次|days)/i.test(text)) return true;
+                    if (current.getAttribute && historical(current.getAttribute('data-date') || '')) return true;
+                }
+                return false;
+            };
+
+            const pageShowsCompletion = () => select(rule.completionSelector ||
+                '[role="status"], [aria-live], .toast, .alert, button, a, [role="button"], p, span, div, li, td, strong'
+            ).some((element) => {
+                const text = textOf(element);
+                return text.length <= 160 && isVisible(element) && (rule.completionSelector || completionWords.test(text))
+                    && !hasHistoricalContext(element) && !/未签到|未完成|签到失败/i.test(text);
+            });
+
+            const pageShowsFailure = () => select(rule.failureSelector ||
+                '[role="status"], [aria-live], .toast, .alert, p, span, div'
+            ).some((element) => isVisible(element) && textOf(element).length <= 160
+                && !hasHistoricalContext(element)
+                && (rule.failureSelector || /签到失败|签到出错|check[\\s-]?in\\s+(?:failed|error)/i.test(textOf(element))));
+
+            const finish = () => {
+                hasCompleted = true;
+                stopDetection();
+                api.success("页面显示已完成签到");
+            };
+
+            const stopDetection = () => {
+                captchaCaptureGeneration++;
+                captchaCaptureInFlight = false;
+                clearTimeout(noButtonTimer);
+                clearTimeout(debounceTimer);
+                clearTimeout(successTimer);
+                clearTimeout(submissionTimer);
+                observer.disconnect();
+            };
+
+            // This is also the explicit retry entry point. Capture the current
+            // DOM image; never reuse the previous challenge's image bytes.
+            api.captureCaptcha = async () => {
+                if (hasCompleted || captchaCaptureInFlight) return;
+                api.pause();
+                if (api.hasFilledCaptcha?.()) {
+                    api.captchaDetected("验证码已填入，请完成验证后继续检测");
+                    return;
+                }
+                const generation = ++captchaCaptureGeneration;
+                captchaCaptureInFlight = true;
+                try {
+                    const challenge = await prepareCaptcha();
+                    if (hasCompleted || generation !== captchaCaptureGeneration || !api.isPaused()) return;
+                    api.captchaDetected(challenge
+                        ? "检测到数字图片验证码，正在识别。"
+                        : "无法读取验证码图片，请手动输入。", challenge);
+                } catch (_) {
+                    if (generation === captchaCaptureGeneration && api.isPaused()) {
+                        api.captchaDetected("无法读取验证码图片，请手动输入。");
+                    }
+                } finally {
+                    if (generation === captchaCaptureGeneration) captchaCaptureInFlight = false;
+                }
+            };
+
+            const detect = async () => {
+                if (hasCompleted || api.isPaused()) return;
+                try {
+                    for (const key of ['checkInContainerSelector', 'actionSelector', 'completionSelector', 'failureSelector',
+                        'captchaSelector', 'captchaImageSelector', 'captchaInputSelector', 'captchaSubmitSelector']) {
+                        if (rule[key]) document.querySelectorAll(rule[key]);
+                    }
+                } catch (_) {
+                    clearTimeout(noButtonTimer);
+                    api.error("网站选择器无效，请检查网站规则");
+                    return;
+                }
+
+                if ((rule.captchaSelector ? [rule.captchaSelector] : captchaSelectors).some((selector) => {
+                    try { return [...document.querySelectorAll(selector)].some(isVisible); }
+                    catch (_) { api.error("验证码选择器无效，请检查网站规则"); return false; }
+                })) {
+                    if (captchaCaptureInFlight) return;
+                    if (rule.captchaAutoFillEnabled) {
+                        await api.captureCaptcha();
+                        return;
+                    }
+                    api.captchaDetected("检测到验证码，请手动完成");
+                    return;
+                }
+
+                if (pageShowsCompletion()) {
+                    finish();
+                    return;
+                }
+
+                if (hasClicked && pageShowsFailure()) {
+                    clearTimeout(submissionTimer);
+                    submissionFailed = true;
+                    api.error("签到提交失败，请检查页面后手动重试或跳过");
+                    return;
+                }
+
+                const button = findSignButton();
+                if (!button) return;
+
+                clearTimeout(noButtonTimer);
+                if (hasClicked) return;
+                hasClicked = true;
+                submissionTimer = setTimeout(() => {
+                    if (!hasCompleted && !api.isPaused()) {
+                        submissionFailed = true;
+                        api.error("提交后未收到签到结果，请检查页面后手动重试或跳过");
+                    }
+                }, Math.max(5, Math.min(120, rule.submissionTimeoutSeconds || 30)) * 1000);
+                button.click();
+
+                // Reuse the same checks so a newly displayed CAPTCHA always
+                // pauses automation before any success is reported.
+                successTimer = setTimeout(() => { void detect(); }, 1200);
+            };
+
+            const schedule = () => {
+                if (hasCompleted || api.isPaused()) return;
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(() => { void detect(); }, 250);
+            };
+
+            const root = document.documentElement || document;
+            const observer = new MutationObserver(schedule);
+            const observe = () => observer.observe(root, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                characterData: true
+            });
+
+            window.addEventListener("cwebAutomationPause", stopDetection);
+
+            window.addEventListener("cwebAutomationResume", () => {
+                if (hasCompleted) return;
+                captchaCaptureGeneration++;
+                captchaCaptureInFlight = false;
+                observe();
+                if (submissionFailed) { hasClicked = false; submissionFailed = false; }
+                clearTimeout(submissionTimer);
+                if (hasClicked) {
+                    submissionTimer = setTimeout(() => {
+                        if (!hasCompleted && !api.isPaused()) {
+                            submissionFailed = true;
+                            api.error("提交后未收到签到结果，请检查页面后手动重试或跳过");
+                        }
+                    }, Math.max(5, Math.min(120, rule.submissionTimeoutSeconds || 30)) * 1000);
+                }
+                armNoButtonTimer();
+                schedule();
+            });
+
+            window.addEventListener("cwebAutomationRecheck", schedule);
+
+            const armNoButtonTimer = () => {
+                clearTimeout(noButtonTimer);
+                noButtonTimer = setTimeout(() => {
+                    if (!hasCompleted && !hasClicked && !api.isPaused()) {
+                        api.noButton("未找到签到入口");
+                    }
+                }, 6000);
+            };
+
+            if (!api.isPaused()) {
+                observe();
+                armNoButtonTimer();
+            }
+
+            void detect();
+        })();
+        """
 
     // Exact Swift source of the template shipped before the completion fix.
     // Keep this fixture unchanged: the migration must recognize saved copies.
