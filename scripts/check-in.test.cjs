@@ -452,7 +452,7 @@ test("manual pause persists and blocks success; resume restores completion once"
     assert.deepEqual(p.types(), []);
     api.resume();
     assert.equal(p.storage.has("daily.paused"), false);
-    assert.deepEqual(p.dispatched, ["cwebAutomationResume"]);
+    assert.deepEqual(p.dispatched, ["cwebAutomationPause", "cwebAutomationResume"]);
     api.success("done");
     api.success("duplicate");
     assert.deepEqual(p.types(), ["resume", "success"]);

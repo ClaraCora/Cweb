@@ -4,6 +4,7 @@ import CoreText
 import ImageIO
 import Testing
 import UniformTypeIdentifiers
+import WebKit
 @testable import ProfileBrowser
 
 struct AutomationScriptTests {
@@ -47,8 +48,90 @@ struct AutomationScriptTests {
         )
 
         #expect(source.contains("fillCaptcha"))
+        #expect(source.contains("__cwebResolveCaptchaInput"))
+        #expect(source.contains("candidates.find(__cwebIsVisible)"))
+        #expect(source.contains("HTMLInputElement.prototype"))
+        #expect(source.contains("input.value !== value"))
         #expect(source.contains("details = null"))
         #expect(source.contains("payload.captcha"))
+    }
+
+    @Test
+    @MainActor
+    func captchaFillCallUpdatesTheVisibleFormAndReturnsItsResult() async throws {
+        var configuration = WebPage.Configuration()
+        configuration.websiteDataStore = .nonPersistent()
+        let page = WebPage(configuration: configuration)
+        let fixture = """
+        <html><body>
+        <input hidden id="old" placeholder="请输入验证码">
+        <form><input id="current" placeholder="请输入验证码"><button>确认</button></form>
+        <script>
+        window.fixtureState = { value: '', input: 0, change: 0, submits: 0 };
+        document.addEventListener('input', event => {
+            window.fixtureState.value = event.target.value;
+            window.fixtureState.input++;
+        });
+        document.addEventListener('change', () => window.fixtureState.change++);
+        document.querySelector('form').addEventListener('submit', event => {
+            event.preventDefault(); window.fixtureState.submits++;
+        });
+        </script></body></html>
+        """
+        let fixtureURL = try #require(URL(string: "https://captcha.example.invalid"))
+        for try await _ in page.load(html: fixture, baseURL: fixtureURL) { }
+        let rule = WebsiteRule(host: "captcha.example.invalid", captchaInputSelector: "input[placeholder=\"请输入验证码\"]")
+        _ = try await page.callJavaScript(AutomationScriptBuilder.build(
+            code: "", matches: ["<all_urls>"], siteRules: [rule]
+        ))
+
+        let result = try await page.callJavaScript(
+            AutomationScriptBuilder.captchaFillCall, arguments: ["code": "2746"], contentWorld: .page
+        ) as? Bool
+        #expect(result == true)
+        let state = try #require(try await page.callJavaScript("""
+        return { ...window.fixtureState,
+            current: document.querySelector('#current').value,
+            old: document.querySelector('#old').value };
+        """) as? [String: Any])
+        #expect(state["current"] as? String == "2746")
+        #expect(state["value"] as? String == "2746")
+        #expect(state["old"] as? String == "")
+        #expect(state["input"] as? Int == 1)
+        #expect(state["change"] as? Int == 1)
+        #expect(state["submits"] as? Int == 0)
+
+        _ = try await page.callJavaScript("""
+        const previous = document.querySelector('#current');
+        previous.id = 'replaced'; previous.hidden = true;
+        const input = document.createElement('input');
+        input.id = 'current'; input.placeholder = '请输入验证码';
+        previous.after(input);
+        """)
+        let replacementResult = try await page.callJavaScript(
+            AutomationScriptBuilder.captchaFillCall, arguments: ["code": "5832"], contentWorld: .page
+        ) as? Bool
+        #expect(replacementResult == false)
+        #expect(try await page.callJavaScript("return document.querySelector('#current').value;") as? String == "")
+        _ = try await page.callJavaScript("""
+        window.CwebCheckIn.captureCaptcha = () => {};
+        window.CwebCheckIn.retryCaptcha();
+        """)
+        let retriedResult = try await page.callJavaScript(
+            AutomationScriptBuilder.captchaFillCall, arguments: ["code": "5832"], contentWorld: .page
+        ) as? Bool
+        #expect(retriedResult == true)
+        #expect(try await page.callJavaScript("return document.querySelector('#current').value;") as? String == "5832")
+        #expect(try await page.callJavaScript("return document.querySelector('#replaced').value;") as? String == "2746")
+
+        _ = try await page.callJavaScript("document.querySelector('#current').hidden = true;")
+        let hiddenResult = try await page.callJavaScript(
+            AutomationScriptBuilder.captchaFillCall, arguments: ["code": "9317"], contentWorld: .page
+        ) as? Bool
+        #expect(hiddenResult == false)
+        #expect(try await page.callJavaScript("return document.querySelector('#current').value;") as? String == "5832")
+        #expect(try await page.callJavaScript("return window.fixtureState.submits;") as? Int == 0)
+        page.stopLoading()
     }
 
     @Test
@@ -68,8 +151,25 @@ struct AutomationScriptTests {
         #expect(rule.host == "example.com")
         #expect(rule.balanceSelector == "#balance")
         #expect(!rule.captchaAutoFillEnabled)
+        #expect(!rule.captchaAutoSubmitEnabled)
         #expect(rule.captchaImageSelector == nil)
         #expect(rule.captchaInputSelector == nil)
+        let legacySubmitRule = try JSONDecoder().decode(WebsiteRule.self, from: Data(
+            ##"{"host":"example.com","captchaAutoFillEnabled":true,"captchaSubmitSelector":"#submit"}"##.utf8
+        ))
+        #expect(!legacySubmitRule.captchaAutoSubmitEnabled)
+        var enabledRule = legacySubmitRule
+        enabledRule.captchaAutoSubmitEnabled = true
+        #expect(try JSONDecoder().decode(WebsiteRule.self, from: JSONEncoder().encode(enabledRule)) == enabledRule)
+    }
+
+    @Test
+    func websiteRuleMatchesLoginAndRedirectSubdomains() {
+        let rule = WebsiteRule(host: "cf.sheapi.cc", captchaAutoFillEnabled: true)
+        #expect(rule.matches(host: "cf.sheapi.cc"))
+        #expect(rule.matches(host: "www.sheapi.cc"))
+        #expect(rule.matches(host: "sheapi.cc"))
+        #expect(!rule.matches(host: "example.cc"))
     }
 
     @Test
@@ -91,7 +191,379 @@ struct AutomationScriptTests {
         #expect(confidence >= 0.80)
     }
 
-    private static func syntheticCaptchaImage() -> Data? {
+    @Test
+    @MainActor
+    func iOSWebKitRecognizesAndFillsCaptchaWithoutExplicitSelectors() async throws {
+        let session = BrowserSession(profile: BrowserProfile(
+            name: "验证码端到端回归",
+            homePage: URL(string: "https://captcha.example.invalid/sign-in")!
+        ))
+        defer { session.close() }
+
+        let rule = WebsiteRule(host: "captcha.example.invalid", captchaAutoFillEnabled: true)
+        session.configureAutomation(
+            settings: GlobalScriptSettings(
+                enabled: true,
+                source: GlobalScriptSettings.default.source,
+                updatedAt: .now,
+                siteRules: [rule]
+            ),
+            shouldRunToday: true,
+            completionKey: "cweb.captcha.integration.\(UUID().uuidString)"
+        )
+
+        let html = """
+        <html><body>
+        <div class="captcha">
+            <canvas aria-label="Captcha image" width="240" height="80"></canvas>
+            <label for="captcha-code">Captcha</label>
+            <input id="captcha-code" placeholder="Enter captcha" autocomplete="off">
+        </div>
+        <script>
+        const canvas = document.querySelector('canvas');
+        const context = canvas.getContext('2d');
+        context.fillStyle = '#fff';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.fillStyle = '#000';
+        context.font = 'bold 56px Helvetica';
+        context.fillText('2746', 36, 62);
+        document.querySelector('#captcha-code').addEventListener('input', () => {
+            document.querySelector('.captcha').hidden = true;
+        });
+        </script>
+        </body></html>
+        """
+        for try await _ in session.page.load(
+            html: html,
+            baseURL: URL(string: "https://captcha.example.invalid/sign-in")!
+        ) { }
+
+        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+        var filled = false
+        while ContinuousClock.now < deadline {
+            let value = try? await session.page.callJavaScript(
+                "return document.querySelector('#captcha-code')?.value || '';"
+            ) as? String
+            if value == "2746" {
+                filled = true
+                break
+            }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+
+        #expect(filled)
+        #expect(try await session.page.callJavaScript(
+            "return document.querySelector('.captcha')?.hidden === true;"
+        ) as? Bool == true)
+        #expect(try await session.page.callJavaScript(
+            "return window.__cwebCaptchaSubmitCount || 0;"
+        ) as? Int == 0)
+    }
+
+    @Test
+    @MainActor
+    func iOSWebKitRecognizesAndFillsSheApiStyleDataImageCaptcha() async throws {
+        let session = BrowserSession(profile: BrowserProfile(
+            name: "SheApi 图片验证码端到端回归",
+            homePage: URL(string: "https://cf.sheapi.cc/sign-in")!
+        ))
+        defer { session.close() }
+
+        let imageData = try #require(Self.syntheticCaptchaImage())
+        let imageURI = "data:image/png;base64,\(imageData.base64EncodedString())"
+        let rule = WebsiteRule(
+            host: "cf.sheapi.cc",
+            captchaAutoFillEnabled: true,
+            captchaImageSelector: "img[alt=\"验证码图片\"]",
+            captchaInputSelector: "input[placeholder=\"请输入验证码\"]",
+            captchaExpectedLength: 4
+        )
+        session.configureAutomation(
+            settings: GlobalScriptSettings(
+                enabled: true,
+                source: GlobalScriptSettings.default.source,
+                updatedAt: .now,
+                siteRules: [rule]
+            ),
+            shouldRunToday: true,
+            completionKey: "cweb.captcha.image.integration.\(UUID().uuidString)"
+        )
+
+        let html = """
+        <html><body>
+        <div class="captcha">
+            <img alt="验证码图片" src="\(imageURI)">
+            <input placeholder="请输入验证码" autocomplete="off">
+        </div>
+        <script>
+        window.fixtureState = { value: '', input: 0, change: 0 };
+        const input = document.querySelector('input[placeholder="请输入验证码"]');
+        input.addEventListener('input', () => {
+            window.fixtureState.value = input.value;
+            window.fixtureState.input++;
+        });
+        input.addEventListener('change', () => window.fixtureState.change++);
+        </script>
+        </body></html>
+        """
+        for try await _ in session.page.load(
+            html: html,
+            // The login page uses cf.sheapi.cc, while the authenticated
+            // profile page redirects to www.sheapi.cc.
+            baseURL: URL(string: "https://www.sheapi.cc/profile")!
+        ) { }
+
+        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+        var value = ""
+        while ContinuousClock.now < deadline {
+            value = (try? await session.page.callJavaScript(
+                "return document.querySelector('input[placeholder=\"请输入验证码\"]')?.value || '';"
+            ) as? String) ?? ""
+            if value == "2746" { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+
+        #expect(value == "2746")
+        #expect(try await session.page.callJavaScript("return window.fixtureState.value;") as? String == "2746")
+        #expect(try await session.page.callJavaScript("return window.fixtureState.input;") as? Int == 1)
+        #expect(try await session.page.callJavaScript("return window.fixtureState.change;") as? Int == 1)
+    }
+
+    @Test
+    @MainActor
+    func iOSWebKitRecognizesCaptchaAppearingAfterCheckInClickOnRedirectHost() async throws {
+        let session = BrowserSession(profile: BrowserProfile(
+            name: "SheApi 签到弹窗时序回归",
+            homePage: URL(string: "https://cf.sheapi.cc/sign-in")!
+        ))
+        defer { session.close() }
+
+        let imageData = try #require(Self.syntheticCaptchaImage())
+        let imageURI = "data:image/png;base64,\(imageData.base64EncodedString())"
+        let rule = WebsiteRule(
+            host: "cf.sheapi.cc",
+            captchaAutoFillEnabled: true,
+            captchaImageSelector: "img[alt=\"验证码图片\"]",
+            captchaInputSelector: "input[placeholder=\"请输入验证码\"]",
+            captchaExpectedLength: 4
+        )
+        session.configureAutomation(
+            settings: GlobalScriptSettings(
+                enabled: true,
+                source: GlobalScriptSettings.default.source,
+                updatedAt: .now,
+                siteRules: [rule]
+            ),
+            shouldRunToday: true,
+            completionKey: "cweb.captcha.dynamic.integration.\(UUID().uuidString)"
+        )
+
+        let html = """
+        <html><body>
+        <button id="check-in">立即签到</button>
+        <div id="dialog" role="dialog" hidden>
+            <img alt="验证码图片" src="\(imageURI)">
+            <input placeholder="请输入验证码" autocomplete="off">
+            <button type="button">取消</button>
+        </div>
+        <script>
+        window.fixtureState = { opened: 0, value: '', input: 0 };
+        document.querySelector('#check-in').addEventListener('click', () => {
+            document.querySelector('#dialog').hidden = false;
+            window.fixtureState.opened++;
+        });
+        document.querySelector('#dialog input').addEventListener('input', event => {
+            window.fixtureState.value = event.target.value;
+            window.fixtureState.input++;
+        });
+        </script>
+        </body></html>
+        """
+        for try await _ in session.page.load(
+            html: html,
+            baseURL: URL(string: "https://www.sheapi.cc/profile")!
+        ) { }
+
+        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+        var value = ""
+        while ContinuousClock.now < deadline {
+            value = (try? await session.page.callJavaScript(
+                "return document.querySelector('#dialog input')?.value || '';"
+            ) as? String) ?? ""
+            if value == "2746" { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+
+        #expect(value == "2746")
+        #expect(try await session.page.callJavaScript("return window.fixtureState.opened;") as? Int == 1)
+        #expect(try await session.page.callJavaScript("return window.fixtureState.value;") as? String == "2746")
+        #expect(try await session.page.callJavaScript("return window.fixtureState.input;") as? Int == 1)
+        #expect(try await session.page.callJavaScript("return document.querySelector('#dialog').hidden;") as? Bool == false)
+    }
+
+    @Test(arguments: [false, true])
+    @MainActor
+    func captchaFillsOnceAndWaitsForExplicitRetryOrContinue(autoSubmit: Bool) async throws {
+        let url = URL(string: "https://captcha.example.invalid/profile")!
+        let session = BrowserSession(profile: BrowserProfile(name: "单次验证码回归", homePage: url))
+        defer { session.close() }
+        let image = try #require(Self.syntheticCaptchaImage())
+        let rule = WebsiteRule(host: "captcha.example.invalid", captchaAutoFillEnabled: true,
+            captchaAutoSubmitEnabled: autoSubmit, captchaInputSelector: "#code",
+            captchaSubmitSelector: "#confirm", captchaExpectedLength: 4)
+        session.configureAutomation(settings: GlobalScriptSettings(enabled: true,
+            source: GlobalScriptSettings.default.source, updatedAt: .now, siteRules: [rule]),
+            shouldRunToday: true, completionKey: UUID().uuidString)
+        let html = """
+        <html><body><div class="captcha">
+            <img alt="验证码图片" src="data:image/png;base64,\(image.base64EncodedString())">
+            <input id="code" placeholder="请输入验证码">
+            <button id="confirm" type="button">确认</button>
+        </div><script>
+        window.fixtureState = { input: 0, submits: 0 };
+        document.querySelector('#code').addEventListener('input', () => window.fixtureState.input++);
+        document.querySelector('#confirm').addEventListener('click', () => window.fixtureState.submits++);
+        </script></body></html>
+        """
+        for try await _ in session.page.load(html: html, baseURL: url) { }
+        await waitForCaptcha(session, state: autoSubmit ? .submitted : .filled)
+        let originalChallenge = try #require(session.captchaChallenge)
+        #expect(session.automationState == .captcha)
+        #expect(try await session.page.callJavaScript("return document.querySelector('#code').value;") as? String == "2746")
+        #expect(try await session.page.callJavaScript("return window.CwebCheckIn.isPaused();") as? Bool == true)
+
+        for _ in 0..<3 { await session.recheckAutomation() }
+        session.receiveAutomationMessage(type: "captcha", message: "重复挑战", captcha: originalChallenge)
+        session.receiveAutomationMessage(type: "error", message: "旧提交计时器")
+        _ = try await session.page.callJavaScript("""
+        document.querySelector('#code').setAttribute('data-change', 'mutation');
+        window.dispatchEvent(new Event('cwebAutomationRecheck'));
+        """)
+        try await Task.sleep(for: .milliseconds(400))
+        let duplicate = try await session.page.callJavaScript(
+            AutomationScriptBuilder.captchaFillCall, arguments: ["code": "9999"]
+        ) as? Bool
+        #expect(duplicate == false)
+        #expect(session.automationState == .captcha)
+        #expect(try await session.page.callJavaScript("return window.fixtureState.input;") as? Int == 1)
+        #expect(try await session.page.callJavaScript("return window.fixtureState.submits;") as? Int == (autoSubmit ? 1 : 0))
+
+        // Even an explicit continue must not recognize the same visible image
+        // again. It pauses for the user to complete verification on the page.
+        await session.resumeAutomation()
+        let pauseDeadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while session.automationState != .captcha, ContinuousClock.now < pauseDeadline {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        #expect(session.automationState == .captcha)
+        #expect(try await session.page.callJavaScript("return window.fixtureState.input;") as? Int == 1)
+
+        let refreshedImage = try #require(Self.syntheticCaptchaImage(code: "5832"))
+        _ = try await session.page.callJavaScript("""
+        document.querySelector('img').src = imageURI;
+        document.querySelector('#code').value = '';
+        """, arguments: ["imageURI": "data:image/png;base64,\(refreshedImage.base64EncodedString())"])
+        session.retryCaptchaRecognition()
+        await waitForCaptcha(session, state: autoSubmit ? .submitted : .filled)
+        #expect(try await session.page.callJavaScript("return document.querySelector('#code').value;") as? String == "5832")
+        #expect(try await session.page.callJavaScript("return window.fixtureState.input;") as? Int == 2)
+        #expect(try await session.page.callJavaScript("return window.fixtureState.submits;") as? Int == (autoSubmit ? 2 : 0))
+
+        // Page changes alone do not resume detection. Only the button's native
+        // resume call may accept the completion and advance the queue.
+        _ = try await session.page.callJavaScript("""
+        document.querySelector('.captcha').hidden = true;
+        const result = document.createElement('p'); result.textContent = '今天已完成签到';
+        document.body.append(result);
+        """)
+        await session.recheckAutomation()
+        #expect(session.automationState == .captcha)
+        await session.resumeAutomation()
+        let successDeadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while session.automationState != .success, ContinuousClock.now < successDeadline {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        #expect(session.automationState == .success)
+    }
+
+    @Test(arguments: ["", "#missing", "#disabled", "#hidden"])
+    @MainActor
+    func autoSubmitRequiresAnAvailableExplicitControl(selector: String) async throws {
+        var configuration = WebPage.Configuration()
+        configuration.websiteDataStore = .nonPersistent()
+        let page = WebPage(configuration: configuration)
+        let html = """
+        <html><body><input id="code"><button id="disabled" disabled>确认</button>
+        <button id="hidden" hidden>确认</button>
+        <script>window.clicks = 0; document.addEventListener('click', () => window.clicks++);</script>
+        </body></html>
+        """
+        for try await _ in page.load(html: html, baseURL: URL(string: "https://captcha.example.invalid")!) { }
+        let rule = WebsiteRule(host: "captcha.example.invalid", captchaAutoFillEnabled: true,
+            captchaAutoSubmitEnabled: true, captchaInputSelector: "#code", captchaSubmitSelector: selector)
+        _ = try await page.callJavaScript(AutomationScriptBuilder.build(code: "", matches: ["<all_urls>"], siteRules: [rule]))
+        #expect(try await page.callJavaScript(AutomationScriptBuilder.captchaFillCall, arguments: ["code": "2746"]) as? Bool == true)
+        #expect(try await page.callJavaScript("return window.clicks;") as? Int == 0)
+        #expect(try await page.callJavaScript("return window.CwebCheckIn.hasSubmittedCaptcha();") as? Bool == false)
+    }
+
+    @Test
+    @MainActor
+    func captchaPauseSurvivesANewOriginUntilExplicitContinue() async throws {
+        let home = URL(string: "https://cf.example.invalid/profile")!
+        let destination = URL(string: "https://www.example.invalid/profile")!
+        let session = BrowserSession(profile: BrowserProfile(name: "验证码跳转暂停回归", homePage: home))
+        defer { session.close() }
+        session.configureAutomation(settings: GlobalScriptSettings(enabled: true,
+            source: GlobalScriptSettings.default.source, updatedAt: .now,
+            siteRules: [WebsiteRule(host: "cf.example.invalid")]), shouldRunToday: true,
+            completionKey: UUID().uuidString)
+        session.receiveAutomationMessage(type: "captcha", message: "等待验证码")
+        let html = """
+        <html><body><button>立即签到</button><script>
+        window.clicks = 0; document.querySelector('button').onclick = () => window.clicks++;
+        </script></body></html>
+        """
+        for try await _ in session.page.load(html: html, baseURL: destination) { }
+        await session.recheckAutomation()
+        #expect(try await session.page.callJavaScript("return window.CwebCheckIn.isPaused();") as? Bool == true)
+        #expect(try await session.page.callJavaScript("return window.clicks;") as? Int == 0)
+        #expect(session.automationState == .captcha)
+        await session.resumeAutomation()
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        var clicks = 0
+        while clicks == 0, ContinuousClock.now < deadline {
+            clicks = (try? await session.page.callJavaScript("return window.clicks;") as? Int) ?? 0
+            if clicks == 0 { try await Task.sleep(for: .milliseconds(25)) }
+        }
+        #expect(clicks == 1)
+    }
+
+    @Test
+    @MainActor
+    func staleDocumentCannotReceiveOCRFill() async throws {
+        var configuration = WebPage.Configuration()
+        configuration.websiteDataStore = .nonPersistent()
+        let page = WebPage(configuration: configuration)
+        for try await _ in page.load(html: "<html><body><input id='code'></body></html>", baseURL: URL(string: "https://captcha.example.invalid")!) { }
+        _ = try await page.callJavaScript("window.__cwebDocumentID = 'new-document';")
+        let rule = WebsiteRule(host: "captcha.example.invalid", captchaInputSelector: "#code")
+        _ = try await page.callJavaScript(AutomationScriptBuilder.build(code: "", matches: ["<all_urls>"], siteRules: [rule]))
+        #expect(try await page.callJavaScript(AutomationScriptBuilder.captchaFillCall,
+            arguments: ["code": "2746", "documentID": "old-document"]) as? Bool == false)
+        #expect(try await page.callJavaScript("return document.querySelector('#code').value;") as? String == "")
+    }
+
+    @MainActor
+    private func waitForCaptcha(_ session: BrowserSession, state: CaptchaRecognitionState) async {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+        while session.captchaRecognitionState != state, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+        #expect(session.captchaRecognitionState == state)
+    }
+
+    private static func syntheticCaptchaImage(code: String = "2746") -> Data? {
         let width = 240
         let height = 80
         let colorSpace = CGColorSpaceCreateDeviceRGB()
@@ -115,7 +587,7 @@ struct AutomationScriptTests {
             NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(gray: 0, alpha: 1)
         ]
         let line = CTLineCreateWithAttributedString(
-            NSAttributedString(string: "2746", attributes: attributes)
+            NSAttributedString(string: code, attributes: attributes)
         )
         let bounds = CTLineGetBoundsWithOptions(line, [])
         context.textPosition = CGPoint(

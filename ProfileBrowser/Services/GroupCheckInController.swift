@@ -136,6 +136,7 @@ final class GroupCheckInController: Identifiable {
         if activeSession.automationState == .captcha {
             // Human verification has no automatic skip deadline.
             deadline = now.addingTimeInterval(waitLimit(for: activeSession.profile))
+            return
         } else if let deadline, now >= deadline {
             statuses[activeSession.profile.id] = "等待超时：请检查登录、网络或网站识别规则。"
             finishCurrent(.failed)
@@ -211,7 +212,7 @@ final class GroupCheckInController: Identifiable {
 
     private func checkpoint() { model.saveGroupRun(record) }
     private func waitLimit(for profile: BrowserProfile) -> TimeInterval {
-        TimeInterval(settings.siteRules?.first { $0.normalizedHost == profile.homePageHost }?.environmentTimeoutSeconds ?? 60)
+        TimeInterval(settings.siteRules?.first { $0.matches(host: profile.homePageHost) }?.environmentTimeoutSeconds ?? 60)
     }
 
     private func openNext() {

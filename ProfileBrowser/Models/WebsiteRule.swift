@@ -13,6 +13,7 @@ struct WebsiteRule: Codable, Equatable, Identifiable, Sendable {
     var balanceReadySelector = ""
     var captchaSelector: String?
     var captchaAutoFillEnabled = false
+    var captchaAutoSubmitEnabled = false
     var captchaImageSelector: String?
     var captchaInputSelector: String?
     var captchaSubmitSelector: String?
@@ -21,7 +22,51 @@ struct WebsiteRule: Codable, Equatable, Identifiable, Sendable {
     var submissionTimeoutSeconds = 30
 
     var normalizedHost: String {
-        host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        Self.normalizeHost(host)
+    }
+
+    /// Website rules are scoped to a site, so a rule saved while logging in
+    /// on `cf.example.com` also applies after the site redirects to
+    /// `www.example.com`. Exact host matching made this fail for sites that
+    /// use separate CDN and application subdomains.
+    func matches(host candidate: String) -> Bool {
+        Self.sameSite(normalizedHost, candidate)
+    }
+
+    static func normalizeHost(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+    }
+
+    static func sameSite(_ lhs: String, _ rhs: String) -> Bool {
+        let left = normalizeHost(lhs)
+        let right = normalizeHost(rhs)
+        guard !left.isEmpty, !right.isEmpty else { return false }
+        guard left != right else { return true }
+
+        // Keep IP addresses and localhost exact-only. For host names, use a
+        // small public-suffix approximation that covers common two-label
+        // suffixes without introducing a runtime dependency.
+        guard left.contains("."), right.contains("."),
+              !left.isIPAddress, !right.isIPAddress else { return false }
+        return registrableDomain(left) == registrableDomain(right)
+    }
+
+    private static func registrableDomain(_ host: String) -> String {
+        let labels = host.split(separator: ".").map(String.init)
+        guard labels.count >= 2 else { return host }
+        let suffix = labels.suffix(2).joined(separator: ".")
+        let commonSecondLevelSuffixes = Set(["co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au", "co.jp", "com.cn", "net.cn", "org.cn"])
+        let count = commonSecondLevelSuffixes.contains(suffix) ? 3 : 2
+        return labels.suffix(min(count, labels.count)).joined(separator: ".")
+    }
+}
+
+private extension String {
+    var isIPAddress: Bool {
+        let parts = split(separator: ".")
+        return parts.count == 4 && parts.allSatisfy { Int($0) != nil && (0...255).contains(Int($0)!) }
     }
 }
 
@@ -40,7 +85,7 @@ extension WebsiteRule {
     private enum CodingKeys: String, CodingKey {
         case id, host, checkInContainerSelector, actionSelector, completionSelector
         case failureSelector, balanceSelector, balanceReadySelector, captchaSelector
-        case captchaAutoFillEnabled, captchaImageSelector, captchaInputSelector
+        case captchaAutoFillEnabled, captchaAutoSubmitEnabled, captchaImageSelector, captchaInputSelector
         case captchaSubmitSelector, captchaExpectedLength, environmentTimeoutSeconds
         case submissionTimeoutSeconds
     }
@@ -57,6 +102,7 @@ extension WebsiteRule {
         balanceReadySelector = try container.decodeIfPresent(String.self, forKey: .balanceReadySelector) ?? ""
         captchaSelector = try container.decodeIfPresent(String.self, forKey: .captchaSelector)
         captchaAutoFillEnabled = try container.decodeIfPresent(Bool.self, forKey: .captchaAutoFillEnabled) ?? false
+        captchaAutoSubmitEnabled = try container.decodeIfPresent(Bool.self, forKey: .captchaAutoSubmitEnabled) ?? false
         captchaImageSelector = try container.decodeIfPresent(String.self, forKey: .captchaImageSelector)
         captchaInputSelector = try container.decodeIfPresent(String.self, forKey: .captchaInputSelector)
         captchaSubmitSelector = try container.decodeIfPresent(String.self, forKey: .captchaSubmitSelector)

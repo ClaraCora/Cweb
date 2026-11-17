@@ -179,9 +179,28 @@ struct GroupCheckInView: View {
                     .foregroundStyle(.primary)
                     .lineLimit(3)
             }
-            Text(controller.isPaused ? "继续后恢复自动检测。" : "每 5 秒检测；验证码等待手动处理，其他异常超时后转入待处理并继续。")
+            Text(controller.isPaused ? "继续后恢复自动检测。" : "每 5 秒检测；验证码填入后暂停，点击“继续检测”才恢复。等待验证码期间不超时，其他异常超时后转入待处理。")
                 .font(.caption)
                 .foregroundStyle(AppUI.secondaryText)
+            if let session = controller.session, session.automationState == .captcha {
+                HStack(spacing: 12) {
+                    if session.captchaRecognitionState == .recognizing {
+                        ProgressView("正在识别")
+                            .font(.footnote)
+                    } else if session.canRetryCaptchaRecognition {
+                        Button("重新识别", systemImage: "arrow.clockwise") { session.retryCaptchaRecognition() }
+                            .frame(minHeight: 44)
+                            .accessibilityIdentifier("groupCheckIn.retryCaptcha")
+                    }
+                    Spacer(minLength: 0)
+                    Button("继续检测") { Task { await session.resumeAutomation() } }
+                        .buttonStyle(.bordered)
+                        .frame(minHeight: 44)
+                        .disabled(controller.isPaused || session.captchaRecognitionState == .recognizing)
+                        .accessibilityIdentifier("groupCheckIn.resumeCaptcha")
+                }
+                .font(.footnote.weight(.semibold))
+            }
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 0) { detailActions }
             } else {

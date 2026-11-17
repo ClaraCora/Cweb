@@ -53,6 +53,7 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
             let hasCompleted = false;
             let submissionFailed = false;
             var captchaCaptureInFlight = false;
+            let captchaCaptureGeneration = 0;
 
             const textOf = (element) =>
                 (typeof element?.innerText === "string"
@@ -122,7 +123,27 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
                 if (element.tagName === 'CANVAS') {
                     try { return element.toDataURL('image/png'); } catch (_) { return null; }
                 }
-                if (element.tagName !== 'IMG' || !element.complete || !element.naturalWidth) return null;
+                if (element.tagName !== 'IMG') return null;
+                if (!element.complete || !element.naturalWidth) {
+                    const loaded = await new Promise((resolve) => {
+                        let settled = false;
+                        const finish = (value) => {
+                            if (settled) return;
+                            settled = true;
+                            clearTimeout(timer);
+                            element.removeEventListener('load', onLoad);
+                            element.removeEventListener('error', onError);
+                            resolve(value);
+                        };
+                        const onLoad = () => finish(Boolean(element.naturalWidth));
+                        const onError = () => finish(false);
+                        const timer = setTimeout(() => finish(false), 1500);
+                        element.addEventListener('load', onLoad, { once: true });
+                        element.addEventListener('error', onError, { once: true });
+                        if (element.complete && element.naturalWidth) finish(true);
+                    });
+                    if (!loaded || !element.naturalWidth) return null;
+                }
                 if (element.currentSrc?.startsWith('data:')) return element.currentSrc;
                 try {
                     const canvas = document.createElement('canvas');
@@ -138,9 +159,7 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
             };
 
             const prepareCaptcha = async () => {
-                if (!rule.captchaAutoFillEnabled
-                    || !rule.captchaImageSelector
-                    || !rule.captchaInputSelector) return null;
+                if (!rule.captchaAutoFillEnabled) return null;
                 const root = captchaRoot();
                 const input = captchaInput(root);
                 const image = captchaImage(root);
@@ -218,12 +237,44 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
 
             const finish = () => {
                 hasCompleted = true;
+                stopDetection();
+                api.success("页面显示已完成签到");
+            };
+
+            const stopDetection = () => {
+                captchaCaptureGeneration++;
+                captchaCaptureInFlight = false;
                 clearTimeout(noButtonTimer);
                 clearTimeout(debounceTimer);
                 clearTimeout(successTimer);
                 clearTimeout(submissionTimer);
                 observer.disconnect();
-                api.success("页面显示已完成签到");
+            };
+
+            // This is also the explicit retry entry point. Capture the current
+            // DOM image; never reuse the previous challenge's image bytes.
+            api.captureCaptcha = async () => {
+                if (hasCompleted || captchaCaptureInFlight) return;
+                api.pause();
+                if (api.hasFilledCaptcha?.()) {
+                    api.captchaDetected("验证码已填入，请完成验证后继续检测");
+                    return;
+                }
+                const generation = ++captchaCaptureGeneration;
+                captchaCaptureInFlight = true;
+                try {
+                    const challenge = await prepareCaptcha();
+                    if (hasCompleted || generation !== captchaCaptureGeneration || !api.isPaused()) return;
+                    api.captchaDetected(challenge
+                        ? "检测到数字图片验证码，正在识别。"
+                        : "无法读取验证码图片，请手动输入。", challenge);
+                } catch (_) {
+                    if (generation === captchaCaptureGeneration && api.isPaused()) {
+                        api.captchaDetected("无法读取验证码图片，请手动输入。");
+                    }
+                } finally {
+                    if (generation === captchaCaptureGeneration) captchaCaptureInFlight = false;
+                }
             };
 
             const detect = async () => {
@@ -244,14 +295,9 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
                     catch (_) { api.error("验证码选择器无效，请检查网站规则"); return false; }
                 })) {
                     if (captchaCaptureInFlight) return;
-                    if (!captchaCaptureInFlight && rule.captchaAutoFillEnabled) {
-                        captchaCaptureInFlight = true;
-                        const challenge = await prepareCaptcha();
-                        captchaCaptureInFlight = false;
-                        if (challenge) {
-                            api.captchaDetected("检测到数字图片验证码，正在识别。", challenge);
-                            return;
-                        }
+                    if (rule.captchaAutoFillEnabled) {
+                        await api.captureCaptcha();
+                        return;
                     }
                     api.captchaDetected("检测到验证码，请手动完成");
                     return;
@@ -289,22 +335,27 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
             };
 
             const schedule = () => {
-                if (hasCompleted) return;
+                if (hasCompleted || api.isPaused()) return;
                 clearTimeout(debounceTimer);
                 debounceTimer = setTimeout(() => { void detect(); }, 250);
             };
 
             const root = document.documentElement || document;
             const observer = new MutationObserver(schedule);
-            observer.observe(root, {
+            const observe = () => observer.observe(root, {
                 childList: true,
                 subtree: true,
                 attributes: true,
                 characterData: true
             });
 
+            window.addEventListener("cwebAutomationPause", stopDetection);
+
             window.addEventListener("cwebAutomationResume", () => {
                 if (hasCompleted) return;
+                captchaCaptureGeneration++;
+                captchaCaptureInFlight = false;
+                observe();
                 if (submissionFailed) { hasClicked = false; submissionFailed = false; }
                 clearTimeout(submissionTimer);
                 if (hasClicked) {
@@ -330,7 +381,10 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
                 }, 6000);
             };
 
-            armNoButtonTimer();
+            if (!api.isPaused()) {
+                observe();
+                armNoButtonTimer();
+            }
 
             void detect();
         })();
@@ -349,7 +403,8 @@ struct GlobalScriptSettings: Codable, Equatable, Sendable {
             "0471f26f7d022c72130828a52976c180468d2711d041c60c8473dbf83ab7ebd5",
             "0a086ed37b237890a33ca9c3a5cd601f866d4a1940742d14c3ba38d94709d41a",
             "6b022d4272cb410163ce49c802c932c45a9920c6e685839eed538872eb72c43c",
-            "34c285f8ce439f24819a6b013f52824e3d5cefb10073403d809dd3a0a9c8a554"
+            "34c285f8ce439f24819a6b013f52824e3d5cefb10073403d809dd3a0a9c8a554",
+            "7e3e09a0361a8fa7148b861b0bbe7ac44d2f2d6058b6216f2d86f99965abb6b6"
         ]
         guard bundledFingerprints.contains(digest) else {
             return self

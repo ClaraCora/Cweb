@@ -465,4 +465,31 @@ final class NativeUIRegressionTests: XCTestCase {
         XCTAssertTrue(feedback.waitForExistence(timeout: 5))
         capture("website-rules-preview-saved")
     }
+
+    func testCaptchaSubmitSwitchDefaultsOffAndCanBeEnabled() {
+        for dark in [false, true] {
+            let app = launch(dark: dark)
+            selectTab("设置", in: app)
+            app.buttons["settings.script"].tap()
+            app.buttons["网站识别规则"].tap()
+            XCTAssertTrue(app.navigationBars["网站识别规则"].waitForExistence(timeout: 5))
+            app.buttons["添加网站"].tap()
+            let autoFill = app.switches["启用数字验证码自动识别"]
+            for _ in 0..<8 where !autoFill.isHittable { app.swipeUp() }
+            XCTAssertTrue(autoFill.isHittable)
+            autoFill.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+            XCTAssertEqual(autoFill.value as? String, "1")
+            let autoSubmit = app.switches["captcha.autoSubmit"]
+            for _ in 0..<3 where !autoSubmit.isHittable { app.swipeUp() }
+            XCTAssertTrue(autoSubmit.isHittable)
+            XCTAssertTrue(autoSubmit.isEnabled)
+            XCTAssertEqual(autoSubmit.value as? String, "0")
+            capture(dark ? "captcha-submit-off-dark" : "captcha-submit-off-light")
+            autoSubmit.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+            XCTAssertEqual(autoSubmit.value as? String, "1")
+            XCTAssertTrue(app.staticTexts["仅点击指定提交控件一次，随后暂停。请填写提交控件的 CSS 选择器。"].exists)
+            capture(dark ? "captcha-submit-on-dark" : "captcha-submit-on-light")
+            app.terminate()
+        }
+    }
 }

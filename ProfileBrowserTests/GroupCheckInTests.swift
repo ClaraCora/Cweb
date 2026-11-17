@@ -88,6 +88,36 @@ struct GroupCheckInTests {
 
     @Test
     @MainActor
+    func captchaRechecksKeepCurrentEnvironmentPausedWithoutTimeout() async throws {
+        let fixture = try GroupRunFixture()
+        defer { fixture.cleanUp() }
+        let controller = GroupCheckInController(groupName: "测试", profiles: fixture.profiles, model: fixture.model)
+        controller.start()
+        defer { controller.stop() }
+        let session = try #require(controller.session)
+        session.configureAutomation(
+            settings: GlobalScriptSettings(enabled: true, source: "// Local pause regression", updatedAt: .now),
+            shouldRunToday: true, completionKey: UUID().uuidString
+        ) { event in controller.receive(session.profile.id, event) }
+        session.receiveAutomationMessage(type: "captcha", message: "等待验证码")
+        for seconds in [5, 65, 300, 3600] {
+            await controller.recheck(now: .now.addingTimeInterval(TimeInterval(seconds)))
+            #expect(controller.session === session)
+            #expect(controller.queue.currentProfileID == fixture.profiles[0].id)
+            #expect(controller.queue.outcomes.isEmpty)
+            #expect(session.automationState == .captcha)
+        }
+        #expect(controller.record.statuses[session.profile.id] == "等待验证码")
+        session.receiveAutomationMessage(type: "error", message: "旧提交超时")
+        session.receiveAutomationMessage(type: "resume", message: "周期恢复")
+        #expect(session.automationState == .captcha)
+        await session.resumeAutomation()
+        #expect(session.automationState == .running)
+        #expect(controller.session === session)
+    }
+
+    @Test
+    @MainActor
     func successKeepsPageOpenUntilBalanceRefreshAndPauseDefersAdvancement() async throws {
         let fixture = try GroupRunFixture()
         defer { fixture.cleanUp() }

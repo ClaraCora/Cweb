@@ -12,7 +12,16 @@ enum BrowserDocumentScript {
         let rulesJSON = String(data: (try? JSONEncoder().encode(rules)) ?? Data("[]".utf8), encoding: .utf8)!
         return """
         (() => {
-            const rule = (\(rulesJSON)).find(r => r.host.trim().toLowerCase() === location.hostname.toLowerCase()) || {};
+            const normalizeHost = value => String(value || '').trim().toLowerCase().replace(/\\.+$/, '');
+            const siteHost = value => {
+                const host = normalizeHost(value);
+                const labels = host.split('.').filter(Boolean);
+                if (labels.length < 2) return host;
+                const suffix = labels.slice(-2).join('.');
+                const commonTwoLabelSuffixes = new Set(['co.uk', 'org.uk', 'ac.uk', 'gov.uk', 'com.au', 'net.au', 'org.au', 'co.jp', 'com.cn', 'net.cn', 'org.cn']);
+                return labels.slice(-(commonTwoLabelSuffixes.has(suffix) ? 3 : 2)).join('.');
+            };
+            const rule = (\(rulesJSON)).find(r => siteHost(r.host) === siteHost(location.hostname)) || {};
             const selector = rule.balanceSelector || '[data-account-balance],[data-testid="account-balance"],.dashboard-stat-value,.semi-statistic-content,.ant-statistic-content,div.font-mono.tabular-nums';
             let previous, timer;
             const state = n => {

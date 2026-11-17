@@ -76,7 +76,7 @@ struct BrowserView: View {
                     state: session.automationState,
                     message: automationMessage,
                     recognitionState: session.captchaRecognitionState,
-                    canRetryRecognition: session.captchaChallenge?.imageData != nil,
+                    canRetryRecognition: session.canRetryCaptchaRecognition,
                     retryRecognition: { session.retryCaptchaRecognition() },
                     resume: {
                         Task { await session.resumeAutomation() }
@@ -254,30 +254,35 @@ private struct AutomationStatusBanner: View {
     let resume: () -> Void
 
     var body: some View {
-        HStack(alignment: .center, spacing: 10) {
-            Image(systemName: iconName)
-                .foregroundStyle(iconColor)
-                .accessibilityHidden(true)
-
-            Text(message)
-                .font(.footnote)
-                .foregroundStyle(.primary)
-                .lineLimit(3)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Spacer(minLength: 4)
-
-            if state == .captcha {
-                if recognitionState == .needsManual && canRetryRecognition {
-                    Button("重新识别", systemImage: "arrow.clockwise", action: retryRecognition)
-                        .font(.footnote.weight(.semibold))
-                        .buttonStyle(.borderless)
-                        .frame(minHeight: AppUI.minimumTarget)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .center, spacing: 10) {
+                if recognitionState == .recognizing && state == .captcha {
+                    ProgressView().accessibilityHidden(true)
+                } else {
+                    Image(systemName: iconName)
+                        .foregroundStyle(iconColor)
+                        .accessibilityHidden(true)
                 }
-                Button("继续检测", action: resume)
-                    .font(.footnote.weight(.semibold))
-                    .buttonStyle(.bordered)
-                    .frame(minHeight: AppUI.minimumTarget)
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if state == .captcha {
+                HStack(spacing: 12) {
+                    if canRetryRecognition {
+                        Button("重新识别", systemImage: "arrow.clockwise", action: retryRecognition)
+                            .font(.footnote.weight(.semibold))
+                            .buttonStyle(.borderless)
+                            .frame(minHeight: AppUI.minimumTarget)
+                    }
+                    Spacer(minLength: 0)
+                    Button("继续检测", action: resume)
+                        .font(.footnote.weight(.semibold))
+                        .buttonStyle(.bordered)
+                        .frame(minHeight: AppUI.minimumTarget)
+                        .disabled(recognitionState == .recognizing)
+                }
             }
         }
         .padding(.horizontal, 14)
@@ -287,15 +292,7 @@ private struct AutomationStatusBanner: View {
         .overlay(alignment: .bottom) {
             Divider()
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibilityMessage)
-    }
-
-    private var accessibilityMessage: String {
-        if let stateMessage = recognitionState.message, state == .captcha {
-            return "\(message)，\(stateMessage)"
-        }
-        return message
+        .accessibilityElement(children: .contain)
     }
 
     private var iconName: String {

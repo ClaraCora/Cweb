@@ -719,7 +719,7 @@ final class AppModel {
                     // A login redirect or unrelated site must not replace the account's balance.
                     guard session.currentOrigin == WebOrigin(url: session.profile.homePage) else { return nil as AccountBalanceReading? }
                     let host = session.currentOrigin?.host ?? ""
-                    let rule = self.globalScriptSettings.siteRules?.first { $0.normalizedHost == host }
+                    let rule = self.globalScriptSettings.siteRules?.first { $0.matches(host: host) }
                     return try await session.readAccountBalanceResult(rule: rule)
                 }
             )
