@@ -7,13 +7,23 @@ final class AppModel {
     private(set) var activeGroupRun: GroupCheckInController?
     private(set) var pendingGroupRun: GroupRunRecord?
     private(set) var groupRunHistory: [GroupRunRecord] = []
-    private(set) var profiles: [BrowserProfile] = []
-    private(set) var socksProxies: [SocksProxy] = []
+    private(set) var profiles: [BrowserProfile] = [] {
+        didSet { cachedGroups = nil }
+    }
+    private(set) var socksProxies: [SocksProxy] = [] {
+        didSet { cachedProxyBindings = nil }
+    }
+    @ObservationIgnored private var cachedGroups: [ProfileGroup]?
+    @ObservationIgnored private var cachedProxyBindings: ProxyBindingResolver?
     private(set) var proxyPresets: [SocksProxyPreset] = []
     private(set) var isProxyStoreAvailable = false
     private(set) var isProxySettingsAvailable = false
     var isBackupStoreAvailable: Bool { isProfileStoreAvailable && isProxyStoreAvailable && isProxySettingsAvailable }
-    private(set) var socksProxyValidationSettings: SocksProxyValidationSettings = .defaults
+    private(set) var socksProxyValidationSettings: SocksProxyValidationSettings = .defaults {
+        didSet {
+            if oldValue.sortMode != socksProxyValidationSettings.sortMode { cachedProxyBindings = nil }
+        }
+    }
     private(set) var globalScriptSettings: GlobalScriptSettings
     private(set) var lastAutomationResult: AutomationRunRecord?
     private(set) var isLoadingProfiles = true
@@ -161,6 +171,10 @@ final class AppModel {
 
     func cleanOrphanedWebsiteDataOnColdLaunch() async {
         guard isProfileStoreAvailable, !didAttemptColdCleanup else { return }
+        // Starting WebKit solely to enumerate unused stores can block the first interactive frame.
+        // Wait for a settled foreground before doing maintenance. Backgrounding cancels this delay.
+        do { try await Task.sleep(for: .seconds(1)) } catch { return }
+        guard !Task.isCancelled, isProfileStoreAvailable, !didAttemptColdCleanup else { return }
         didAttemptColdCleanup = true
         let failures = await websiteDataStores.removeOrphans { Set(self.profiles.map(\.websiteDataStoreID)) }
         websiteCleanupFailureCount = failures.count
@@ -207,22 +221,22 @@ final class AppModel {
             }
         }
         // Match imported bindings against this installation's final ranked list.
-        let ranking = ranked(combined, using: socksProxyValidationSettings.sortMode)
+        let bindingsAfterImport = ProxyBindingResolver(rankings: ranked(combined, using: socksProxyValidationSettings.sortMode))
         let bindings = Dictionary(uniqueKeysWithValues: (archive.bindings ?? []).map { ($0.profileID, $0.proxyID) })
         var blocked = 0
         var usedByGroup: [String: Set<Int>] = [:]
         for profile in profiles {
             guard profile.unresolvedProxyNumber == nil,
-                  let number = ProxyBindingResolver.number(profile, rankings: ranking),
+                  let number = bindingsAfterImport.number(profile),
                   let oldProxy = socksProxy(for: profile),
-                  oldProxy.id == ProxyBindingResolver.resolve(profile, rankings: ranking)?.id else { continue }
+                  oldProxy.id == bindingsAfterImport.resolve(profile)?.id else { continue }
             usedByGroup[profile.displayGroupName, default: []].insert(number)
         }
         var conflicts = 0
         let restoredProfiles = archive.profiles.map { profile in
             var copy = profile
             if let oldID = bindings[profile.id], let newID = proxyIDMap[oldID],
-               let number = ranking.first(where: { $0.proxy.id == newID })?.number {
+               let number = bindingsAfterImport.number(forID: newID) {
                 copy.socksProxyNumber = number
                 if copy.fixedProxyID != nil { copy.fixedProxyID = newID }
                 copy.unresolvedProxyNumber = nil
@@ -254,7 +268,7 @@ final class AppModel {
         let shifted = profiles.filter { profile in
             guard profile.fixedProxyID == nil else { return false }
             guard let number = profile.socksProxyNumber else { return false }
-            return rankedSocksProxies.first(where: { $0.number == number })?.id != ranking.first(where: { $0.number == number })?.id
+            return socksProxy(forDisplayNumber: number)?.id != bindingsAfterImport.proxy(forNumber: number)?.id
         }.count
         if shifted > 0 { warnings.append("新增代理会改变 \(shifted) 个现有环境的编号指向；这些环境将暂停联网，需重新选择。") }
         return BackupRestorePlan(baseProxies: socksProxies, baseProfiles: profiles, basePresets: proxyPresets, baseSettings: socksProxyValidationSettings, baseScript: globalScriptSettings, profiles: restoredProfiles, credentials: archive.credentials,
@@ -380,6 +394,10 @@ final class AppModel {
 
     func shouldRunAutomation(for profileID: UUID, now: Date = .now) -> Bool {
         guard let profile = profiles.first(where: { $0.id == profileID }) else { return true }
+        return shouldRunAutomation(for: profile, now: now)
+    }
+
+    func shouldRunAutomation(for profile: BrowserProfile, now: Date = .now) -> Bool {
         return !completionStore.isCompleted(profile, now: now)
     }
 
@@ -467,6 +485,10 @@ final class AppModel {
     }
 
     var profileGroups: [ProfileGroup] {
+        // Read the observed source even on a cache hit so each SwiftUI consumer
+        // still refreshes when profile data changes.
+        let members = sortedProfiles
+        if let cachedGroups { return cachedGroups }
         // Group identity is persisted on every profile so a rename does not
         // invalidate a navigation destination that is already on screen.
         // The fallback key keeps this projection safe for a profile loaded
@@ -474,7 +496,7 @@ final class AppModel {
         var groupedProfiles: [String: [BrowserProfile]] = [:]
         var groupOrder: [String] = []
 
-        for profile in sortedProfiles {
+        for profile in members {
             let key = profile.groupID.map { "id:\($0.uuidString)" }
                 ?? "name:\(profile.displayGroupName)"
             if groupedProfiles[key] == nil {
@@ -498,12 +520,14 @@ final class AppModel {
                 profiles: profiles
             )
         }
-        return groups.enumerated().sorted { lhs, rhs in
+        let result = groups.enumerated().sorted { lhs, rhs in
             if lhs.element.sortOrder != rhs.element.sortOrder {
                 return lhs.element.sortOrder < rhs.element.sortOrder
             }
             return lhs.offset < rhs.offset
         }.map(\.element)
+        cachedGroups = result
+        return result
     }
 
     func addProfile(
@@ -852,16 +876,25 @@ final class AppModel {
     /// profile editing, and browser launch must all use this ranking so a
     /// number never resolves to different proxies in different screens.
     var rankedSocksProxies: [SocksProxyRanking] {
-        ranked(socksProxies, using: socksProxyValidationSettings.sortMode)
+        proxyBindings.rankings
+    }
+
+    private var proxyBindings: ProxyBindingResolver {
+        let proxies = socksProxies
+        let mode = socksProxyValidationSettings.sortMode
+        if let cachedProxyBindings { return cachedProxyBindings }
+        let result = ProxyBindingResolver(rankings: ranked(proxies, using: mode))
+        cachedProxyBindings = result
+        return result
     }
 
     /// Fixed bindings resolve by identity; legacy ranked bindings follow the display number.
     func socksProxy(for profile: BrowserProfile) -> SocksProxy? {
-        ProxyBindingResolver.resolve(profile, rankings: rankedSocksProxies)
+        proxyBindings.resolve(profile)
     }
 
     func proxyNumber(for profile: BrowserProfile) -> Int? {
-        ProxyBindingResolver.number(profile, rankings: rankedSocksProxies)
+        proxyBindings.number(profile)
     }
 
     func entryPreflightIssues(for profiles: [BrowserProfile]) -> [String] {
@@ -879,8 +912,7 @@ final class AppModel {
     }
 
     func socksProxy(forDisplayNumber number: Int) -> SocksProxy? {
-        guard number > 0 else { return nil }
-        return rankedSocksProxies.first(where: { $0.number == number })?.proxy
+        proxyBindings.proxy(forNumber: number)
     }
 
     func groupProxyTargets(for profiles: [BrowserProfile]) -> [SocksProxy] {

@@ -151,10 +151,10 @@ final class GroupCheckInController: Identifiable {
 
     func receive(_ profileID: UUID, _ event: AutomationEvent) {
         guard !isPaused, queue.currentProfileID == profileID, pendingCompletion == nil else { return }
-        if !event.message.isEmpty {
+        if !event.message.isEmpty, statuses[profileID] != event.message {
             statuses[profileID] = event.message
+            checkpoint()
         }
-        checkpoint()
         if event.kind == .success { completeAfterRefreshingBalance(.completed) }
     }
 
@@ -179,8 +179,9 @@ final class GroupCheckInController: Identifiable {
             self.pendingCompletion = finalOutcome
             self.isRefreshingBalance = false
             self.balanceRefreshTask = nil
-            self.checkpoint()
-            if !self.isPaused {
+            if self.isPaused {
+                self.checkpoint()
+            } else {
                 self.finishCurrent(finalOutcome)
             }
         }

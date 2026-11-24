@@ -19,10 +19,12 @@ struct WebsiteDataStoreManager {
         // WebKit synchronously; it is never used for environment browsing.
         _ = WKWebsiteDataStore.default()
         let all = Set(await WKWebsiteDataStore.allDataStoreIdentifiers)
+        guard !all.isEmpty else { return [:] }
+        let candidates = Self.orphanIDs(all: all, referenced: referenced(), leased: Self.leasedIDs)
         var failures: [UUID: String] = [:]
-        for id in all {
-            // Re-evaluate after every suspension so newly opened stores are excluded.
-            guard Self.orphanIDs(all: [id], referenced: referenced(), leased: Self.leasedIDs).contains(id) else { continue }
+        for id in candidates {
+            // Another environment may have opened or claimed this store during the previous removal.
+            guard !Self.leasedIDs.contains(id), !referenced().contains(id) else { continue }
             do { try await WKWebsiteDataStore.remove(forIdentifier: id) }
             catch { failures[id] = error.localizedDescription }
         }

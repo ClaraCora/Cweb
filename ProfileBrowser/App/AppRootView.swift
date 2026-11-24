@@ -28,6 +28,9 @@ struct AppRootView: View {
         .onChange(of: scenePhase) { _, phase in if phase == .background { model.activeGroupRun?.pause() } }
         .task {
             if !model.isProfileStoreAvailable { await model.retryLoadingProfiles() }
+        }
+        .task(id: scenePhase == .active && model.isProfileStoreAvailable, priority: .utility) {
+            guard scenePhase == .active, model.isProfileStoreAvailable else { return }
             await model.cleanOrphanedWebsiteDataOnColdLaunch()
         }
     }

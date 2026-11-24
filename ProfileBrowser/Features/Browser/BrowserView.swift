@@ -61,7 +61,7 @@ struct BrowserView: View {
                 .foregroundStyle(AppUI.secondaryText)
                 .frame(maxWidth: .infinity, minHeight: 28)
                 .padding(.horizontal, 16)
-                .background(.bar)
+                .background(Color(uiColor: .systemGroupedBackground))
             }
 
             ProgressView(value: session.page.estimatedProgress)
@@ -69,7 +69,7 @@ struct BrowserView: View {
                 .opacity(session.page.isLoading ? 1 : 0)
                 .frame(height: 2)
                 .accessibilityHidden(!session.page.isLoading)
-                .background(.bar)
+                .background(Color(uiColor: .systemGroupedBackground))
 
             if browserChromePresentation == nil, let automationMessage = session.automationMessage {
                 AutomationStatusBanner(
@@ -332,7 +332,7 @@ private struct BrowserBottomChrome: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 2)
         }
-        .background(.bar)
+        .background(Color(uiColor: .systemGroupedBackground))
         .overlay(alignment: .top) {
             Divider()
         }
@@ -372,7 +372,7 @@ private struct BrowserAddressBar: View {
                 .accessibilityLabel(session.page.isLoading ? "停止载入" : "重新载入")
             }
             .padding(.leading, 12)
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background { ControlGlass(cornerRadius: 22).allowsHitTesting(false).accessibilityHidden(true) }
 
             Button("隐藏浏览器工具栏", systemImage: "chevron.down") {
                 hideChrome()

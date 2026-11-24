@@ -1,5 +1,10 @@
 name: ProfileBrowser
 
+packages:
+  BorderBeam:
+    url: https://github.com/ismnoiet/border-beam-ios.git
+    exactVersion: 1.0.0
+
 options:
   bundleIdPrefix: com.personal
   deploymentTarget:
@@ -22,6 +27,9 @@ targets:
     type: application
     platform: iOS
     deploymentTarget: "26.0"
+    dependencies:
+      - package: BorderBeam
+        product: BorderBeam
     sources:
       - path: ProfileBrowser
         excludes:

@@ -17,12 +17,12 @@ struct SettingsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 20) {
                 appIdentity
 
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 10) {
                     sectionHeading("外观", detail: "配色模式")
-                    HStack(spacing: 12) {
+                    HStack(spacing: 10) {
                         ForEach(AppAppearanceMode.allCases) { mode in
                             SettingsAppearanceOption(mode: mode, isSelected: appearanceMode.wrappedValue == mode) {
                                 appearanceMode.wrappedValue = mode
@@ -31,7 +31,7 @@ struct SettingsView: View {
                     }
                 }
 
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 10) {
                     sectionHeading("浏览与自动化")
                     VStack(spacing: 0) {
                         NavigationLink {
@@ -73,9 +73,10 @@ struct SettingsView: View {
                 } label: {
                     HStack(spacing: 12) {
                         Image(systemName: "lock.shield.fill")
-                            .font(.title2)
+                            .font(.title3.weight(.medium))
                             .foregroundStyle(Color.accentColor)
-                            .frame(width: 36, height: 40)
+                            .frame(width: 36, height: 36)
+                            .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                             .accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 4) {
                             Text("加密备份")
@@ -91,7 +92,8 @@ struct SettingsView: View {
                             .foregroundStyle(Color.accentColor)
                             .accessibilityHidden(true)
                     }
-                    .padding(16)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 16))
                     .contentShape(Rectangle())
@@ -102,10 +104,10 @@ struct SettingsView: View {
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 20)
-            .padding(.top, 12)
+            .padding(.top, 8)
             .padding(.bottom, 24)
         }
-        .background(Color(.systemGroupedBackground))
+        .background { WorkspaceBackdrop() }
         .accessibilityIdentifier("settings.scroll")
         .navigationTitle("设置")
         .navigationBarTitleDisplayMode(.inline)
@@ -118,7 +120,7 @@ struct SettingsView: View {
         NavigationLink {
             AboutSettingsView()
         } label: {
-            HStack(spacing: 14) {
+            HStack(spacing: 12) {
                 Image("SettingsAppIcon")
                     .resizable()
                     .scaledToFit()
@@ -131,18 +133,21 @@ struct SettingsView: View {
                         .foregroundStyle(.primary)
                     Text("Cweb · 版本 \(identity.version)")
                         .font(.footnote)
+                        .monospacedDigit()
                         .foregroundStyle(AppUI.secondaryText)
                 }
                 Spacer(minLength: 8)
-                Text("关于")
-                    .font(.subheadline)
-                    .foregroundStyle(AppUI.secondaryText)
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-                    .accessibilityHidden(true)
+                HStack(spacing: 4) {
+                    Text("关于")
+                        .font(.subheadline)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                }
+                .foregroundStyle(AppUI.secondaryText)
+                .accessibilityHidden(true)
             }
-            .padding(.vertical, 8)
+            .padding(16)
+            .beamPanel(cornerRadius: 18, active: true)
             .contentShape(Rectangle())
         }
         .accessibilityLabel("关于环境浏览器，版本 \(identity.version)")
@@ -152,7 +157,7 @@ struct SettingsView: View {
     private func sectionHeading(_ title: String, detail: String? = nil) -> some View {
         HStack {
             Text(title)
-                .font(.subheadline.weight(.semibold))
+                .font(.headline)
                 .foregroundStyle(.primary)
                 .accessibilityAddTraits(.isHeader)
             Spacer()
@@ -187,7 +192,7 @@ private struct SettingsAppearanceOption: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 10) {
+            VStack(spacing: 8) {
                 ZStack {
                     SettingsAppearancePreview(dark: mode == .dark)
                     if mode == .system {
@@ -201,7 +206,7 @@ private struct SettingsAppearanceOption: View {
                             }
                     }
                 }
-                .frame(height: 74)
+                .frame(height: 68)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .overlay {
                     RoundedRectangle(cornerRadius: 12)

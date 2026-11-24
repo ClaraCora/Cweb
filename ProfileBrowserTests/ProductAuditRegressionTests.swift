@@ -7,6 +7,29 @@ import Testing
 @MainActor
 @Suite(.serialized)
 struct ProductAuditRegressionTests {
+    @Test func cachedListProjectionsStillNotifyObserversAndShowEdits() throws {
+        let profile = BrowserProfile(name: "Before")
+        let fixture = try AuditFixture(profiles: [profile]); defer { fixture.cleanUp() }
+        let model = fixture.model
+        _ = model.profileGroups
+        _ = model.rankedSocksProxies
+
+        let groupsChanged = OSAllocatedUnfairLock(initialState: false)
+        withObservationTracking { _ = model.profileGroups } onChange: { groupsChanged.withLock { $0 = true } }
+        var edited = try #require(model.profiles.first)
+        edited.name = "After"
+        try model.updateProfile(edited)
+        #expect(groupsChanged.withLock { $0 })
+        #expect(model.profileGroups.first?.profiles.first?.name == "After")
+
+        let proxiesChanged = OSAllocatedUnfairLock(initialState: false)
+        withObservationTracking { _ = model.rankedSocksProxies } onChange: { proxiesChanged.withLock { $0 = true } }
+        let proxy = SocksProxy(host: "new.example.invalid", port: 1080)
+        try model.addSocksProxy(proxy)
+        #expect(proxiesChanged.withLock { $0 })
+        #expect(model.socksProxy(forDisplayNumber: 1)?.id == proxy.id)
+    }
+
     @Test func completionChangesNotifyTheProfileList() throws {
         let profile = BrowserProfile(name: "Observable completion")
         let fixture = try AuditFixture(profiles: [profile]); defer { fixture.cleanUp() }
@@ -183,19 +206,33 @@ struct ProductAuditRegressionTests {
     }
 
     @Test func timeoutAdvancesButCaptchaWaitsForTheUser() async throws {
-        let fixture = try AuditFixture(profiles: [BrowserProfile(name: "One"),BrowserProfile(name: "Two")]); defer { fixture.cleanUp() }
+        let home = URL(string: "https://timer.example.invalid")!
+        let fixture = try AuditFixture(profiles: [BrowserProfile(name: "One", homePage: home), BrowserProfile(name: "Two", homePage: home)])
+        defer { fixture.cleanUp() }
+        let limit = 90
+        var rule = WebsiteRule(host: "timer.example.invalid")
+        rule.environmentTimeoutSeconds = limit
+        try fixture.model.updateWebsiteRules([rule])
         for profile in fixture.model.profiles { fixture.model.confirmEntry(for: profile) }
         let run = GroupCheckInController(groupName: "Test", profiles: fixture.model.profiles, model: fixture.model)
         run.start()
+        defer { run.stop() }
         let first = try #require(run.session)
+        first.configureAutomation(settings: run.settings, shouldRunToday: true, completionKey: "timeout-test")
         first.receiveAutomationMessage(type: "captcha", message: "请验证")
-        await run.recheck(now: Date().addingTimeInterval(100))
+        let lastCaptchaPoll = Date().addingTimeInterval(TimeInterval(limit * 3))
+        await run.recheck(now: lastCaptchaPoll)
         #expect(run.queue.index == 0)
+        // Only the user's native “继续检测” action can release a CAPTCHA pause.
         first.receiveAutomationMessage(type: "resume", message: "")
-        await run.recheck(now: Date().addingTimeInterval(200))
+        #expect(first.automationState == .captcha)
+        await first.resumeAutomation()
+        #expect(first.automationState == .running)
+        await run.recheck(now: lastCaptchaPoll.addingTimeInterval(TimeInterval(limit - 1)))
+        #expect(run.queue.index == 0)
+        await run.recheck(now: lastCaptchaPoll.addingTimeInterval(TimeInterval(limit)))
         #expect(run.queue.outcomes[first.profile.id] == .failed)
         #expect(run.queue.index == 1)
-        run.stop()
     }
 
     @Test func successfulCheckInRetainsSeparateBalanceFailureAndNameSnapshot() async throws {

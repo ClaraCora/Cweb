@@ -32,7 +32,7 @@ struct GroupCheckInView: View {
                     results
                 }
             }
-            .navigationTitle(controller.session?.profile.name ?? "\(controller.groupName)签到结果")
+            .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -73,6 +73,12 @@ struct GroupCheckInView: View {
         .onDisappear { controller.pause() }
     }
 
+    private var navigationTitle: String {
+        if let session = controller.session { return session.profile.name }
+        if !controller.hasStarted { return "开始前确认" }
+        return controller.groupName + (controller.mode == .balanceOnly ? "余额结果" : "签到结果")
+    }
+
     private var preflight: some View {
         List {
             Section("开始前确认") {
@@ -101,26 +107,32 @@ struct GroupCheckInView: View {
     }
 
     private var taskBar: some View {
-        VStack(spacing: 0) {
+        let status = GroupTaskStatus.current(controller)
+        return VStack(spacing: 0) {
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 0) {
-                    taskSummary
+                    taskSummary(status)
                     taskControls.frame(maxWidth: .infinity, alignment: .trailing)
                 }
             } else {
                 HStack(spacing: 8) {
-                    taskSummary
+                    taskSummary(status)
                     taskControls
                 }
             }
-            if showsTaskDetails { taskDetails }
+            if showsTaskDetails {
+                Divider()
+                taskDetails
+                    .padding(.bottom, 4)
+            }
         }
+        .padding(.horizontal, AppUI.Spacing.row)
         .frame(maxWidth: AppUI.readableWidth - 2 * AppUI.Spacing.page)
+        .beamPanel(cornerRadius: 14, active: status.running)
         .frame(maxWidth: .infinity)
         .padding(.horizontal, AppUI.Spacing.page)
         .padding(.vertical, 4)
-        .background(.bar)
-        .overlay(alignment: .bottom) { Divider() }
+        .background(Color(uiColor: .systemGroupedBackground))
     }
 
     private var taskControls: some View {
@@ -131,19 +143,20 @@ struct GroupCheckInView: View {
         .fixedSize(horizontal: !dynamicTypeSize.isAccessibilitySize, vertical: false)
     }
 
-    private var taskSummary: some View {
+    private func taskSummary(_ status: GroupTaskStatus) -> some View {
         Button {
             showsTaskDetails.toggle()
         } label: {
             HStack(spacing: 6) {
+                status.icon
                 VStack(alignment: .leading, spacing: 2) {
                     Text("\(controller.queue.index + 1)/\(controller.queue.profileIDs.count)")
                         .font(.subheadline.weight(.medium))
                         .monospacedDigit()
                         .foregroundStyle(.primary)
-                    Text(statusTitle)
-                        .font(.caption)
-                        .foregroundStyle(statusColor)
+                    Text(status.title)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(status.tint)
                 }
                 .lineLimit(1)
                 Image(systemName: showsTaskDetails ? "chevron.up" : "chevron.down")
@@ -156,7 +169,7 @@ struct GroupCheckInView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("本组第 \(controller.queue.index + 1) 个，共 \(controller.queue.profileIDs.count) 个，\(statusTitle)，\(currentHost)")
+        .accessibilityLabel("本组第 \(controller.queue.index + 1) 个，共 \(controller.queue.profileIDs.count) 个，\(status.title)，\(currentHost)")
         .accessibilityValue(controller.session?.automationMessage ?? "")
         .accessibilityHint(showsTaskDetails ? "收起任务详情" : "展开任务详情和浏览器工具入口")
         .accessibilityIdentifier("groupCheckIn.details")
@@ -179,12 +192,17 @@ struct GroupCheckInView: View {
                     .foregroundStyle(.primary)
                     .lineLimit(3)
             }
-            Text(controller.isPaused ? "继续后恢复自动检测。" : "页面变化时自动检测；遇到验证码请手动完成后点击“继续检测”。等待验证码期间不超时，其他异常超时后转入待处理。")
-                .font(.caption)
-                .foregroundStyle(AppUI.secondaryText)
+            if controller.isPaused {
+                Text("点击“开始”继续当前任务。")
+                    .font(.caption)
+                    .foregroundStyle(AppUI.secondaryText)
+            }
             if let session = controller.session, session.automationState == .captcha {
-                HStack(spacing: 12) {
-                    Spacer(minLength: 0)
+                HStack {
+                    Text("手动完成验证后继续。")
+                        .font(.caption)
+                        .foregroundStyle(AppUI.secondaryText)
+                    Spacer()
                     Button("继续检测") { Task { await session.resumeAutomation() } }
                         .buttonStyle(.bordered)
                         .frame(minHeight: 44)
@@ -232,33 +250,10 @@ struct GroupCheckInView: View {
         controller.session?.currentOrigin?.host ?? controller.session?.profile.homePageHost ?? ""
     }
 
-    private var statusTitle: String {
-        if controller.isPaused { return "已暂停" }
-        if controller.isRefreshingBalance { return "更新余额" }
-        switch controller.session?.automationState ?? .inactive {
-        case .captcha: return "待验证"
-        case .noButton: return "等待入口"
-        case .error: return "检测失败"
-        case .success, .skipped: return "已完成"
-        case .inactive, .running: return "检测中"
-        }
-    }
-
-    private var statusColor: Color {
-        guard !controller.isPaused else { return .secondary }
-        if controller.isRefreshingBalance { return .secondary }
-        switch controller.session?.automationState ?? .inactive {
-        case .captcha, .noButton: return AppUI.warning
-        case .error: return AppUI.danger
-        case .success, .skipped: return AppUI.success
-        case .inactive, .running: return .secondary
-        }
-    }
-
     private var results: some View {
         List {
             Section {
-                Label(controller.queue.isFinished ? "本组已处理完毕" : "本组签到已停止", systemImage: controller.queue.isFinished ? "checkmark.circle" : "stop.circle")
+                Label(controller.queue.isFinished ? "本组已处理完毕" : (controller.mode == .balanceOnly ? "余额更新已停止" : "本组签到已停止"), systemImage: controller.queue.isFinished ? "checkmark.circle" : "stop.circle")
                 Text("已完成 \(controller.queue.completedCount) · 待处理 \(controller.queue.failedCount) · 已跳过 \(controller.queue.skippedCount) · 未处理 \(controller.queue.profileIDs.count - controller.queue.index)")
                     .font(.subheadline)
                     .foregroundStyle(AppUI.secondaryText)

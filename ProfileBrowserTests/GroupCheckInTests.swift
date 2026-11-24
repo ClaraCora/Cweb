@@ -100,6 +100,11 @@ struct GroupCheckInTests {
             shouldRunToday: true, completionKey: UUID().uuidString
         ) { event in controller.receive(session.profile.id, event) }
         session.receiveAutomationMessage(type: "captcha", message: "等待验证码")
+        let waitingCheckpoint = try #require(fixture.model.pendingGroupRun?.updatedAt)
+        for _ in 0..<20 {
+            controller.receive(session.profile.id, AutomationEvent(kind: .captcha, message: "等待验证码"))
+        }
+        #expect(fixture.model.pendingGroupRun?.updatedAt == waitingCheckpoint)
         for seconds in [5, 65, 300, 3600] {
             await controller.recheck(now: .now.addingTimeInterval(TimeInterval(seconds)))
             #expect(controller.session === session)

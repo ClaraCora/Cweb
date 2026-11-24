@@ -166,6 +166,9 @@ struct BalanceReadWebKitTests {
         let enteredProfile = try #require(model.profiles.first)
         #expect(enteredProfile.balanceSourceVerified == true)
         #expect(model.balanceStatus(for: enteredProfile)?.hasPrefix("更新于 ") == true)
+        // The DOM read and the validated WKScriptMessage complete independently.
+        // Start the post-check-in reload only after native code receives success.
+        try await waitUntil { successes > 0 }
         #expect(successes == 1)
         let state = try await session.page.callJavaScript("return document.readyState;") as? String
         #expect(state == "interactive")

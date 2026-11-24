@@ -4,20 +4,29 @@ import Foundation
 /// and discard their late result, instead of awaiting an uncooperative child.
 @MainActor
 enum BoundedOperation {
-    static func run<Value>(timeout: Duration, operation: @escaping @MainActor () async throws -> Value) async throws -> Value {
-        let box = Completion<Value>()
-        let task = Task { @MainActor in
-            do { box.result = .success(try await operation()) }
-            catch { box.result = .failure(error) }
-        }
-        defer { task.cancel() }
-        let deadline = ContinuousClock.now.advanced(by: timeout)
-        while true {
-            try Task.checkCancellation()
-            if let result = box.result { return try result.get() }
-            guard ContinuousClock.now < deadline else { throw BrowserSessionDiagnosticError(message: "操作超时，请重试。") }
-            try await Task.sleep(for: .milliseconds(25))
-        }
+    struct Timeout: LocalizedError {
+        var errorDescription: String? { "操作超时，请重试。" }
     }
-    private final class Completion<Value> { var result: Result<Value, Error>? }
+
+    static func run<Value: Sendable>(timeout: Duration, operation: @escaping @MainActor () async throws -> Value) async throws -> Value {
+        try Task.checkCancellation()
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        let (stream, completion) = AsyncThrowingStream<Value, Error>.makeStream()
+        let task = Task { @MainActor in
+            do {
+                try Task.checkCancellation()
+                completion.yield(try await operation())
+                completion.finish()
+            } catch { completion.finish(throwing: error) }
+        }
+        let timer = Task {
+            try await Task.sleep(until: deadline, clock: .continuous)
+            completion.finish(throwing: Timeout())
+        }
+        defer { task.cancel(); timer.cancel() }
+        var iterator = stream.makeAsyncIterator()
+        guard let value = try await iterator.next() else { throw CancellationError() }
+        try Task.checkCancellation()
+        return value
+    }
 }

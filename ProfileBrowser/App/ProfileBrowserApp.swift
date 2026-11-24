@@ -5,6 +5,7 @@ import SwiftUI
 struct ProfileBrowserApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @State private var model = AppModel.launchModel()
+    @State private var lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
     @AppStorage(AppSettings.appearanceModeKey) private var appearanceModeRaw = AppSettings.defaultAppearanceMode
 
     private var preferredColorScheme: ColorScheme? {
@@ -19,6 +20,10 @@ struct ProfileBrowserApp: App {
         WindowGroup {
             AppRootView()
                 .environment(model)
+                .environment(\.cwebLowPowerMode, lowPowerMode)
+                .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)) { _ in
+                    lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
+                }
                 .tint(Color("AccentColor"))
                 .preferredColorScheme(preferredColorScheme)
                 .overlay {

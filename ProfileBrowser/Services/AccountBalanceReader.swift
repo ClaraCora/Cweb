@@ -31,37 +31,19 @@ enum AccountBalanceReader {
         }, wait: wait, timeout: timeout)
     }
 
-    static func readResult<Value: Equatable>(
+    static func readResult<Value: Equatable & Sendable>(
         afterCheckIn: Bool,
         reloadPage: @escaping @MainActor () async throws -> Void,
         readValue: @escaping @MainActor () async throws -> Value?,
         wait: @escaping @MainActor () async throws -> Void = { try await Task.sleep(for: .milliseconds(250)) },
         timeout: Duration? = nil
     ) async throws -> Value? {
-        try Task.checkCancellation()
-        let completion = BalanceReadCompletion<Value>()
-        let operation = Task { @MainActor in
-            do {
-                try Task.checkCancellation()
+        do {
+            return try await BoundedOperation.run(timeout: timeout ?? .seconds(afterCheckIn ? 5 : 12)) {
                 if afterCheckIn { try await reloadPage() }
-                try Task.checkCancellation()
-                let value = try await readDocument(afterCheckIn: afterCheckIn, readValue: readValue, wait: wait)
-                completion.result = .success(value)
-            } catch {
-                completion.result = .failure(error)
+                return try await readDocument(afterCheckIn: afterCheckIn, readValue: readValue, wait: wait)
             }
-        }
-        defer { operation.cancel() }
-
-        let deadline = ContinuousClock.now.advanced(by: timeout ?? .seconds(afterCheckIn ? 5 : 12))
-        while true {
-            try Task.checkCancellation()
-            if let result = completion.result { return try result.get() }
-            if ContinuousClock.now >= deadline { return nil }
-            // Do not await the child task on timeout: a stalled WebKit call
-            // may ignore cancellation. Its late result must never block the queue.
-            try await Task.sleep(for: .milliseconds(25))
-        }
+        } catch is BoundedOperation.Timeout { return nil }
     }
 
     private static func readDocument<Value: Equatable>(
@@ -101,11 +83,6 @@ enum AccountBalanceReader {
         }
         return nil
     }
-}
-
-@MainActor
-private final class BalanceReadCompletion<Value> {
-    var result: Result<Value?, Error>?
 }
 
 enum BalanceReadError: LocalizedError {

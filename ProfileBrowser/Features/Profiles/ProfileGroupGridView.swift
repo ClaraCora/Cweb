@@ -18,7 +18,7 @@ struct ProfileGroupGridView: View {
             content
                 .navigationTitle("分组")
                 .navigationBarTitleDisplayMode(.inline)
-                .background(Color(.systemGroupedBackground))
+                .background { WorkspaceBackdrop() }
                 .navigationDestination(for: UUID.self) { groupID in
                     ProfileListView(
                         groupID: groupID,
@@ -82,9 +82,6 @@ struct ProfileGroupGridView: View {
                     guard count == 0 else { return }
                     schedulePendingGroupDeletion()
                 }
-                .task {
-                    await model.retryLoadingProfiles()
-                }
         }
     }
 
@@ -119,7 +116,7 @@ struct ProfileGroupGridView: View {
         return List {
             Section {
                 groupOverview
-                    .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 24, trailing: 20))
+                    .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 18, trailing: 20))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             }
@@ -191,11 +188,12 @@ struct ProfileGroupGridView: View {
                     .font(.title2.weight(.medium))
                     .foregroundStyle(Color.accentColor)
                     .frame(width: 48, height: 48)
-                    .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
+                    .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 5) {
                     Text("环境分组")
-                        .font(.title3.weight(.semibold))
+                        .font(.title2.weight(.semibold))
+                        .accessibilityAddTraits(.isHeader)
                     Text("\(model.profileGroups.count) 个分组 · \(model.profiles.count) 个环境")
                         .font(.footnote)
                         .foregroundStyle(AppUI.secondaryText)
@@ -204,7 +202,7 @@ struct ProfileGroupGridView: View {
                 }
             }
 
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
                 Button {
                     editorMode = .create
                 } label: {
@@ -222,7 +220,7 @@ struct ProfileGroupGridView: View {
                     Label("分组排序", systemImage: "arrow.up.arrow.down")
                         .frame(maxWidth: .infinity, minHeight: 44)
                         .foregroundStyle(Color.accentColor)
-                        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+                        .background(Color(.quaternarySystemFill), in: RoundedRectangle(cornerRadius: 12))
                 }
                 .disabled(model.profileGroups.count < 2)
                 .opacity(model.profileGroups.count < 2 ? 0.45 : 1)
@@ -231,6 +229,8 @@ struct ProfileGroupGridView: View {
             .font(.subheadline.weight(.semibold))
             .buttonStyle(.plain)
         }
+        .padding(16)
+        .beamPanel(cornerRadius: 18, active: true)
     }
 
     private var groupDeletionAlertBinding: Binding<Bool> {
@@ -335,13 +335,15 @@ private struct ProfileGroupRow: View {
     }
 
     private var environmentCount: some View {
-        Text("\(group.profiles.count) 个环境")
-            .font(.subheadline.monospacedDigit())
-            .foregroundStyle(Color.accentColor)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-            .fixedSize(horizontal: true, vertical: false)
+        HStack(alignment: .firstTextBaseline, spacing: 3) {
+            Text(group.profiles.count, format: .number)
+                .font(.headline.monospacedDigit())
+                .foregroundStyle(.primary)
+            Text("个环境")
+                .font(.caption)
+                .foregroundStyle(AppUI.secondaryText)
+        }
+        .fixedSize(horizontal: true, vertical: false)
     }
 }
 

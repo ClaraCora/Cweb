@@ -44,6 +44,14 @@ jobs:
           xcodebuild -version
           swift --version
 
+      - name: Ensure Metal compiler is available
+        run: |
+          set -euo pipefail
+          if ! xcrun --sdk iphoneos metal --version; then
+            xcodebuild -downloadComponent metalToolchain
+            xcrun --sdk iphoneos metal --version
+          fi
+
       - name: Verify check-in script behavior
         run: node --test scripts/check-in.test.cjs
 
@@ -170,6 +178,11 @@ jobs:
           test -f "$APP_PATH/Assets.car"
           test -f "$APP_PATH/ProfileBrowser"
           test ! -e "$APP_PATH/embedded.mobileprovision"
+          BEAM_LIBRARY="BorderBeam_BorderBeam.bundle/default.metallib"
+          if [ ! -s "$APP_PATH/$BEAM_LIBRARY" ]; then
+            echo "::error::Missing compiled BorderBeam shader in the device app."
+            exit 1
+          fi
 
           SHORT_SHA="${GITHUB_SHA:0:7}"
           CWEB_APP_BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Info.plist")"
@@ -189,6 +202,7 @@ jobs:
           (
             cd artifacts
             /usr/bin/zip -qry "$IPA_NAME" Payload
+            /usr/bin/unzip -tq "$IPA_NAME" "Payload/ProfileBrowser.app/$BEAM_LIBRARY"
             rm -rf Payload
             shasum -a 256 "$IPA_NAME" > SHA256SUMS.txt
             {

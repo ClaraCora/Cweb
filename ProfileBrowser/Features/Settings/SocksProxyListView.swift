@@ -25,10 +25,14 @@ struct SocksProxyListView: View {
 
     var body: some View {
         @Bindable var model = model
+        let visible = rankedProxies
+        let counts = model.socksProxies.reduce(into: [SocksProxyStatus: Int]()) {
+            $0[$1.latestStatus, default: 0] += 1
+        }
 
         List {
             Section {
-                proxySummary
+                proxySummary(availableCount: counts[.available, default: 0], visibleCount: visible.count)
                     .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 16, trailing: 20))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -82,13 +86,13 @@ struct SocksProxyListView: View {
             }
             if !model.socksProxies.isEmpty {
                 Section {
-                    proxyFilters
+                    proxyFilters(counts: counts)
                         .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 12, trailing: 20))
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                 }
             }
-            proxySection
+            proxySection(visibleProxies: visible)
                 .disabled(isValidating)
             presetSection
                 .disabled(isValidating)
@@ -96,7 +100,7 @@ struct SocksProxyListView: View {
         .listStyle(.plain)
         .listSectionSpacing(0)
         .scrollContentBackground(.hidden)
-        .background(Color(.systemGroupedBackground))
+        .background { WorkspaceBackdrop() }
         .scrollDismissesKeyboard(.interactively)
         .environment(\.defaultMinListRowHeight, 44)
         .accessibilityIdentifier("proxy.list")
@@ -219,25 +223,28 @@ struct SocksProxyListView: View {
         }
     }
 
-    private var proxySummary: some View {
+    private func proxySummary(availableCount: Int, visibleCount: Int) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
                 Image(systemName: "network")
                     .font(.title2.weight(.medium))
                     .foregroundStyle(Color.accentColor)
                     .frame(width: 48, height: 48)
-                    .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
+                    .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 5) {
                     Text("代理管理")
-                        .font(.title3.weight(.semibold))
+                        .font(.title2.weight(.semibold))
+                        .accessibilityAddTraits(.isHeader)
                     Text(searchText.isEmpty
-                         ? "共 \(model.socksProxies.count) 条 · \(model.socksProxies.filter(\.isAvailable).count) 条可用"
-                         : "匹配 \(rankedProxies.count) / \(model.socksProxies.count) 条")
+                         ? "共 \(model.socksProxies.count) 条 · \(availableCount) 条可用"
+                         : "匹配 \(visibleCount) / \(model.socksProxies.count) 条")
                         .font(.footnote)
+                        .monospacedDigit()
                         .foregroundStyle(AppUI.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer(minLength: 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 Button {
                     showsRules = true
                 } label: {
@@ -252,12 +259,13 @@ struct SocksProxyListView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .layoutPriority(1)
                 .foregroundStyle(Color.accentColor)
                 .accessibilityHint("查看或修改测速方式和结果保留规则")
                 .accessibilityIdentifier("proxy.rules")
             }
 
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
                 Button {
                     validateProxies()
                 } label: {
@@ -276,7 +284,7 @@ struct SocksProxyListView: View {
                     Label("导入代理", systemImage: "arrow.down.to.line")
                         .frame(maxWidth: .infinity, minHeight: 44)
                         .foregroundStyle(Color.accentColor)
-                        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+                        .background(Color(.quaternarySystemFill), in: RoundedRectangle(cornerRadius: 12))
                 }
                 .disabled(isValidating)
                 .opacity(isValidating ? 0.45 : 1)
@@ -285,38 +293,43 @@ struct SocksProxyListView: View {
             .font(.subheadline.weight(.semibold))
             .buttonStyle(.plain)
         }
+        .padding(16)
+        .beamPanel(cornerRadius: 18, active: true)
     }
 
-    private var proxyFilters: some View {
-        HStack(spacing: 8) {
+    private func proxyFilters(counts: [SocksProxyStatus: Int]) -> some View {
+        HStack(spacing: 2) {
             ForEach(ProxyStatusFilter.allCases) { filter in
+                let isSelected = statusFilter == filter
+                let count = filter.status.map { counts[$0, default: 0] } ?? model.socksProxies.count
                 Button {
                     statusFilter = filter
                 } label: {
-                    HStack(spacing: 4) {
+                    VStack(spacing: 2) {
+                        Text(count, format: .number)
+                            .font(.headline.monospacedDigit())
                         Text(filter.title)
-                        Text("\(model.socksProxies.filter { filter.includes($0) }.count)")
-                            .monospacedDigit()
+                            .font(.caption.weight(isSelected ? .semibold : .regular))
                     }
-                    .font(.subheadline.weight(statusFilter == filter ? .semibold : .regular))
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .foregroundStyle(statusFilter == filter ? Color(.systemBackground) : AppUI.secondaryText)
-                    .background(statusFilter == filter ? Color.accentColor : Color(.secondarySystemGroupedBackground), in: Capsule())
-                    .contentShape(Capsule())
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                    .foregroundStyle(isSelected ? Color.accentColor : AppUI.secondaryText)
+                    .background(isSelected ? Color.accentColor.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(filter.title)
-                .accessibilityValue(statusFilter == filter ? "已选择" : "未选择")
-                .accessibilityAddTraits(statusFilter == filter ? .isSelected : [])
+                .accessibilityLabel("\(filter.title)，\(count) 条")
+                .accessibilityValue(isSelected ? "已选择" : "未选择")
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
                 .accessibilityIdentifier("proxy.filter." + filter.rawValue)
             }
         }
+        .padding(4)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
         .disabled(isValidating)
     }
 
     @ViewBuilder
-    private var proxySection: some View {
-        let visibleProxies = rankedProxies
+    private func proxySection(visibleProxies: [SocksProxyRanking]) -> some View {
         Section {
             if model.socksProxies.isEmpty {
                 ContentUnavailableView {
@@ -486,7 +499,9 @@ struct SocksProxyListView: View {
     }
 
     private var rankedProxies: [SocksProxyRanking] {
-        model.rankedSocksProxies.filter { ranking in
+        let rankings = model.rankedSocksProxies
+        guard statusFilter != .all || !searchText.isEmpty else { return rankings }
+        return rankings.filter { ranking in
             statusFilter.includes(ranking.proxy) && (searchText.isEmpty || "\(ranking.number) \(ranking.proxy.displayCode ?? "") \(ranking.proxy.displayAddress)"
                 .localizedCaseInsensitiveContains(searchText))
         }
@@ -588,13 +603,17 @@ private enum ProxyStatusFilter: String, CaseIterable, Identifiable {
         }
     }
 
-    func includes(_ proxy: SocksProxy) -> Bool {
+    var status: SocksProxyStatus? {
         switch self {
-        case .all: true
-        case .available: proxy.latestStatus == .available
-        case .untested: proxy.latestStatus == .untested
-        case .unavailable: proxy.latestStatus == .unavailable
+        case .all: nil
+        case .available: .available
+        case .untested: .untested
+        case .unavailable: .unavailable
         }
+    }
+
+    func includes(_ proxy: SocksProxy) -> Bool {
+        status.map { proxy.latestStatus == $0 } ?? true
     }
 }
 

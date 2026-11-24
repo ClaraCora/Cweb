@@ -44,6 +44,8 @@ struct ProfileListView: View {
 
     private var navigationContent: some View {
         content
+            .scrollContentBackground(.hidden)
+            .background { WorkspaceBackdrop() }
             .navigationTitle(currentGroup?.name ?? "分组")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, prompt: "搜索环境名称、主页或代理")
@@ -217,7 +219,8 @@ struct ProfileListView: View {
     }
 
     private var checkInControls: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let isTaskRunning = checkInController.map { $0.canStop && GroupTaskStatus.current($0).running } ?? false
+        return VStack(alignment: .leading, spacing: 0) {
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 0) {
                     checkInSummary
@@ -237,12 +240,12 @@ struct ProfileListView: View {
                     .padding(.vertical, 4)
             }
         }
+        .padding(.horizontal, AppUI.Spacing.row)
         .frame(maxWidth: AppUI.readableWidth - 2 * AppUI.Spacing.page)
+        .beamPanel(cornerRadius: 14, active: isTaskRunning && !showsGroupCheckIn)
         .frame(maxWidth: .infinity)
         .padding(.horizontal, AppUI.Spacing.page)
         .padding(.vertical, 4)
-        .background(.bar)
-        .overlay(alignment: .bottom) { Divider() }
     }
 
     private var checkInButtons: some View {
@@ -259,23 +262,28 @@ struct ProfileListView: View {
     @ViewBuilder
     private var checkInSummary: some View {
         if let checkInController, checkInController.canStop {
+            let status = GroupTaskStatus.current(checkInController)
+            let taskPage = checkInController.mode == .balanceOnly ? "返回余额页面" : "返回签到页面"
             Button {
                 showsGroupCheckIn = true
             } label: {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("\(checkInController.queue.index + 1)/\(checkInController.queue.profileIDs.count) · \(checkInController.isPaused ? "已暂停" : "签到中")")
-                        .font(.subheadline.weight(.medium))
-                        .monospacedDigit()
-                    Text("返回签到页面")
-                        .font(.caption)
-                        .foregroundStyle(AppUI.secondaryText)
+                HStack(spacing: 6) {
+                    status.icon
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(checkInController.queue.index + 1)/\(checkInController.queue.profileIDs.count) · \(status.title)")
+                            .font(.subheadline.weight(.medium))
+                            .monospacedDigit()
+                        Text(taskPage)
+                            .font(.caption)
+                            .foregroundStyle(AppUI.secondaryText)
+                    }
                 }
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("返回签到页面，第 \(checkInController.queue.index + 1) 个，共 \(checkInController.queue.profileIDs.count) 个，已完成 \(checkInController.queue.completedCount) 个")
+            .accessibilityLabel("\(taskPage)，第 \(checkInController.queue.index + 1) 个，共 \(checkInController.queue.profileIDs.count) 个，\(status.title)")
         } else {
             VStack(alignment: .leading, spacing: 2) {
                 Text(model.pendingGroupRun?.groupID == groupID ? "恢复上次任务" : "分组签到")
@@ -285,7 +293,7 @@ struct ProfileListView: View {
                     .foregroundStyle(AppUI.secondaryText)
             }
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .accessibilityHint("今天已完成签到的环境会自动跳过")
+            .accessibilityHint(taskMode == .balanceOnly ? "继续按序更新本组余额" : "今天已完成签到的环境会自动跳过")
         }
     }
 
@@ -296,7 +304,13 @@ struct ProfileListView: View {
     }
 
     private var isCheckInScriptEmpty: Bool {
-        model.globalScriptSettings.source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        taskMode == .checkIn && model.globalScriptSettings.source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var taskMode: GroupRunMode {
+        if let checkInController, checkInController.canStop { return checkInController.mode }
+        if let record = model.pendingGroupRun, record.groupID == groupID { return record.mode ?? .checkIn }
+        return .checkIn
     }
 
     private func startCheckIn() {
@@ -310,7 +324,9 @@ struct ProfileListView: View {
 
     @ViewBuilder
     private var content: some View {
-        if visibleProfiles.isEmpty && !groupProfiles.isEmpty {
+        let members = groupProfiles
+        let visibleProfiles = filteredProfiles(members)
+        if visibleProfiles.isEmpty && !members.isEmpty {
             ContentUnavailableView {
                 Label("没有符合条件的环境", systemImage: "line.3.horizontal.decrease")
             } description: {
@@ -349,7 +365,7 @@ struct ProfileListView: View {
                         }
                     }
                 } header: {
-                    groupProxyHeader
+                    groupProxyHeader(for: visibleProfiles)
                 } footer: {
                     if let proxyTestSummary { Text(proxyTestSummary) }
                 }
@@ -360,28 +376,30 @@ struct ProfileListView: View {
         }
     }
 
-    private var groupProxyHeader: some View {
-        ViewThatFits(in: .horizontal) {
+    private func groupProxyHeader(for profiles: [BrowserProfile]) -> some View {
+        let count = profileCount(profiles.count)
+        let test = proxyTestButton(hasProxy: profiles.contains { model.socksProxy(for: $0) != nil })
+        return ViewThatFits(in: .horizontal) {
             HStack(spacing: AppUI.Spacing.related) {
-                profileCount.fixedSize()
+                count.fixedSize()
                 Spacer(minLength: AppUI.Spacing.related)
-                proxyTestButton.fixedSize()
+                test.fixedSize()
             }
             VStack(alignment: .leading, spacing: 0) {
-                profileCount
-                proxyTestButton
+                count
+                test
             }
         }
         .textCase(nil)
     }
 
-    private var profileCount: some View {
-        Text(todayFilter == 0 ? "\(visibleProfiles.count) 个环境" : "\(todayFilter == 1 ? "待签到" : todayFilter == 2 ? "已完成" : "需处理") · \(visibleProfiles.count) 个环境")
+    private func profileCount(_ count: Int) -> some View {
+        Text(todayFilter == 0 ? "\(count) 个环境" : "\(todayFilter == 1 ? "待签到" : todayFilter == 2 ? "已完成" : "需处理") · \(count) 个环境")
             .font(.footnote)
             .foregroundStyle(AppUI.secondaryText)
     }
 
-    private var proxyTestButton: some View {
+    private func proxyTestButton(hasProxy: Bool) -> some View {
         Button {
             isTestingProxies = true
         } label: {
@@ -395,13 +413,13 @@ struct ProfileListView: View {
         }
         .buttonStyle(.borderless)
         .disabled(isTestingProxies || editMode == .active || checkInController?.canStop == true
-            || model.groupProxyTargets(for: visibleProfiles).isEmpty)
+            || !hasProxy)
         .accessibilityHint("仅测本组使用的代理，共用代理只测一次，直连环境不参与")
         .accessibilityIdentifier("profiles.testProxies")
     }
 
     private func measureGroupProxies() async {
-        let profiles = visibleProfiles
+        let profiles = filteredProfiles(groupProfiles)
         let targets = model.groupProxyTargets(for: profiles)
         testingProxyIDs = Set(targets.map(\.id))
         proxyTestCompleted = 0
@@ -430,23 +448,31 @@ struct ProfileListView: View {
 
     private var isGroupLocked: Bool { !model.reservedProfileIDs.isDisjoint(with: Set(groupProfiles.map(\.id))) }
 
-    private var visibleProfiles: [BrowserProfile] {
-        groupProfiles.filter { profile in
-            let pending = model.shouldRunAutomation(for: profile.id)
-            let matches = searchText.isEmpty || (profile.name + " " + profile.homePageHost + " " + proxySummary(for: profile))
-                .localizedStandardContains(searchText)
-            let needsAttention = profile.balanceReadError != nil || (profile.cachedBalance != nil && profile.balanceSourceVerified != true)
+    private func filteredProfiles(_ members: [BrowserProfile]) -> [BrowserProfile] {
+        guard !searchText.isEmpty || todayFilter != 0 else { return members }
+        return members.filter { profile in
+            if !searchText.isEmpty {
+                let label = profile.name + " " + profile.homePageHost + " " + proxySummary(for: profile)
+                guard label.localizedStandardContains(searchText) else { return false }
+            }
+            switch todayFilter {
+            case 0: return true
+            case 1: return model.shouldRunAutomation(for: profile)
+            case 2: return !model.shouldRunAutomation(for: profile)
+            case 3: return profile.balanceReadError != nil || (profile.cachedBalance != nil && profile.balanceSourceVerified != true)
                 || model.entryPreflightIssue(for: profile) != nil
-            return matches && (todayFilter == 0 || (todayFilter == 1 && pending) || (todayFilter == 2 && !pending) || (todayFilter == 3 && needsAttention))
+            default: return false
+            }
         }
     }
 
     private var groupProfiles: [BrowserProfile] {
-        model.sortedProfiles.filter { profile in
+        let groupName = currentGroup?.name
+        return model.sortedProfiles.filter { profile in
             if let profileGroupID = profile.groupID {
                 return profileGroupID == groupID
             }
-            return profile.displayGroupName == currentGroup?.name
+            return profile.displayGroupName == groupName
         }
     }
 
@@ -485,7 +511,7 @@ struct ProfileListView: View {
                 profile: profile,
                 balance: model.balance(for: profile),
                 balanceStatus: model.balanceStatus(for: profile),
-                todayCompleted: !model.shouldRunAutomation(for: profile.id),
+                todayCompleted: !model.shouldRunAutomation(for: profile),
                 proxyMeasuredAt: model.socksProxy(for: profile)?.latestMeasurement?.checkedAt,
                 proxySummary: proxySummary(for: profile),
                 proxyLatency: proxyLatency(for: profile),

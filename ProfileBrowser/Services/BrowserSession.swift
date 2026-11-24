@@ -20,7 +20,7 @@ final class BrowserSession {
     // Retain a cancelled task until the next navigation can await its teardown.
     private var navigationTask: Task<Void, Never>?
     private var navigationGeneration = 0
-    private var committedNavigationGeneration = 0
+    @ObservationIgnored private var navigationCommit: AsyncStream<Void>.Continuation?
     private let proxyConfigurationError: String?
     private let userContentController: WKUserContentController
     private var automationMessageHandler: AutomationMessageHandler?
@@ -129,7 +129,10 @@ final class BrowserSession {
         automationConfigured = true
         automationEventHandler = onEvent
         baseRules = settings.siteRules ?? []
-        installBaseScripts()
+        defer {
+            if automationUserScript != nil { installAutomationScripts() }
+            else if !baseRules.isEmpty { installBaseScripts() }
+        }
 
         guard settings.enabled else {
             automationState = .inactive
@@ -166,13 +169,11 @@ final class BrowserSession {
             injectionTime: injectionTime,
             forMainFrameOnly: true
         )
-        installAutomationScripts()
         automationState = .running
     }
 
     private func installAutomationScripts() {
         guard !automationHasCompleted, let automationUserScript else { return }
-        userContentController.removeAllUserScripts()
         installBaseScripts()
         // Preserve both manual and CAPTCHA pauses across redirects, including
         // a new origin whose localStorage has no record of the current pause.
@@ -222,7 +223,9 @@ final class BrowserSession {
     }
 
     func close() {
+        guard !isClosed else { return }
         isClosed = true
+        finishNavigationCommit()
         balanceReadContinuation?.finish()
         balanceReadContinuation = nil
         automationPaused = true
@@ -404,6 +407,7 @@ final class BrowserSession {
         if page.isLoading {
             navigationTask?.cancel()
             navigationGeneration += 1
+            finishNavigationCommit()
             page.stopLoading()
         } else {
             startNavigation { $0.reload() }
@@ -419,22 +423,20 @@ final class BrowserSession {
             throw CancellationError()
         }
         finishAutomationForBalanceRefresh()
-        startNavigation { $0.reload(fromOrigin: true) }
+        let (commits, commit) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        startNavigation(commit: commit) { $0.reload(fromOrigin: true) }
         let generation = navigationGeneration
         do {
-            // Wait for the new document, not all its images/third-party
-            // resources. The balance reader also waits for DOM readiness.
-            while committedNavigationGeneration != generation {
-                try Task.checkCancellation()
-                guard !isClosed, navigationGeneration == generation, navigationTask != nil else {
-                    throw CancellationError()
-                }
-                try await Task.sleep(for: .milliseconds(25))
+            // A committed document can expose its balance while images are still loading.
+            var iterator = commits.makeAsyncIterator()
+            guard await iterator.next() != nil, !isClosed, navigationGeneration == generation else {
+                throw CancellationError()
             }
             try Task.checkCancellation()
         } catch {
             if navigationGeneration == generation, !isClosed {
                 navigationGeneration += 1
+                finishNavigationCommit()
                 navigationTask?.cancel()
                 page.stopLoading()
             }
@@ -443,6 +445,7 @@ final class BrowserSession {
     }
 
     private func finishAutomationForBalanceRefresh() {
+        guard !automationHasCompleted else { return }
         automationHasCompleted = true
         automationUserScript = nil
         installBaseScripts()
@@ -454,10 +457,13 @@ final class BrowserSession {
     /// per active navigation also ensures a cancelled/previous load cannot
     /// surface an error after a newer navigation has begun.
     private func startNavigation<S: AsyncSequence>(
+        commit: AsyncStream<Void>.Continuation? = nil,
         _ makeSequence: @escaping @MainActor (WebPage) -> S
     ) where S.Element == WebPage.NavigationEvent {
         let previousTask = navigationTask
         previousTask?.cancel()
+        finishNavigationCommit()
+        navigationCommit = commit
         navigationGeneration += 1
         let generation = navigationGeneration
 
@@ -471,7 +477,10 @@ final class BrowserSession {
             do {
                 for try await event in sequence {
                     guard !Task.isCancelled, self.navigationGeneration == generation else { return }
-                    if case .committed = event { self.committedNavigationGeneration = generation }
+                    if case .committed = event {
+                        self.navigationCommit?.yield(())
+                        self.finishNavigationCommit()
+                    }
                 }
             } catch {
                 guard !Task.isCancelled,
@@ -482,8 +491,14 @@ final class BrowserSession {
             }
 
             guard self.navigationGeneration == generation else { return }
+            self.finishNavigationCommit()
             self.navigationTask = nil
         }
+    }
+
+    private func finishNavigationCommit() {
+        navigationCommit?.finish()
+        navigationCommit = nil
     }
 
     private static func navigationErrorMessage(_ error: Error) -> String {
