@@ -112,6 +112,9 @@ struct ProfileGroupGridView: View {
 
     private var groupList: some View {
         let groups = model.profileGroups
+        // Bound each live glass surface when the user has many groups.
+        let rowsPerPanel = 8
+        let panelStarts = Array(stride(from: 0, to: groups.count, by: rowsPerPanel))
 
         return List {
             Section {
@@ -131,45 +134,22 @@ struct ProfileGroupGridView: View {
                     }
                     .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                 }
-                ForEach(groups) { group in
-                    Button {
-                        navigationPath.append(group.id)
-                    } label: {
-                        ProfileGroupRow(
-                            group: group,
-                            isBusy: model.busyGroupName == group.name
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("group.\(group.id.uuidString)")
-                    .disabled(model.busyGroupName == group.name)
-                    .background {
-                        UnevenRoundedRectangle(
-                            topLeadingRadius: group.id == groups.first?.id ? 16 : 0,
-                            bottomLeadingRadius: group.id == groups.last?.id ? 16 : 0,
-                            bottomTrailingRadius: group.id == groups.last?.id ? 16 : 0,
-                            topTrailingRadius: group.id == groups.first?.id ? 16 : 0
-                        )
-                        .fill(Color(.secondarySystemGroupedBackground))
-                    }
-                    .overlay(alignment: .bottom) {
-                        if group.id != groups.last?.id {
-                            Divider().padding(.leading, 72).padding(.trailing, 16)
+                ForEach(panelStarts, id: \.self) { start in
+                    let end = min(start + rowsPerPanel, groups.count)
+                    let panelGroups = groups[start..<end]
+                    VStack(spacing: 0) {
+                        ForEach(panelGroups) { group in
+                            groupButton(group, canReorder: groups.count > 1)
+                            if group.id != panelGroups.last?.id {
+                                Divider()
+                                    .padding(.leading, 72)
+                                    .padding(.trailing, 16)
+                                    .accessibilityHidden(true)
+                            }
                         }
                     }
-                    .contextMenu {
-                        Button("编辑分组", systemImage: "pencil") {
-                            groupEditor = group
-                        }
-                        Button("调整分组排序", systemImage: "arrow.up.arrow.down") {
-                            showsGroupOrder = true
-                        }
-                        .disabled(groups.count < 2)
-                        Button("删除整个分组", systemImage: "trash", role: .destructive) {
-                            pendingGroupDeletion = group
-                        }
-                    }
-                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                    .beamPanel(cornerRadius: 16, active: true)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 12, trailing: 20))
                 }
             }
             .listRowBackground(Color.clear)
@@ -179,6 +159,30 @@ struct ProfileGroupGridView: View {
         .listSectionSpacing(0)
         .scrollContentBackground(.hidden)
         .accessibilityIdentifier("groups.list")
+    }
+
+    private func groupButton(_ group: ProfileGroup, canReorder: Bool) -> some View {
+        let isBusy = model.busyGroupName == group.name
+        return Button {
+            navigationPath.append(group.id)
+        } label: {
+            ProfileGroupRow(group: group, isBusy: isBusy)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("group.\(group.id.uuidString)")
+        .disabled(isBusy)
+        .contextMenu {
+            Button("编辑分组", systemImage: "pencil") {
+                groupEditor = group
+            }
+            Button("调整分组排序", systemImage: "arrow.up.arrow.down") {
+                showsGroupOrder = true
+            }
+            .disabled(!canReorder)
+            Button("删除整个分组", systemImage: "trash", role: .destructive) {
+                pendingGroupDeletion = group
+            }
+        }
     }
 
     private var groupOverview: some View {
