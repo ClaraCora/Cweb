@@ -23,6 +23,7 @@ struct ProfileListView: View {
     @State private var pendingAccountReset: BrowserProfile?
     @State private var checkInController: GroupCheckInController?
     @State private var editMode: EditMode = .inactive
+    @State private var profileRowsHeight: CGFloat?
     @State private var isTestingProxies = false
     @State private var testingProxyIDs: Set<UUID> = []
     @State private var proxyTestCompleted = 0
@@ -348,32 +349,51 @@ struct ProfileListView: View {
                 .buttonStyle(.borderedProminent)
             }
         } else {
-            List {
-                Section {
-                    ForEach(visibleProfiles) { profile in
-                        profileButton(for: profile)
-                    }
-                    .onMove { offsets, destination in
-                        do {
-                            try model.moveProfiles(
-                                visibleProfiles.map(\.id),
-                                fromOffsets: offsets,
-                                toOffset: destination
-                            )
-                        } catch {
-                            model.present(error)
-                        }
-                    }
-                } header: {
-                    groupProxyHeader(for: visibleProfiles)
-                } footer: {
-                    if let proxyTestSummary { Text(proxyTestSummary) }
+            VStack(alignment: .leading, spacing: AppUI.Spacing.related) {
+                groupProxyHeader(for: visibleProfiles)
+                    .padding(.horizontal, AppUI.Spacing.page)
+                profileRows(visibleProfiles)
+                if let proxyTestSummary {
+                    Text(proxyTestSummary)
+                        .font(.footnote)
+                        .foregroundStyle(AppUI.secondaryText)
+                        .padding(.horizontal, AppUI.Spacing.page)
                 }
             }
-            .listStyle(.insetGrouped)
-            .scrollDismissesKeyboard(.interactively)
-            .readableListMargins()
+            .frame(maxWidth: AppUI.readableWidth)
+            .padding(.horizontal, 20)
+            .padding(.bottom, AppUI.Spacing.related)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
+    }
+
+    private func profileRows(_ profiles: [BrowserProfile]) -> some View {
+        let cornerRadius: CGFloat = 16
+        return List {
+            ForEach(profiles) { profile in
+                profileButton(for: profile)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden, edges: profile.id == profiles.last?.id ? .all : .top)
+            }
+            .onMove { offsets, destination in
+                do {
+                    try model.moveProfiles(profiles.map(\.id), fromOffsets: offsets, toOffset: destination)
+                } catch {
+                    model.present(error)
+                }
+            }
+        }
+        .listStyle(.plain)
+        .scrollDismissesKeyboard(.interactively)
+        .onScrollGeometryChange(for: CGFloat.self) { geometry in
+            ceil(geometry.contentSize.height)
+        } action: { _, height in
+            // Keep short lists snug and let long lists scroll inside the same panel.
+            profileRowsHeight = height > 0 ? height : nil
+        }
+        .frame(maxHeight: profileRowsHeight)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .circular))
+        .beamPanel(cornerRadius: cornerRadius, active: editMode != .active && !showsGroupCheckIn)
     }
 
     private func groupProxyHeader(for profiles: [BrowserProfile]) -> some View {
