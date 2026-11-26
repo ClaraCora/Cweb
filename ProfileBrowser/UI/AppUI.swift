@@ -134,10 +134,11 @@ struct AppSettingsRow: View {
 
 struct AppStatusMessage: View {
     enum Tone {
-        case success, warning, error
+        case neutral, success, warning, error
 
         var icon: String {
             switch self {
+            case .neutral: "info.circle"
             case .success: "checkmark.circle"
             case .warning: "exclamationmark.circle"
             case .error: "exclamationmark.triangle"
@@ -146,6 +147,7 @@ struct AppStatusMessage: View {
 
         var color: Color {
             switch self {
+            case .neutral: AppUI.secondaryText
             case .success: AppUI.success
             case .warning: AppUI.warning
             case .error: AppUI.danger
@@ -155,12 +157,14 @@ struct AppStatusMessage: View {
 
     let message: String
     let tone: Tone
+    var symbol: String? = nil
 
     var body: some View {
-        Label {
+        HStack(alignment: .firstTextBaseline, spacing: AppUI.Spacing.related) {
+            Image(systemName: symbol ?? tone.icon)
+                .foregroundStyle(tone.color)
+                .accessibilityHidden(true)
             Text(message).foregroundStyle(.primary)
-        } icon: {
-            Image(systemName: tone.icon).foregroundStyle(tone.color)
         }
         .font(.footnote)
         .fixedSize(horizontal: false, vertical: true)

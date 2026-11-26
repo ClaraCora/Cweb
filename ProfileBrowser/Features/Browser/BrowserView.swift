@@ -142,6 +142,7 @@ struct BrowserView: View {
                     .disabled(!automaticallyRefreshesBalance || model.isRefreshingBalance(for: session.profile.id))
                     Button("网站识别规则", systemImage: "slider.horizontal.3") { showsWebsiteRules = true }
                         .accessibilityIdentifier("browser.websiteRules")
+                    Button("网页诊断", systemImage: "waveform.path.ecg") { showsDiagnostics = true }
                 }
                 .accessibilityIdentifier("browser.more")
             }
@@ -250,30 +251,20 @@ private struct AutomationStatusBanner: View {
     let resume: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .center, spacing: 10) {
-                Image(systemName: iconName)
-                    .foregroundStyle(iconColor)
-                    .accessibilityHidden(true)
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(.primary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+        VStack(alignment: .leading, spacing: AppUI.Spacing.related) {
+            AppStatusMessage(message: message, tone: tone, symbol: iconName)
             if state == .captcha {
-                HStack(spacing: 12) {
-                    Spacer(minLength: 0)
-                    Button("继续检测", action: resume)
-                        .font(.footnote.weight(.semibold))
-                        .buttonStyle(.bordered)
-                        .frame(minHeight: AppUI.minimumTarget)
+                Button(action: resume) {
+                    Label("继续检测", systemImage: "arrow.clockwise")
                 }
+                .buttonStyle(WorkspaceActionStyle(prominent: true))
+                .accessibilityHint("在网页上手动完成验证后继续检测")
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.horizontal, AppUI.Spacing.page)
+        .padding(.vertical, AppUI.Spacing.related)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(backgroundColor)
+        .background(Color(.secondarySystemGroupedBackground))
         .overlay(alignment: .bottom) {
             Divider()
         }
@@ -282,9 +273,9 @@ private struct AutomationStatusBanner: View {
 
     private var iconName: String {
         switch state {
-        case .success: "checkmark.circle.fill"
-        case .captcha: "hand.raised.fill"
-        case .error: "exclamationmark.triangle.fill"
+        case .success: "checkmark.circle"
+        case .captcha: "hand.raised"
+        case .error: "exclamationmark.triangle"
         case .noButton: "questionmark.circle"
         case .skipped: "clock.arrow.circlepath"
         case .running: "arrow.triangle.2.circlepath"
@@ -292,23 +283,15 @@ private struct AutomationStatusBanner: View {
         }
     }
 
-    private var iconColor: Color {
+    private var tone: AppStatusMessage.Tone {
         switch state {
-        case .success: AppUI.success
-        case .captcha: AppUI.warning
-        case .error: AppUI.danger
-        case .noButton, .skipped, .running, .inactive: .secondary
+        case .success: .success
+        case .captcha, .noButton: .warning
+        case .error: .error
+        case .skipped, .running, .inactive: .neutral
         }
     }
 
-    private var backgroundColor: Color {
-        switch state {
-        case .captcha: Color.orange.opacity(0.12)
-        case .error: Color.red.opacity(0.10)
-        case .success: Color.green.opacity(0.10)
-        default: Color(.secondarySystemBackground)
-        }
-    }
 }
 
 @MainActor
@@ -348,7 +331,7 @@ private struct BrowserAddressBar: View {
         HStack(spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: session.currentOrigin?.isSecure == true ? "lock.fill" : "globe")
-                    .foregroundStyle(session.currentOrigin?.isSecure == true ? .green : .secondary)
+                    .foregroundStyle(session.currentOrigin?.isSecure == true ? AppUI.success : AppUI.secondaryText)
                     .frame(width: 20)
                     .accessibilityLabel(session.currentOrigin?.isSecure == true ? "安全连接" : "网址")
 
@@ -361,24 +344,27 @@ private struct BrowserAddressBar: View {
                     .onSubmit(session.navigateFromAddressBar)
                     .accessibilityLabel("地址")
 
-                Button(
-                    session.page.isLoading ? "停止" : "刷新",
-                    systemImage: session.page.isLoading ? "xmark" : "arrow.clockwise"
-                ) {
+                Button {
                     session.reloadOrStop()
+                } label: {
+                    Label(
+                        session.page.isLoading ? "停止载入" : "重新载入",
+                        systemImage: session.page.isLoading ? "xmark" : "arrow.clockwise"
+                    )
+                    .modifier(BrowserControlLabel())
                 }
-                .labelStyle(.iconOnly)
-                .frame(minWidth: 44, minHeight: 44)
-                .accessibilityLabel(session.page.isLoading ? "停止载入" : "重新载入")
+                .buttonStyle(WorkspaceRowButtonStyle())
             }
             .padding(.leading, 12)
             .background { ControlGlass(cornerRadius: 22).allowsHitTesting(false).accessibilityHidden(true) }
 
-            Button("隐藏浏览器工具栏", systemImage: "chevron.down") {
+            Button {
                 hideChrome()
+            } label: {
+                Label("隐藏浏览器工具栏", systemImage: "chevron.down")
+                    .modifier(BrowserControlLabel())
             }
-            .labelStyle(.iconOnly)
-            .frame(minWidth: 44, minHeight: 44)
+            .buttonStyle(WorkspaceRowButtonStyle())
             .accessibilityHint("收起地址栏和浏览器控制")
             .accessibilityIdentifier("browser.hideToolbar")
         }
@@ -404,14 +390,7 @@ private struct BrowserToolbar: View {
             Spacer()
             toolbarButton("主页", systemImage: "house", action: goHome)
             Spacer()
-            Menu {
-                Button("网页诊断", systemImage: "waveform.path.ecg", action: showDiagnostics)
-            } label: {
-                Label("更多", systemImage: "ellipsis.circle")
-                    .labelStyle(.iconOnly)
-                    .frame(minWidth: 44, minHeight: 44)
-            }
-            .accessibilityLabel("更多")
+            toolbarButton("网页诊断", systemImage: "waveform.path.ecg", action: showDiagnostics)
         }
         .frame(maxWidth: .infinity, minHeight: 48)
     }
@@ -422,10 +401,20 @@ private struct BrowserToolbar: View {
         disabled: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
-        Button(label, systemImage: systemImage, action: action)
+        Button(action: action) {
+            Label(label, systemImage: systemImage)
+                .modifier(BrowserControlLabel())
+        }
+        .buttonStyle(.borderless)
+        .disabled(disabled)
+    }
+}
+
+private struct BrowserControlLabel: ViewModifier {
+    func body(content: Content) -> some View {
+        content
             .labelStyle(.iconOnly)
-            .frame(minWidth: 44, minHeight: 44)
-            .disabled(disabled)
-            .accessibilityLabel(label)
+            .frame(minWidth: AppUI.minimumTarget, minHeight: AppUI.minimumTarget)
+            .contentShape(Rectangle())
     }
 }

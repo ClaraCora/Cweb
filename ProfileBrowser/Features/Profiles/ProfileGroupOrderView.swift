@@ -11,29 +11,27 @@ struct ProfileGroupOrderView: View {
         NavigationStack {
             List {
                 ForEach(model.profileGroups) { group in
-                    HStack(spacing: 12) {
-                        Text(group.displayEmoji)
-                            .font(.title3)
-                            .frame(width: 32, height: 32)
-                            .accessibilityHidden(true)
+                    HStack(spacing: AppUI.Spacing.row) {
+                        ProfileGroupIcon(emoji: group.emoji, size: AppUI.rowIconSize)
 
                         VStack(alignment: .leading, spacing: 2) {
                             Text(group.name)
                                 .font(.body.weight(.medium))
-                                .lineLimit(1)
+                                .lineLimit(2)
                             HStack(spacing: 6) {
                                 if let code = group.displayCode {
                                     Text(code)
                                         .font(.caption.monospaced())
+                                        .lineLimit(1)
                                 }
                                 Text("\(group.profiles.count) 个环境")
                                     .font(.caption)
+                                    .fixedSize()
                             }
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppUI.secondaryText)
                         }
                     }
                     .accessibilityElement(children: .combine)
-                    .accessibilityLabel("\(group.name)，\(group.profiles.count) 个环境")
                     .accessibilityHint("上下拖动调整顺序")
                 }
                 .onMove { offsets, destination in

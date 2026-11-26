@@ -24,6 +24,7 @@ struct GlobalScriptSettingsView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.asciiCapable)
+                        .accessibilityLabel("脚本内容")
                         .frame(minHeight: 260, maxHeight: 460)
                         .scrollContentBackground(.hidden)
                         .padding(8)
@@ -41,7 +42,7 @@ struct GlobalScriptSettingsView: View {
                 if let previousSource {
                     Button("撤销恢复模板") { scriptDraft.source = previousSource; self.previousSource = nil }
                 }
-                if !hasScriptChanges, let saveFeedback { Text(saveFeedback).font(.footnote).foregroundStyle(.secondary) }
+                if !hasScriptChanges, let saveFeedback { Text(saveFeedback).font(.footnote).foregroundStyle(AppUI.secondaryText) }
                 if let result = model.lastAutomationResult {
                     let profileName = model.profiles.first(where: { $0.id == result.profileID })?.name ?? "已删除环境"
                     Label {
@@ -49,7 +50,7 @@ struct GlobalScriptSettingsView: View {
                             Text("最近结果：\(result.message.isEmpty ? result.kind.title : result.message)")
                             Text("\(profileName) · \(result.date, style: .relative)")
                                 .font(.footnote)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(AppUI.secondaryText)
                         }
                     } icon: {
                         Image(systemName: result.kind.systemImage)
@@ -129,10 +130,10 @@ private extension AutomationEventKind {
 
     var tint: Color {
         switch self {
-        case .success: .green
-        case .captcha: .orange
-        case .error: .red
-        case .noButton, .resume: .secondary
+        case .success: AppUI.success
+        case .captcha, .noButton: AppUI.warning
+        case .error: AppUI.danger
+        case .resume: AppUI.secondaryText
         }
     }
 }

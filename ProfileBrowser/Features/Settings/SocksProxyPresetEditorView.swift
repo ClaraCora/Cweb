@@ -27,12 +27,21 @@ struct SocksProxyPresetEditorView: View {
         NavigationStack {
             Form {
                 Section("预设信息") {
-                    TextField("名称（可选）", text: $name)
-                        .textInputAutocapitalization(.sentences)
-                    TextField("https://example.com/proxies.txt", text: $urlText)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                    FormField("名称（可选）") {
+                        TextField("例如：备用代理", text: $name)
+                            .textInputAutocapitalization(.sentences)
+                            .accessibilityLabel("名称")
+                    }
+                    FormField("订阅链接") {
+                        TextField("https://example.com/proxies.txt", text: $urlText)
+                            .keyboardType(.URL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .accessibilityLabel("订阅链接")
+                        if !urlText.isEmpty && !isValid {
+                            InlineValidationMessage(message: "请输入完整的 HTTP 或 HTTPS 订阅链接。")
+                        }
+                    }
                     Toggle("启用此链接", isOn: $isEnabled)
                 }
             }

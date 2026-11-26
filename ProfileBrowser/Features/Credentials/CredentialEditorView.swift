@@ -37,13 +37,18 @@ struct CredentialEditorView: View {
                 }
 
                 Section("账号") {
-                    TextField("名称（可选）", text: $label)
-                    TextField("用户名或邮箱", text: $username)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    SecretField("密码", text: $password)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                    FormField("名称（可选）") {
+                        TextField("例如：个人账号", text: $label)
+                            .accessibilityLabel("名称")
+                    }
+                    FormField("用户名或邮箱") {
+                        TextField("用户名或邮箱", text: $username)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
+                    FormField("密码") {
+                        SecretField("密码", text: $password)
+                    }
                 }
             }
             .navigationTitle(originalCredential == nil ? "添加凭据" : "编辑凭据")

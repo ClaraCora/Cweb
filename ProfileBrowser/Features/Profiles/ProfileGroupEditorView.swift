@@ -47,12 +47,14 @@ struct ProfileGroupEditorView: View {
 
                     FormField("代号") {
                         TextField("可选", text: $code)
+                            .accessibilityLabel("代号")
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                     }
 
                     FormField("Emoji 图标") {
                         TextField("可选", text: $emoji)
+                            .accessibilityLabel("Emoji 图标")
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                     }
@@ -61,14 +63,14 @@ struct ProfileGroupEditorView: View {
                         Button("清除 Emoji", systemImage: "xmark.circle") {
                             emoji = ""
                         }
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppUI.secondaryText)
                     }
                 }
 
                 Section {
                     Text("修改分组名称会同步组内环境的所属分组。以旧分组名称开头的环境名会保留后缀并自动更新；手动命名的环境不会被覆盖。")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppUI.secondaryText)
                 }
 
                 Section {
@@ -92,7 +94,7 @@ struct ProfileGroupEditorView: View {
                                         in: RoundedRectangle(cornerRadius: 10, style: .continuous)
                                     )
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(WorkspaceRowButtonStyle())
                             .accessibilityLabel("选择 \(value) 图标")
                             .accessibilityAddTraits(emoji == value ? .isSelected : [])
                         }
@@ -147,37 +149,27 @@ struct ProfileGroupEditorView: View {
         !normalizedName.isEmpty
     }
 
-    private var previewEmoji: String {
-        normalizedEmoji ?? "📁"
-    }
-
-    @ViewBuilder
     private var groupPreview: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(previewEmoji)
-                .font(.title)
-                .frame(width: 48, height: 48)
-                .background(group.color.color.opacity(0.14), in: Circle())
-
-            VStack(alignment: .leading, spacing: 6) {
+        HStack(spacing: AppUI.Spacing.row) {
+            ProfileGroupIcon(emoji: normalizedEmoji)
+            VStack(alignment: .leading, spacing: AppUI.Spacing.tight) {
                 Text(normalizedName.isEmpty ? "分组名称" : normalizedName)
-                    .font(.headline)
-                    .foregroundStyle(normalizedName.isEmpty ? Color.secondary : Color.primary)
-                    .lineLimit(1)
-
-                Text(normalizedCode ?? " ")
-                    .font(.subheadline.monospaced().weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(normalizedName.isEmpty ? AppUI.secondaryText : Color.primary)
+                    .lineLimit(2)
+                if let normalizedCode {
+                    Text(normalizedCode)
+                        .font(.footnote.monospaced())
+                        .foregroundStyle(AppUI.secondaryText)
+                        .lineLimit(1)
+                }
                 Text("\(group.profiles.count) 个环境")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .font(.footnote)
+                    .foregroundStyle(AppUI.secondaryText)
             }
-
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, AppUI.Spacing.tight)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(previewEmoji)，\(normalizedName.isEmpty ? "分组名称" : normalizedName)")
     }
 
     private func save() {

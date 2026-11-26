@@ -18,7 +18,7 @@ struct WebsiteRulesView: View {
         Form {
             Section {
                 Text("按站点限定签到区域和金额来源，避免将历史记录或其他金额误认。同一主域名下的登录、CDN 和主站子域会共享规则；留空的选择器使用通用检测。自定义脚本可读取 window.CwebSiteRule。")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.footnote).foregroundStyle(AppUI.secondaryText)
             }
             ForEach($rules) { $rule in
                 Section(rule.host.isEmpty ? "新网站" : rule.host) {
@@ -32,7 +32,7 @@ struct WebsiteRulesView: View {
                     selector("验证码区域", text: Binding(get: { rule.captchaSelector ?? "" }, set: { rule.captchaSelector = $0 }))
                     Text("检测到验证码时暂停签到，请在网页中手动完成后点击“继续检测”。")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppUI.secondaryText)
                     Stepper("环境等待上限：\(rule.environmentTimeoutSeconds ?? 60) 秒", value: Binding(
                         get: { rule.environmentTimeoutSeconds ?? 60 }, set: { rule.environmentTimeoutSeconds = $0 }), in: 15...300, step: 15)
                     if let session, rule.matches(host: session.currentOrigin?.host ?? "") {
@@ -47,8 +47,8 @@ struct WebsiteRulesView: View {
                 }
             }
             Button("添加网站", systemImage: "plus") { rules.append(WebsiteRule(host: session?.currentOrigin?.host ?? "")) }
-            if rules == (model.globalScriptSettings.siteRules ?? []), let status { Text(status).font(.footnote).foregroundStyle(.secondary) }
-            if session == nil { Text("可在浏览器的“更多 → 网站识别规则”中测试当前页面的匹配数量和金额。").font(.footnote).foregroundStyle(.secondary) }
+            if rules == (model.globalScriptSettings.siteRules ?? []), let status { Text(status).font(.footnote).foregroundStyle(AppUI.secondaryText) }
+            if session == nil { Text("可在浏览器的“更多 → 网站识别规则”中测试当前页面的匹配数量和金额。").font(.footnote).foregroundStyle(AppUI.secondaryText) }
         }
         .disabled(isSaving)
         .navigationTitle("网站识别规则")

@@ -1,5 +1,28 @@
 import SwiftUI
 
+struct ProfileGroupIcon: View {
+    let emoji: String?
+    var size: CGFloat = AppUI.minimumTarget
+
+    var body: some View {
+        Group {
+            if let emoji = emoji?.trimmingCharacters(in: .whitespacesAndNewlines), !emoji.isEmpty {
+                Text(emoji)
+                    .font(.title2)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+            } else {
+                Image(systemName: "folder.fill")
+                    .font(.title3.weight(.medium))
+                    .foregroundStyle(Color.accentColor)
+            }
+        }
+        .frame(width: size, height: size)
+        .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityHidden(true)
+    }
+}
+
 extension ProfileColor {
     var color: Color {
         switch self {

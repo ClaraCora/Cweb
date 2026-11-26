@@ -13,10 +13,11 @@ struct ProfileGroupSelectionView: View {
             List {
                 Section {
                     groupButton("未分组", value: "")
-                    ForEach(model.profileGroups.filter { group in
-                        group.name != "未分组" && (searchText.isEmpty || group.name.localizedCaseInsensitiveContains(searchText))
-                    }) { group in
+                    ForEach(matchingGroups) { group in
                         groupButton(group.name, value: group.name)
+                    }
+                    if !searchText.isEmpty && matchingGroups.isEmpty {
+                        AppStatusMessage(message: "没有匹配的分组，请试试其他名称。", tone: .neutral, symbol: "magnifyingglass")
                     }
                 }
                 Section("新分组") {
@@ -38,6 +39,12 @@ struct ProfileGroupSelectionView: View {
         }
     }
 
+    private var matchingGroups: [ProfileGroup] {
+        model.profileGroups.filter { group in
+            group.name != "未分组" && (searchText.isEmpty || group.name.localizedCaseInsensitiveContains(searchText))
+        }
+    }
+
     private func groupButton(_ title: String, value: String) -> some View {
         Button {
             selection = value
@@ -47,10 +54,11 @@ struct ProfileGroupSelectionView: View {
                 Text(title).foregroundStyle(.primary)
                 Spacer()
                 if selection == value {
-                    Image(systemName: "checkmark").foregroundStyle(.tint)
+                    Image(systemName: "checkmark").foregroundStyle(.tint).accessibilityHidden(true)
                 }
             }
-            .frame(minHeight: 44)
+            .frame(minHeight: AppUI.minimumTarget)
+            .contentShape(Rectangle())
         }
         .accessibilityAddTraits(selection == value ? .isSelected : [])
     }
@@ -76,13 +84,23 @@ struct ProfileProxySelectionView: View {
                         HStack {
                             Text("不使用代理").foregroundStyle(.primary)
                             Spacer()
-                            if selection == nil { Image(systemName: "checkmark") }
+                            if selection == nil { Image(systemName: "checkmark").accessibilityHidden(true) }
                         }
-                        .frame(minHeight: 44)
+                        .frame(minHeight: AppUI.minimumTarget)
+                        .contentShape(Rectangle())
                     }
+                    .accessibilityAddTraits(selection == nil ? .isSelected : [])
                 }
                 Section {
-                    ForEach(options) { ranking in
+                    let matches = options
+                    if matches.isEmpty {
+                        AppStatusMessage(
+                            message: searchText.isEmpty ? "还没有代理，可在代理页添加或导入。" : "没有匹配的代理，请试试其他编号、代号或地址。",
+                            tone: .neutral,
+                            symbol: searchText.isEmpty ? "network" : "magnifyingglass"
+                        )
+                    }
+                    ForEach(matches) { ranking in
                         let occupant = model.profileUsingSocksProxyNumber(
                             ranking.number, inGroupNamed: groupName, excludingProfileID: profileID
                         )
@@ -96,19 +114,20 @@ struct ProfileProxySelectionView: View {
                                         .foregroundStyle(.primary)
                                     Text(ranking.proxy.displayAddress)
                                         .font(.subheadline.monospaced())
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(AppUI.secondaryText)
                                         .fixedSize(horizontal: false, vertical: true)
                                     if let occupant {
                                         Text("已由“\(occupant.name)”使用")
                                             .font(.footnote)
-                                            .foregroundStyle(.secondary)
+                                            .foregroundStyle(AppUI.secondaryText)
                                     }
                                 }
                                 Spacer(minLength: 0)
-                                if selection == ranking.number { Image(systemName: "checkmark") }
+                                if selection == ranking.number { Image(systemName: "checkmark").accessibilityHidden(true) }
                             }
                             .padding(.vertical, 4)
-                            .frame(minHeight: 44)
+                            .frame(minHeight: AppUI.minimumTarget)
+                            .contentShape(Rectangle())
                         }
                         .disabled(occupant != nil)
                         .accessibilityIdentifier("proxyOption.\(ranking.number)")

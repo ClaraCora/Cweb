@@ -6,7 +6,7 @@ struct ProxyImportReportView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("导入结果") { Text(report.summary) }
+                Section("导入结果") { ProxyImportSummary(report: report) }
                 if !report.invalid.isEmpty {
                     Section("未导入的条目") {
                         ForEach(report.invalid) { issue in Text("第 \(issue.line) 行：\(issue.reason)") }
@@ -16,5 +16,17 @@ struct ProxyImportReportView: View {
             .navigationTitle("导入明细").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
         }
+    }
+}
+
+struct ProxyImportSummary: View {
+    let report: ProxyImportReport
+
+    var body: some View {
+        AppStatusMessage(
+            message: report.summary,
+            tone: !report.invalid.isEmpty ? .warning : (report.added + report.updated > 0 ? .success : .neutral)
+        )
+        .monospacedDigit()
     }
 }

@@ -16,7 +16,9 @@ struct DiagnosticsView: View {
                 Section("环境") {
                     LabeledContent("名称", value: session.profile.name)
                     LabeledContent("环境 ID", value: shortID(session.profile.id))
+                        .monospacedDigit()
                     LabeledContent("存储 ID", value: shortID(session.profile.websiteDataStoreID))
+                        .monospacedDigit()
                     LabeledContent("持久化", value: session.dataStore.isPersistent ? "是" : "否")
                 }
 
@@ -25,6 +27,7 @@ struct DiagnosticsView: View {
                     LabeledContent("Cookie") {
                         if let cookieCount {
                             Text("\(cookieCount)")
+                                .monospacedDigit()
                         } else {
                             ProgressView()
                                 .controlSize(.small)
@@ -45,7 +48,8 @@ struct DiagnosticsView: View {
 
                 Section("User-Agent") {
                     Text(session.profile.userAgent)
-                        .font(.caption.monospaced())
+                        .font(.footnote.monospaced())
+                        .foregroundStyle(AppUI.secondaryText)
                         .textSelection(.enabled)
                 }
 

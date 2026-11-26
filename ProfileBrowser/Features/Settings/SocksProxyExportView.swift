@@ -25,8 +25,12 @@ struct SocksProxyExportView: View {
             List(selection: $selectedIDs) {
                 Section {
                     Toggle("包含账号和密码", isOn: $includeCredentials)
-                    Text(includeCredentials ? "导出前需要验证设备身份。文件包含明文凭据。" : "默认仅导出代理地址，不包含账号或密码。")
-                        .font(.footnote).foregroundStyle(.secondary)
+                    if includeCredentials {
+                        AppStatusMessage(message: "导出前需要验证设备身份。文件包含明文凭据。", tone: .warning)
+                    } else {
+                        Text("仅导出代理地址。")
+                            .font(.footnote).foregroundStyle(AppUI.secondaryText)
+                    }
                 }
                 Section {
                     ForEach(rankings) { ranking in
@@ -35,8 +39,9 @@ struct SocksProxyExportView: View {
                             if let measurement = ranking.proxy.latestMeasurement {
                                 Text(measurement.status == .available ? "\(measurement.latencyMilliseconds.map(String.init) ?? "—") ms" : "最近检测不可用")
                                     .font(.caption)
+                                    .monospacedDigit()
                                     .foregroundStyle(measurement.status == .available
-                                        ? measurement.latencyMilliseconds.map(AppUI.latencyColor) ?? .secondary
+                                        ? measurement.latencyMilliseconds.map(AppUI.latencyColor) ?? AppUI.secondaryText
                                         : AppUI.danger)
                                 Text(measurement.checkedAt, format: .dateTime.month().day().hour().minute())
                                     .font(.caption2).foregroundStyle(AppUI.secondaryText)
@@ -76,7 +81,7 @@ struct SocksProxyExportView: View {
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(isExporting ? "正在验证" : "导出") { export() }
+                    Button(isExporting ? "正在验证…" : "导出") { export() }
                         .disabled(selectedIDs.isEmpty || isExporting)
                 }
             }

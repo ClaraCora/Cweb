@@ -30,7 +30,7 @@ struct SocksProxySettingsView: View {
                 IntegerSettingField(title: "最多保留", text: $retainedCountText, range: 0...500, unit: "个")
                 Text("0 表示不限数量；锁定代理始终保留。")
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppUI.secondaryText)
 
                 Picker("编号顺序", selection: $draft.sortMode) {
                     ForEach(SocksProxySortMode.allCases) { mode in
@@ -40,14 +40,12 @@ struct SocksProxySettingsView: View {
 
                 Text(draft.sortMode.explanation)
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppUI.secondaryText)
 
-                Label(
-                    "环境保存的是显示编号。切换编号顺序后，已有环境可能会指向另一条代理。",
-                    systemImage: "exclamationmark.triangle"
+                AppStatusMessage(
+                    message: "环境保存的是显示编号。切换编号顺序后，已有环境可能会指向另一条代理。",
+                    tone: .warning
                 )
-                .font(.footnote)
-                .foregroundStyle(.primary)
             }
             .textCase(nil)
 
@@ -57,7 +55,7 @@ struct SocksProxySettingsView: View {
 
                 Text("并发数越高，批量测试完成得越快，但可能增加网络和设备负载。")
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppUI.secondaryText)
             }
             .textCase(nil)
 
@@ -68,17 +66,18 @@ struct SocksProxySettingsView: View {
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
                         .lineLimit(1...3)
+                        .accessibilityLabel("HTTPS 测速地址")
+                    if !isValidTargetURL {
+                        InlineValidationMessage(message: "请输入完整的 HTTPS 地址。")
+                    }
                 }
 
                 Toggle("TLS 握手测速", isOn: $draft.verifiesTLS)
 
                 Text(tlsDescription)
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppUI.secondaryText)
 
-                if !isValidTargetURL {
-                    InlineValidationMessage(message: "请输入完整的 HTTPS 地址。")
-                }
             }
             .textCase(nil)
 

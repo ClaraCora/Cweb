@@ -265,10 +265,7 @@ private struct ProfileGroupRow: View {
 
     var body: some View {
         HStack(spacing: AppUI.Spacing.row) {
-            groupIcon
-                .frame(width: 44, height: 44)
-                .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
-                .accessibilityHidden(true)
+            ProfileGroupIcon(emoji: group.emoji)
 
             VStack(alignment: .leading, spacing: AppUI.Spacing.tight) {
                 Text(group.name)
@@ -311,20 +308,6 @@ private struct ProfileGroupRow: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(group.name)\(group.displayCode.map { "，代号 \($0)" } ?? "，\(codePlaceholder)")，\(group.profiles.count) 个环境\(isBusy ? "，正在删除分组" : "")")
         .accessibilityHint("进入分组")
-    }
-
-    @ViewBuilder
-    private var groupIcon: some View {
-        if let emoji = group.emoji?.trimmingCharacters(in: .whitespacesAndNewlines), !emoji.isEmpty {
-            Text(emoji)
-                .font(.title2)
-                .lineLimit(1)
-                .minimumScaleFactor(0.5)
-        } else {
-            Image(systemName: "folder.fill")
-                .font(.title3.weight(.medium))
-                .foregroundStyle(Color.accentColor)
-        }
     }
 
     private var codePlaceholder: String {

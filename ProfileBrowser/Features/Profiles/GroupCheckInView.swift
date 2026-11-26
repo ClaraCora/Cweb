@@ -48,7 +48,7 @@ struct GroupCheckInView: View {
                         }
                     }
                     .accessibilityLabel(controller.session == nil ? "完成" : "返回分组")
-                    .accessibilityHint(controller.session == nil ? "关闭签到结果" : "暂停当前任务并返回分组")
+                    .accessibilityHint(controller.session == nil ? "关闭任务页面" : "暂停当前任务并返回分组")
                 }
             }
         }
@@ -81,19 +81,22 @@ struct GroupCheckInView: View {
 
     private var preflight: some View {
         List {
-            Section("开始前确认") {
+            Section("环境检查") {
                 if controller.preflightIssues.isEmpty {
-                    Text("以下环境的入口或网络路径发生变化，请确认后开始。")
+                    AppStatusMessage(message: "以下环境的入口或网络路径发生变化，请确认后开始。", tone: .warning)
                 } else {
-                    ForEach(controller.preflightIssues, id: \.self) { Text($0) }
+                    ForEach(controller.preflightIssues, id: \.self) { AppStatusMessage(message: $0, tone: .warning) }
                     Text("可以返回编辑相关环境，或将异常环境标记为待处理后继续。")
+                        .font(.footnote)
+                        .foregroundStyle(AppUI.secondaryText)
                 }
                 ForEach(controller.changedEntries) { profile in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(profile.name).font(.headline)
                         Text(profile.homePageHost)
+                            .font(.subheadline).foregroundStyle(AppUI.secondaryText)
                         Text(model.socksProxy(for: profile).map { $0.displayCode ?? $0.displayAddress } ?? "设备网络")
-                            .font(.footnote).foregroundStyle(.secondary)
+                            .font(.footnote).foregroundStyle(AppUI.secondaryText)
                     }
                 }
                 Button("确认并开始") { controller.confirmAndStart() }
@@ -168,7 +171,7 @@ struct GroupCheckInView: View {
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(WorkspaceRowButtonStyle())
         .accessibilityLabel("本组第 \(controller.queue.index + 1) 个，共 \(controller.queue.profileIDs.count) 个，\(status.title)，\(currentHost)")
         .accessibilityValue(controller.session?.automationMessage ?? "")
         .accessibilityHint(showsTaskDetails ? "收起任务详情" : "展开任务详情和浏览器工具入口")
@@ -176,21 +179,19 @@ struct GroupCheckInView: View {
     }
 
     private var taskDetails: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
+        VStack(alignment: .leading, spacing: AppUI.Spacing.related) {
+            VStack(alignment: .leading, spacing: AppUI.Spacing.tight) {
                 Text(controller.groupName)
                     .font(.subheadline.weight(.medium))
-                Spacer()
-                Text("已完成 \(controller.queue.completedCount) · 待处理 \(controller.queue.failedCount) · 已跳过 \(controller.queue.skippedCount)")
-                    .font(.footnote)
-                    .foregroundStyle(AppUI.secondaryText)
+                GroupRunCounts(queue: controller.queue)
             }
             ProgressView(value: Double(controller.queue.index), total: Double(max(1, controller.queue.profileIDs.count)))
+                .accessibilityLabel("已处理的环境")
             if let message = controller.session?.automationMessage {
                 Text(message)
                     .font(.footnote)
                     .foregroundStyle(.primary)
-                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if controller.isPaused {
                 Text("点击“开始”继续当前任务。")
@@ -198,52 +199,52 @@ struct GroupCheckInView: View {
                     .foregroundStyle(AppUI.secondaryText)
             }
             if let session = controller.session, session.automationState == .captcha {
-                HStack {
-                    Text("手动完成验证后继续。")
-                        .font(.caption)
-                        .foregroundStyle(AppUI.secondaryText)
-                    Spacer()
-                    Button("继续检测") { Task { await session.resumeAutomation() } }
-                        .buttonStyle(.bordered)
-                        .frame(minHeight: 44)
-                        .disabled(controller.isPaused)
-                        .accessibilityIdentifier("groupCheckIn.resumeCaptcha")
+                Button { Task { await session.resumeAutomation() } } label: {
+                    Label("继续检测", systemImage: "arrow.clockwise")
                 }
-                .font(.footnote.weight(.semibold))
+                .buttonStyle(WorkspaceActionStyle(prominent: true))
+                .disabled(controller.isPaused)
+                .accessibilityHint("在网页上手动完成验证后，继续当前环境")
+                .accessibilityIdentifier("groupCheckIn.resumeCaptcha")
             }
-            if dynamicTypeSize.isAccessibilitySize {
+            if controller.session?.automationState == .error {
+                Button {
+                    Task { await controller.session?.resumeAutomation() }
+                } label: {
+                    Label("重新尝试签到", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(WorkspaceActionStyle(prominent: true))
+                .disabled(controller.isPaused || controller.isRefreshingBalance)
+            }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: AppUI.Spacing.page) { detailActions }
                 VStack(alignment: .leading, spacing: 0) { detailActions }
-            } else {
-                HStack {
-                    detailActions
-                }
             }
+            .font(.subheadline)
+            .buttonStyle(.borderless)
         }
         .padding(.top, 8)
     }
 
     @ViewBuilder
     private var detailActions: some View {
-        if controller.session?.automationState == .error {
-            Button("重新尝试签到", systemImage: "arrow.clockwise") {
-                Task { await controller.session?.resumeAutomation() }
-            }
-            .disabled(controller.isPaused || controller.isRefreshingBalance)
-            .frame(minHeight: 44)
+        Button { controller.skip() } label: {
+            detailActionLabel("跳过当前环境", symbol: "forward.end")
         }
-        Button("跳过当前环境", systemImage: "forward.end") { controller.skip() }
-            .disabled(!controller.canSkip)
-            .frame(minHeight: 44)
-            .font(.subheadline)
-            .buttonStyle(.borderless)
-        if !dynamicTypeSize.isAccessibilitySize { Spacer() }
-        Button(showsBrowserChrome ? "收起浏览器工具" : "浏览器工具", systemImage: "safari") {
+        .disabled(!controller.canSkip)
+        Button {
             showsBrowserChrome.toggle()
             showsTaskDetails = false
+        } label: {
+            detailActionLabel(showsBrowserChrome ? "收起浏览器工具" : "浏览器工具", symbol: "safari")
         }
-        .frame(minHeight: 44)
-        .font(.subheadline)
-        .buttonStyle(.borderless)
+    }
+
+    private func detailActionLabel(_ title: String, symbol: String) -> some View {
+        Label(title, systemImage: symbol)
+            .fixedSize(horizontal: true, vertical: false)
+            .frame(minWidth: AppUI.minimumTarget, minHeight: AppUI.minimumTarget)
+            .contentShape(Rectangle())
     }
 
     private var currentHost: String {
@@ -253,10 +254,12 @@ struct GroupCheckInView: View {
     private var results: some View {
         List {
             Section {
-                Label(controller.queue.isFinished ? "本组已处理完毕" : (controller.mode == .balanceOnly ? "余额更新已停止" : "本组签到已停止"), systemImage: controller.queue.isFinished ? "checkmark.circle" : "stop.circle")
-                Text("已完成 \(controller.queue.completedCount) · 待处理 \(controller.queue.failedCount) · 已跳过 \(controller.queue.skippedCount) · 未处理 \(controller.queue.profileIDs.count - controller.queue.index)")
-                    .font(.subheadline)
-                    .foregroundStyle(AppUI.secondaryText)
+                AppStatusMessage(
+                    message: controller.queue.isFinished ? "本组已处理完毕" : (controller.mode == .balanceOnly ? "余额更新已停止" : "本组签到已停止"),
+                    tone: controller.queue.isFinished ? .success : .neutral,
+                    symbol: controller.queue.isFinished ? nil : "stop.circle"
+                )
+                GroupRunCounts(queue: controller.queue)
             }
             Section {
                 Button("重试未完成项") { retry(balanceOnly: false) }

@@ -25,7 +25,7 @@ struct BackupView: View {
             Form {
                 if !model.isBackupStoreAvailable {
                     Section {
-                        Label("有数据尚未成功读取，暂不能创建或恢复备份。", systemImage: "exclamationmark.circle")
+                        AppStatusMessage(message: "有数据尚未成功读取，暂不能创建或恢复备份。", tone: .warning)
                         Button("重试读取数据") {
                             model.retryLoadingBackupStores()
                             Task { await model.retryLoadingProfiles() }
@@ -44,6 +44,9 @@ struct BackupView: View {
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .accessibilityLabel("导出备份密码")
+                        if !exportPassword.isEmpty && exportPassword.count < 8 {
+                            InlineValidationMessage(message: "请输入至少 8 个字符。")
+                        }
                     }
                     FormField("确认密码") {
                         SecureField("再次输入备份密码", text: $confirmPassword)
@@ -91,7 +94,7 @@ struct BackupView: View {
                         LabeledContent("新增代理", value: "\(plan.newProxyCount)")
                         LabeledContent("预设链接", value: "\(plan.archive.presets?.count ?? 0)")
                         ForEach(Array(plan.warnings.enumerated()), id: \.offset) { _, warning in
-                            Text(warning).font(.footnote).foregroundStyle(AppUI.secondaryText)
+                            AppStatusMessage(message: warning, tone: .warning)
                         }
                         Toggle("恢复应用设置与全局脚本", isOn: $restoreSettings)
                         Button("确认恢复", systemImage: "arrow.down.doc") { restore(plan) }

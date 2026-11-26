@@ -28,11 +28,15 @@ struct SocksProxyImportView: View {
                                 .accessibilityLabel("订阅链接")
                         }
                     } else if source == 1 {
-                        Button(filename ?? "选择 TXT 文件") { showsFilePicker = true }
+                        Button(filename ?? "选择 TXT 文件", systemImage: "doc") { showsFilePicker = true }
                     } else {
-                        TextEditor(text: $text).frame(minHeight: 150)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled()
-                            .accessibilityLabel("代理文本，每行一个 SOCKS 地址")
+                        FormField("代理文本") {
+                            TextEditor(text: $text)
+                                .frame(minHeight: 132)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .accessibilityLabel("代理文本，每行一个 SOCKS 地址")
+                        }
                     }
                     Text("每行一个 SOCKS 地址，最多 2 MB。导出文件可直接重新导入。相同地址会更新凭据。")
                         .font(.footnote).foregroundStyle(AppUI.secondaryText)
@@ -43,9 +47,10 @@ struct SocksProxyImportView: View {
                 }
                 if let report {
                     Section("导入结果") {
-                        Text(report.summary)
+                        ProxyImportSummary(report: report)
                         ForEach(report.invalid) { issue in
                             Text("第 \(issue.line) 行：\(issue.reason)").font(.footnote)
+                                .foregroundStyle(AppUI.secondaryText)
                         }
                     }
                 }

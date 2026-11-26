@@ -111,9 +111,9 @@ struct CredentialListView: View {
         } else {
             List {
                 Section {
-                    Text("点击账号后，由当前网页脚本直接填入登录表单，不调用 iOS 系统自动填充。")
+                    Text("选择账号，将凭据填入当前网页。")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppUI.secondaryText)
                 }
                 Section {
                     ForEach(credentials) { credential in
@@ -122,7 +122,7 @@ struct CredentialListView: View {
                         } label: {
                             CredentialRow(credential: credential)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(WorkspaceRowButtonStyle())
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button("删除", systemImage: "trash", role: .destructive) {
                                 credentialBeingDeleted = credential
@@ -229,18 +229,19 @@ private struct CredentialRow: View {
                 if !credential.label.isEmpty {
                     Text(credential.username)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppUI.secondaryText)
                 }
             }
 
             Spacer(minLength: 8)
 
-            Image(systemName: "arrow.up.left")
-                .foregroundStyle(.secondary)
+            Image(systemName: "arrow.down.to.line")
+                .foregroundStyle(AppUI.secondaryText)
                 .accessibilityHidden(true)
         }
+        .padding(.vertical, AppUI.Spacing.tight)
+        .frame(minHeight: AppUI.minimumTarget)
         .contentShape(Rectangle())
-        .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("填充账号 \(credential.username)")
     }

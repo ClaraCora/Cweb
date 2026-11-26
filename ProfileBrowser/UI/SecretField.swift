@@ -17,12 +17,15 @@ struct SecretField: View {
             }
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
-            Button(revealed ? "隐藏密码" : "显示密码", systemImage: revealed ? "eye.slash" : "eye") {
+            Button {
                 revealed.toggle()
+            } label: {
+                Label(revealed ? "隐藏密码" : "显示密码", systemImage: revealed ? "eye.slash" : "eye")
+                    .labelStyle(.iconOnly)
+                    .frame(minWidth: AppUI.minimumTarget, minHeight: AppUI.minimumTarget)
+                    .contentShape(Rectangle())
             }
-            .labelStyle(.iconOnly)
             .buttonStyle(.borderless)
-            .frame(minWidth: 44, minHeight: 44)
         }
         .onChange(of: scenePhase) { _, phase in if phase != .active { revealed = false } }
     }

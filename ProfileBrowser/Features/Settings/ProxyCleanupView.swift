@@ -11,13 +11,24 @@ struct ProxyCleanupView: View {
         NavigationStack {
             List {
                 Section {
-                    Text(model.proxyDeletionImpact(for: ids))
+                    AppStatusMessage(message: model.proxyDeletionImpact(for: ids), tone: ids.isEmpty ? .neutral : .warning)
                     Text("测速仅更新结果。以下列表根据已保存的保留规则生成，锁定代理不会删除。")
-                        .font(.footnote).foregroundStyle(.secondary)
+                        .font(.footnote).foregroundStyle(AppUI.secondaryText)
                 }
                 Section("待清理 \(ids.count) 个") {
+                    if ids.isEmpty {
+                        Text("当前规则下没有需要清理的代理。")
+                            .foregroundStyle(AppUI.secondaryText)
+                    }
                     ForEach(model.socksProxies.filter { ids.contains($0.id) }) { proxy in
-                        Text(proxy.displayCode ?? proxy.displayAddress)
+                        VStack(alignment: .leading, spacing: AppUI.Spacing.tight) {
+                            Text(proxy.displayCode ?? proxy.displayAddress)
+                                .font(.body.weight(.medium))
+                            if proxy.displayCode != nil {
+                                Text(proxy.displayAddress)
+                                    .font(.footnote).foregroundStyle(AppUI.secondaryText)
+                            }
+                        }
                     }
                 }
             }

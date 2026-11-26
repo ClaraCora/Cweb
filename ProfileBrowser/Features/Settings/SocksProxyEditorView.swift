@@ -40,9 +40,12 @@ struct SocksProxyEditorView: View {
         NavigationStack {
             Form {
                 Section("标识") {
-                    TextField("代号（可选）", text: $code)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                    FormField("代号（可选）") {
+                        TextField("例如：东京", text: $code)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .accessibilityLabel("代号")
+                    }
                 }
 
                 Section("代理地址") {
@@ -53,24 +56,42 @@ struct SocksProxyEditorView: View {
                     }
                     .pickerStyle(.menu)
 
-                    TextField("主机名或 IP 地址", text: $host)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
+                    FormField("主机名或 IP 地址") {
+                        TextField("proxy.example.com", text: $host)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .keyboardType(.URL)
+                            .accessibilityLabel("主机名或 IP 地址")
+                        if !host.isEmpty && !hostIsValid {
+                            InlineValidationMessage(message: "请输入主机名或 IP 地址。")
+                        }
+                    }
 
-                    TextField("端口", text: $port)
-                        .keyboardType(.numberPad)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                    FormField("端口") {
+                        TextField("1080", text: $port)
+                            .keyboardType(.numberPad)
+                            .monospacedDigit()
+                            .accessibilityLabel("端口")
+                        if parsedPort == nil {
+                            InlineValidationMessage(message: "请输入 1 到 65535 之间的端口。")
+                        }
+                    }
                 }
 
                 Section("认证（可选）") {
-                    TextField("用户名", text: $username)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    SecureField("密码", text: $password)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                    FormField("用户名") {
+                        TextField("用户名", text: $username)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
+                    FormField("密码") {
+                        SecureField("密码", text: $password)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        if !authFieldsValid {
+                            InlineValidationMessage(message: "用户名和密码需要同时填写，或同时留空。")
+                        }
+                    }
                 }
 
                 Section {

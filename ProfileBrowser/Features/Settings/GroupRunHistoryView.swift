@@ -8,17 +8,26 @@ struct GroupRunHistoryView: View {
         List {
             if let pending = model.pendingGroupRun {
                 Section("可恢复任务") {
-                    Text(pending.groupName)
-                    Text("已处理 \(pending.queue.index)/\(pending.queue.profileIDs.count)；进入该分组点击开始以继续。")
-                        .font(.footnote).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: AppUI.Spacing.tight) {
+                        Text(pending.groupName).font(.headline)
+                        GroupRunCounts(queue: pending.queue)
+                        Text("进入该分组，点击“开始”继续。")
+                            .font(.footnote).foregroundStyle(AppUI.secondaryText)
+                    }
                     Button("放弃剩余任务", role: .destructive) { confirmsDiscard = true }
                 }
             }
             ForEach(model.groupRunHistory) { record in
                 Section {
-                    Text(record.groupName).font(.headline)
-                    Text(record.updatedAt, format: .dateTime.year().month().day().hour().minute())
-                    Text("完成 \(record.queue.completedCount) · 待处理 \(record.queue.failedCount) · 跳过 \(record.queue.skippedCount) · 未处理 \(record.queue.profileIDs.count - record.queue.index)")
+                    VStack(alignment: .leading, spacing: AppUI.Spacing.related) {
+                        VStack(alignment: .leading, spacing: AppUI.Spacing.tight) {
+                            Text(record.groupName).font(.headline)
+                            Text(record.updatedAt, format: .dateTime.year().month().day().hour().minute())
+                                .font(.caption).foregroundStyle(AppUI.secondaryText)
+                        }
+                        GroupRunCounts(queue: record.queue)
+                    }
+                    .padding(.vertical, AppUI.Spacing.tight)
                     ForEach(record.queue.profileIDs, id: \.self) { id in
                         GroupRunResultRow(name: record.details?[id]?.name ?? model.profiles.first(where: { $0.id == id })?.name ?? "已删除环境",
                             outcome: record.queue.outcomes[id], detail: record.details?[id])
@@ -29,7 +38,11 @@ struct GroupRunHistoryView: View {
                         .disabled(record.balanceRetryProfileIDs.isEmpty)
                 }
             }
-            if model.groupRunHistory.isEmpty && model.pendingGroupRun == nil { ContentUnavailableView("暂无任务记录", systemImage: "clock") }
+        }
+        .overlay {
+            if model.groupRunHistory.isEmpty && model.pendingGroupRun == nil {
+                ContentUnavailableView("暂无任务记录", systemImage: "clock", description: Text("分组签到或批量更新余额后，即可在这里查看结果。"))
+            }
         }
         .sheet(item: $retryController) { GroupCheckInView(controller: $0) }
         .navigationTitle("签到记录").navigationBarTitleDisplayMode(.inline)

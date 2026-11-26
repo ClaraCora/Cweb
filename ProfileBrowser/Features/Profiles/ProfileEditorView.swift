@@ -124,6 +124,7 @@ struct ProfileEditorView: View {
             .accessibilityIdentifier("profileEditor.group")
             FormField("主页网址") {
                 TextField("https://example.com", text: $homePageText)
+                    .accessibilityLabel("主页网址")
                     .keyboardType(.URL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -155,7 +156,7 @@ struct ProfileEditorView: View {
             if socksProxyNumber != nil {
                 Toggle("固定当前代理", isOn: $usesFixedProxy)
                 Text(usesFixedProxy ? "测速和排序不会改变该环境的代理。" : "按显示编号绑定，重新排序后可能使用另一条代理。")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.footnote).foregroundStyle(AppUI.secondaryText)
             }
             if let socksProxyNumber {
                 if let occupant = proxyOccupant(for: socksProxyNumber) {
@@ -180,6 +181,7 @@ struct ProfileEditorView: View {
         Section {
             FormField("账号") {
                 TextField("可选", text: $autofillUsername)
+                    .accessibilityLabel("账号")
                     .textContentType(nil)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -188,7 +190,7 @@ struct ProfileEditorView: View {
                     .onSubmit { focusedField = .password }
             }
             FormField("密码") {
-                SecretField("可选", text: $autofillPassword)
+                SecretField("密码", text: $autofillPassword)
                     .textContentType(nil)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -224,7 +226,7 @@ struct ProfileEditorView: View {
             if let details = BrowserProfile.userAgentDetails(for: userAgent) {
                 Text(details.summary)
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppUI.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Button("随机参数", systemImage: "shuffle", action: randomizeUserAgent)
@@ -263,7 +265,7 @@ struct ProfileEditorView: View {
                         }
                         .frame(minWidth: 44, minHeight: 44)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(WorkspaceRowButtonStyle())
                     .accessibilityLabel(option.title)
                     .accessibilityValue(color == option ? "已选择" : "未选择")
                     .accessibilityAddTraits(color == option ? .isSelected : [])

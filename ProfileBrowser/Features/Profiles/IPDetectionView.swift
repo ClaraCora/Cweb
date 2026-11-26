@@ -184,17 +184,21 @@ private struct ProbeResultRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: systemImage)
-                .foregroundStyle(iconColor)
+                .foregroundStyle(AppUI.secondaryText)
                 .frame(width: 24, height: 24)
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.body.weight(.medium))
-                Text(detail)
-                    .font(detailFont)
-                    .foregroundStyle(detailColor)
-                    .textSelection(.enabled)
+                if case .failed(let message) = state {
+                    AppStatusMessage(message: message, tone: .warning)
+                } else {
+                    Text(detail)
+                        .font(detailFont)
+                        .foregroundStyle(AppUI.secondaryText)
+                        .textSelection(.enabled)
+                }
             }
 
             Spacer(minLength: 8)
@@ -214,21 +218,6 @@ private struct ProbeResultRow: View {
         case .idle: "尚未检测"
         case .testing: "正在连接"
         case .succeeded(let value), .failed(let value): value
-        }
-    }
-
-    private var iconColor: Color {
-        switch state {
-        case .succeeded: .green
-        case .failed: .orange
-        case .idle, .testing: .secondary
-        }
-    }
-
-    private var detailColor: Color {
-        switch state {
-        case .failed: .primary
-        case .idle, .testing, .succeeded: .secondary
         }
     }
 
