@@ -12,7 +12,7 @@ struct WorkspaceBackdrop: View {
             if reduceTransparency || contrast == .increased {
                 paper
             } else {
-                let strength = scheme == .dark ? 0.36 : 0.32
+                let strength = scheme == .dark ? 0.30 : 0.24
                 MeshGradient(
                     width: 3, height: 3,
                     points: [
@@ -33,6 +33,37 @@ struct WorkspaceBackdrop: View {
             }
         }
         .ignoresSafeArea()
+        .accessibilityHidden(true)
+        .allowsHitTesting(false)
+    }
+}
+
+extension View {
+    func workspacePanel(cornerRadius: CGFloat = AppUI.panelRadius) -> some View {
+        background {
+            ControlGlass(cornerRadius: cornerRadius)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+    }
+}
+
+/// A single inexpensive tint per native list row keeps long lists recyclable.
+struct WorkspaceListRowSurface: View {
+    let first: Bool
+    let last: Bool
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    var body: some View {
+        UnevenRoundedRectangle(
+            topLeadingRadius: first ? AppUI.panelRadius : 0,
+            bottomLeadingRadius: last ? AppUI.panelRadius : 0,
+            bottomTrailingRadius: last ? AppUI.panelRadius : 0,
+            topTrailingRadius: first ? AppUI.panelRadius : 0
+        )
+        .fill(Color(uiColor: .secondarySystemGroupedBackground)
+            .opacity(reduceTransparency || contrast == .increased ? 1 : 0.84))
         .accessibilityHidden(true)
         .allowsHitTesting(false)
     }

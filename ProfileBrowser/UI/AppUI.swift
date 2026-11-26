@@ -8,6 +8,10 @@ enum AppUI {
         static let page: CGFloat = 16
     }
 
+    static let workspaceInset: CGFloat = 20
+    static let panelRadius: CGFloat = 16
+    static let overviewRadius: CGFloat = 18
+    static let rowIconSize: CGFloat = 36
     static let minimumTarget: CGFloat = 44
     static let readableWidth: CGFloat = 840
     static let secondaryText = Color("SecondaryText")
@@ -45,6 +49,33 @@ extension View {
     }
 }
 
+/// A shared visual hierarchy and press state for the two workspace actions.
+struct WorkspaceActionStyle: ButtonStyle {
+    var prominent = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(prominent ? Color(.systemBackground) : Color.accentColor)
+            .frame(maxWidth: .infinity, minHeight: AppUI.minimumTarget)
+            .background {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(prominent ? Color.accentColor : Color(.quaternarySystemFill))
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 12))
+            .opacity(isEnabled ? (configuration.isPressed ? 0.72 : 1) : 0.45)
+    }
+}
+
+/// Keep custom row content responsive to touch without replacing native gestures.
+struct WorkspaceRowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.72 : 1)
+    }
+}
+
 struct AppSettingsRow: View {
     let title: String
     let detail: String?
@@ -65,7 +96,7 @@ struct AppSettingsRow: View {
             Image(systemName: icon)
                 .font(.body.weight(.semibold))
                 .foregroundStyle(tint)
-                .frame(width: 36, height: 36)
+                .frame(width: AppUI.rowIconSize, height: AppUI.rowIconSize)
                 .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: AppUI.Spacing.tight) {

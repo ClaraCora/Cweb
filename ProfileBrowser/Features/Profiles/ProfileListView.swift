@@ -242,10 +242,10 @@ struct ProfileListView: View {
             }
         }
         .padding(.horizontal, AppUI.Spacing.row)
-        .frame(maxWidth: AppUI.readableWidth - 2 * AppUI.Spacing.page)
+        .frame(maxWidth: AppUI.readableWidth - 2 * AppUI.workspaceInset)
         .beamPanel(cornerRadius: 14, active: isTaskRunning && !showsGroupCheckIn)
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, AppUI.Spacing.page)
+        .padding(.horizontal, AppUI.workspaceInset)
         .padding(.vertical, 4)
     }
 
@@ -361,19 +361,22 @@ struct ProfileListView: View {
                 }
             }
             .frame(maxWidth: AppUI.readableWidth)
-            .padding(.horizontal, 20)
+            .padding(.horizontal, AppUI.workspaceInset)
             .padding(.bottom, AppUI.Spacing.related)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
     }
 
     private func profileRows(_ profiles: [BrowserProfile]) -> some View {
-        let cornerRadius: CGFloat = 16
+        let cornerRadius = AppUI.panelRadius
         return List {
             ForEach(profiles) { profile in
                 profileButton(for: profile)
                     .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden, edges: profile.id == profiles.last?.id ? .all : .top)
+                    .listRowInsets(EdgeInsets(top: 6, leading: AppUI.Spacing.page, bottom: 6, trailing: AppUI.Spacing.page))
+                    .listRowSeparator(.hidden, edges: .top)
+                    .listRowSeparator(profile.id == profiles.last?.id ? .hidden : .visible, edges: .bottom)
+                    .alignmentGuide(.listRowSeparatorLeading) { _ in AppUI.rowIconSize + AppUI.Spacing.row }
             }
             .onMove { offsets, destination in
                 do {
@@ -538,7 +541,7 @@ struct ProfileListView: View {
                 isBusy: model.busyProfileID == profile.id
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(WorkspaceRowButtonStyle())
         .accessibilityIdentifier("profile.\(profile.id.uuidString)")
         .disabled(model.busyProfileID == profile.id)
         .swipeActions(edge: .leading, allowsFullSwipe: false) {
@@ -685,13 +688,13 @@ private struct ProfileRow: View {
         HStack(alignment: .center, spacing: AppUI.Spacing.row) {
             if !dynamicTypeSize.isAccessibilitySize {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .fill(profile.color.color.opacity(0.16))
                     Image(systemName: "person.crop.square.fill")
                         .foregroundStyle(profile.color.color)
                         .font(.title3)
                 }
-                .frame(width: 32, height: 32)
+                .frame(width: AppUI.rowIconSize, height: AppUI.rowIconSize)
                 .accessibilityHidden(true)
             }
 
@@ -772,7 +775,7 @@ private struct ProfileRow: View {
 
     private var nameLabel: some View {
         Text(profile.name)
-            .font(.subheadline.weight(.medium))
+            .font(.subheadline.weight(.semibold))
             .foregroundStyle(.primary)
             .lineLimit(1)
             .truncationMode(.tail)

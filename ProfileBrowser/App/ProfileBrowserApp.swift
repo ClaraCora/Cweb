@@ -8,6 +8,8 @@ struct ProfileBrowserApp: App {
     @State private var lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
     @AppStorage(AppSettings.appearanceModeKey) private var appearanceModeRaw = AppSettings.defaultAppearanceMode
 
+    @AppStorage(AppSettings.borderBeamEnabledKey) private var borderBeamEnabled = AppSettings.defaultBorderBeamEnabled
+
     private var preferredColorScheme: ColorScheme? {
         switch AppAppearanceMode(rawValue: appearanceModeRaw) ?? .system {
         case .system: nil
@@ -21,6 +23,7 @@ struct ProfileBrowserApp: App {
             AppRootView()
                 .environment(model)
                 .environment(\.cwebLowPowerMode, lowPowerMode)
+                .environment(\.cwebBorderBeamEnabled, borderBeamEnabled)
                 .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)) { _ in
                     lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
                 }

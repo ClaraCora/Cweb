@@ -33,7 +33,7 @@ struct SocksProxyListView: View {
         List {
             Section {
                 proxySummary(availableCount: counts[.available, default: 0], visibleCount: visible.count)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 16, trailing: 20))
+                    .listRowInsets(EdgeInsets(top: 8, leading: AppUI.workspaceInset, bottom: 16, trailing: AppUI.workspaceInset))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             }
@@ -61,7 +61,7 @@ struct SocksProxyListView: View {
                     .frame(minHeight: 44)
                     .accessibilityElement(children: .combine)
                 }
-                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 16, trailing: 20))
+                .listRowInsets(EdgeInsets(top: 0, leading: AppUI.workspaceInset, bottom: 16, trailing: AppUI.workspaceInset))
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
             } else if let statusMessage {
@@ -80,14 +80,14 @@ struct SocksProxyListView: View {
                         .accessibilityIdentifier("proxy.dismissResult")
                     }
                 }
-                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 16, trailing: 20))
+                .listRowInsets(EdgeInsets(top: 0, leading: AppUI.workspaceInset, bottom: 16, trailing: AppUI.workspaceInset))
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
             }
             if !model.socksProxies.isEmpty {
                 Section {
                     proxyFilters(counts: counts)
-                        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 12, trailing: 20))
+                        .listRowInsets(EdgeInsets(top: 0, leading: AppUI.workspaceInset, bottom: 12, trailing: AppUI.workspaceInset))
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                 }
@@ -270,31 +270,23 @@ struct SocksProxyListView: View {
                     validateProxies()
                 } label: {
                     Label("批量测速", systemImage: "bolt.horizontal.fill")
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .foregroundStyle(Color(.systemBackground))
-                        .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 12))
                 }
+                .buttonStyle(WorkspaceActionStyle(prominent: true))
                 .disabled(model.socksProxies.isEmpty || isValidating)
-                .opacity(model.socksProxies.isEmpty || isValidating ? 0.45 : 1)
                 .accessibilityIdentifier("proxy.validateAll")
 
                 Button {
                     showsImport = true
                 } label: {
                     Label("导入代理", systemImage: "arrow.down.to.line")
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .foregroundStyle(Color.accentColor)
-                        .background(Color(.quaternarySystemFill), in: RoundedRectangle(cornerRadius: 12))
                 }
+                .buttonStyle(WorkspaceActionStyle())
                 .disabled(isValidating)
-                .opacity(isValidating ? 0.45 : 1)
                 .accessibilityIdentifier("proxy.import")
             }
-            .font(.subheadline.weight(.semibold))
-            .buttonStyle(.plain)
         }
-        .padding(16)
-        .beamPanel(cornerRadius: 18, active: true)
+        .padding(AppUI.Spacing.page)
+        .beamPanel(cornerRadius: AppUI.overviewRadius, active: true)
     }
 
     private func proxyFilters(counts: [SocksProxyStatus: Int]) -> some View {
@@ -316,7 +308,7 @@ struct SocksProxyListView: View {
                     .background(isSelected ? Color.accentColor.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(WorkspaceRowButtonStyle())
                 .accessibilityLabel("\(filter.title)，\(count) 条")
                 .accessibilityValue(isSelected ? "已选择" : "未选择")
                 .accessibilityAddTraits(isSelected ? .isSelected : [])
@@ -324,7 +316,7 @@ struct SocksProxyListView: View {
             }
         }
         .padding(4)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+        .workspacePanel()
         .disabled(isValidating)
     }
 
@@ -359,17 +351,14 @@ struct SocksProxyListView: View {
                         editorMode = .edit(ranking.proxy)
                     }
                     .background {
-                        UnevenRoundedRectangle(
-                            topLeadingRadius: ranking.id == visibleProxies.first?.id ? 16 : 0,
-                            bottomLeadingRadius: ranking.id == visibleProxies.last?.id ? 16 : 0,
-                            bottomTrailingRadius: ranking.id == visibleProxies.last?.id ? 16 : 0,
-                            topTrailingRadius: ranking.id == visibleProxies.first?.id ? 16 : 0
+                        WorkspaceListRowSurface(
+                            first: ranking.id == visibleProxies.first?.id,
+                            last: ranking.id == visibleProxies.last?.id
                         )
-                        .fill(Color(.secondarySystemGroupedBackground))
                     }
                     .overlay(alignment: .bottom) {
                         if ranking.id != visibleProxies.last?.id {
-                            Divider().padding(.leading, 64).padding(.trailing, 16)
+                            Divider().padding(.leading, 64).padding(.trailing, 16).accessibilityHidden(true)
                         }
                     }
                     .swipeActions(edge: .leading, allowsFullSwipe: false) {
@@ -426,7 +415,7 @@ struct SocksProxyListView: View {
                 }
             }
         }
-        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+        .listRowInsets(EdgeInsets(top: 0, leading: AppUI.workspaceInset, bottom: 0, trailing: AppUI.workspaceInset))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
     }
@@ -470,7 +459,7 @@ struct SocksProxyListView: View {
                     Image(systemName: "link")
                         .font(.body.weight(.semibold))
                         .foregroundStyle(Color.indigo)
-                        .frame(width: 36, height: 36)
+                        .frame(width: AppUI.rowIconSize, height: AppUI.rowIconSize)
                         .background(Color.indigo.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 4) {
@@ -490,10 +479,10 @@ struct SocksProxyListView: View {
             }
             .font(.subheadline)
             .padding(16)
-            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+            .workspacePanel()
             .accessibilityIdentifier("proxy.presets")
         }
-        .listRowInsets(EdgeInsets(top: 16, leading: 20, bottom: 20, trailing: 20))
+        .listRowInsets(EdgeInsets(top: 16, leading: AppUI.workspaceInset, bottom: 20, trailing: AppUI.workspaceInset))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
     }
@@ -670,7 +659,7 @@ private struct SocksProxyRow: View {
             .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(WorkspaceRowButtonStyle())
         .accessibilityIdentifier("proxy.row.\(ranking.number)")
         .accessibilityLabel("第 \(ranking.number) 号，\(accessibilityName)，\(statusText)\(lockStatusText)")
         .accessibilityValue(accessibilityResult)

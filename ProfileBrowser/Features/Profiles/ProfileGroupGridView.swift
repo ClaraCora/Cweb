@@ -119,7 +119,7 @@ struct ProfileGroupGridView: View {
         return List {
             Section {
                 groupOverview
-                    .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 18, trailing: 20))
+                    .listRowInsets(EdgeInsets(top: 8, leading: AppUI.workspaceInset, bottom: 18, trailing: AppUI.workspaceInset))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             }
@@ -132,7 +132,7 @@ struct ProfileGroupGridView: View {
                             .font(.subheadline)
                             .foregroundStyle(AppUI.secondaryText)
                     }
-                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                    .listRowInsets(EdgeInsets(top: 0, leading: AppUI.workspaceInset, bottom: 0, trailing: AppUI.workspaceInset))
                 }
                 ForEach(panelStarts, id: \.self) { start in
                     let end = min(start + rowsPerPanel, groups.count)
@@ -148,8 +148,8 @@ struct ProfileGroupGridView: View {
                             }
                         }
                     }
-                    .beamPanel(cornerRadius: 16, active: true)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 12, trailing: 20))
+                    .beamPanel(cornerRadius: AppUI.panelRadius, active: true)
+                    .listRowInsets(EdgeInsets(top: 0, leading: AppUI.workspaceInset, bottom: 12, trailing: AppUI.workspaceInset))
                 }
             }
             .listRowBackground(Color.clear)
@@ -168,7 +168,7 @@ struct ProfileGroupGridView: View {
         } label: {
             ProfileGroupRow(group: group, isBusy: isBusy)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(WorkspaceRowButtonStyle())
         .accessibilityIdentifier("group.\(group.id.uuidString)")
         .disabled(isBusy)
         .contextMenu {
@@ -211,10 +211,8 @@ struct ProfileGroupGridView: View {
                     editorMode = .create
                 } label: {
                     Label("新建环境", systemImage: "plus")
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .foregroundStyle(Color(.systemBackground))
-                        .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 12))
                 }
+                .buttonStyle(WorkspaceActionStyle(prominent: true))
                 .disabled(!model.isProfileStoreAvailable)
                 .accessibilityIdentifier("groups.create")
 
@@ -222,19 +220,14 @@ struct ProfileGroupGridView: View {
                     showsGroupOrder = true
                 } label: {
                     Label("分组排序", systemImage: "arrow.up.arrow.down")
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .foregroundStyle(Color.accentColor)
-                        .background(Color(.quaternarySystemFill), in: RoundedRectangle(cornerRadius: 12))
                 }
+                .buttonStyle(WorkspaceActionStyle())
                 .disabled(model.profileGroups.count < 2)
-                .opacity(model.profileGroups.count < 2 ? 0.45 : 1)
                 .accessibilityIdentifier("groups.reorder")
             }
-            .font(.subheadline.weight(.semibold))
-            .buttonStyle(.plain)
         }
-        .padding(16)
-        .beamPanel(cornerRadius: 18, active: true)
+        .padding(AppUI.Spacing.page)
+        .beamPanel(cornerRadius: AppUI.overviewRadius, active: true)
     }
 
     private var groupDeletionAlertBinding: Binding<Bool> {

@@ -5,6 +5,7 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @AppStorage(AppSettings.appearanceModeKey) private var appearanceModeRaw = AppSettings.defaultAppearanceMode
+    @AppStorage(AppSettings.borderBeamEnabledKey) private var borderBeamEnabled = AppSettings.defaultBorderBeamEnabled
     @State private var showsBackup = false
     private let identity = BuildIdentity()
 
@@ -29,6 +30,15 @@ struct SettingsView: View {
                             }
                         }
                     }
+                    Toggle(isOn: $borderBeamEnabled) {
+                        Label("动态流光", systemImage: "sparkle")
+                            .font(.subheadline.weight(.medium))
+                    }
+                    .frame(minHeight: AppUI.minimumTarget)
+                    .padding(.horizontal, AppUI.Spacing.row)
+                    .workspacePanel()
+                    .accessibilityHint("控制页面外框的循环光效")
+                    .accessibilityIdentifier("settings.borderBeam")
                 }
 
                 VStack(alignment: .leading, spacing: 10) {
@@ -65,7 +75,7 @@ struct SettingsView: View {
                         }
                         .accessibilityIdentifier("settings.history")
                     }
-                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+                    .workspacePanel()
                 }
 
                 Button {
@@ -82,7 +92,7 @@ struct SettingsView: View {
                             Text("加密备份")
                                 .font(.body.weight(.semibold))
                                 .foregroundStyle(.primary)
-                            Text("安全导出，随时恢复")
+                            Text("导出或恢复加密备份")
                                 .font(.footnote)
                                 .foregroundStyle(AppUI.secondaryText)
                         }
@@ -95,15 +105,15 @@ struct SettingsView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 16))
+                    .workspacePanel()
                     .contentShape(Rectangle())
                 }
                 .accessibilityLabel("加密备份")
                 .accessibilityHint("导出加密备份或导入已有备份")
                 .accessibilityIdentifier("settings.backup")
             }
-            .buttonStyle(.plain)
-            .padding(.horizontal, 20)
+            .buttonStyle(WorkspaceRowButtonStyle())
+            .padding(.horizontal, AppUI.workspaceInset)
             .padding(.top, 8)
             .padding(.bottom, 24)
         }
@@ -147,7 +157,7 @@ struct SettingsView: View {
                 .accessibilityHidden(true)
             }
             .padding(16)
-            .beamPanel(cornerRadius: 18, active: true)
+            .beamPanel(cornerRadius: AppUI.overviewRadius, active: true)
             .contentShape(Rectangle())
         }
         .accessibilityLabel("关于环境浏览器，版本 \(identity.version)")
@@ -171,7 +181,7 @@ struct SettingsView: View {
     }
 
     private var rowDivider: some View {
-        Divider().padding(.leading, 64).padding(.trailing, 16)
+        Divider().padding(.leading, 64).padding(.trailing, 16).accessibilityHidden(true)
     }
 
     private var proxyPolicySummary: String {

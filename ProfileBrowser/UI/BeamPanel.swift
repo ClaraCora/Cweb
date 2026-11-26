@@ -3,6 +3,7 @@ import SwiftUI
 
 extension EnvironmentValues {
     @Entry var cwebLowPowerMode = false
+    @Entry var cwebBorderBeamEnabled = true
 }
 
 extension View {
@@ -22,6 +23,7 @@ private struct BeamPanelBackground: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.cwebLowPowerMode) private var lowPowerMode
+    @Environment(\.cwebBorderBeamEnabled) private var borderBeamEnabled
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
     @State private var isVisible = false
@@ -30,7 +32,7 @@ private struct BeamPanelBackground: View {
     var body: some View {
         ControlGlass(cornerRadius: cornerRadius)
             .overlay {
-                if active && isVisible && inScrollViewport && scenePhase == .active
+                if borderBeamEnabled && active && isVisible && inScrollViewport && scenePhase == .active
                     && !lowPowerMode && !reduceTransparency && contrast != .increased {
                     PanelBeam(cornerRadius: cornerRadius, intensity: colorScheme == .dark ? 0.74 : 0.82)
                 }
